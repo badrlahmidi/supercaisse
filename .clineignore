@@ -1,0 +1,31 @@
+# ─── Build artifacts ───────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+
+# ─── Rust/Tauri build output ───────────────────────────────────
+src-tauri/target/
+src-tauri/gen/
+
+# ─── Database files ────────────────────────────────────────────
+src-tauri/data/
+*.db
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# ─── Lock files (trop volumineux, peu utiles en contexte) ──────
+package-lock.json
+Cargo.lock
+
+# ─── Icons / images binaires ──────────────────────────────────
+src-tauri/icons/
+src/assets/
+
+# ─── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Temporaires ───────────────────────────────────────────────
+*.local
+.DS_Store

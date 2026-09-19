@@ -1,0 +1,710 @@
+import { useState, useEffect, useRef, useCallback } from "react"
+import { invoke } from "@/lib/tauri"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useAuth } from "@/context/AuthContext"
+import { usePOSProducts } from "@/hooks/useProducts"
+import { useCategoriesList } from "@/hooks/useCategories"
+import { useClientsList } from "@/hooks/useClients"
+import { useAppSettings } from "@/hooks/useSettings"
+import { useCurrentSession, useOpenSession } from "@/hooks/useSessions"
+import { Input } from "@/ui/Input"
+import { Badge } from "@/ui/Badge"
+import { Button } from "@/ui/Button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
+import { Toaster } from "@/ui/Toast"
+import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee } from "lucide-react"
+import { formatCurrency } from "@/lib/utils"
+import { printViaTauri, type ReceiptData } from "@/lib/receipt"
+import { useDebounce } from "@/hooks/useDebounce"
+import { useCartStore } from "@/store/cart"
+import { toast } from "sonner"
+import CategoryPills from "@/components/pos/CategoryPills"
+import ProductGrid from "@/components/pos/ProductGrid"
+import CartPanel from "@/components/pos/CartPanel"
+import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
+
+interface Article {
+  id: number
+  code_barre: string | null
+  designation: string
+  prix_vente: number
+  tva: number
+  stock: number
+  stock_alerte: number | null
+  categorie_id: number | null
+  categorie_nom?: string
+}
+
+interface Category {
+  id: number
+  nom: string
+}
+
+interface Client {
+  id: number
+  nom: string
+  ice: string | null
+  credit_actuel: number
+}
+
+const SHORTCUTS = [
+  { key: "F1", label: "Recherche" },
+  { key: "F2", label: "Nouveau" },
+  { key: "F4", label: "Retirer" },
+  { key: "F5", label: "Valider" },
+  { key: "F6", label: "Paiement" },
+  { key: "F7", label: "Mettre en attente" },
+  { key: "F8", label: "Reprendre ticket" },
+]
+
+const PAYMENT_CYCLE = ["especes", "carte", "cheque", "credit", "virement"]
+
+export default function POS() {
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [search, setSearch] = useState("")
+  const { data: clients = [] } = useClientsList()
+  const { data: settings = {} as any } = useAppSettings()
+  const isRestaurant = settings.business_type === "restaurant"
+  const { data: tables = [], isLoading: tablesLoading } = useTables()
+  const updateTableMutation = useUpdateTable()
+
+  const [debouncedSearch] = useDebounce(search, 300)
+  const [activeCategory, setActiveCategory] = useState<number | "all">("all")
+  const [processing, setProcessing] = useState(false)
+  const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showHeldPanel, setShowHeldPanel] = useState(false)
+  const [, setLastSync] = useState<Date>(new Date())
+
+  const [documentType, setDocumentType] = useState<string>("facture")
+
+  const { data: currentSession, isLoading: isSessionLoading } = useCurrentSession(user?.id)
+  const openSessionMutation = useOpenSession()
+  const [fondInitial, setFondInitial] = useState("0")
+
+  const cart = useCartStore((s) => s.items)
+  const selectedClient = useCartStore((s) => s.selectedClient)
+  const paymentMode = useCartStore((s) => s.paymentMode)
+  const discountPercent = useCartStore((s) => s.discountPercent)
+  const cashGiven = useCartStore((s) => s.cashGiven)
+  const addItem = useCartStore((s) => s.addItem)
+  const updateQuantityStore = useCartStore((s) => s.updateQuantity)
+  const removeItem = useCartStore((s) => s.removeItem)
+  const clearCartStore = useCartStore((s) => s.clearCart)
+  const setPaymentMode = useCartStore((s) => s.setPaymentMode)
+  const paymentSplits = useCartStore((s) => s.paymentSplits)
+  const holdCart = useCartStore((s) => s.holdCart)
+  const resumeCart = useCartStore((s) => s.resumeCart)
+  const deleteHeldCart = useCartStore((s) => s.deleteHeldCart)
+  const useLoyaltyPoints = useCartStore((s) => s.useLoyaltyPoints)
+  const setUseLoyaltyPoints = useCartStore((s) => s.setUseLoyaltyPoints)
+  const activeTableId = useCartStore((s) => s.activeTableId)
+  const activeTableNom = useCartStore((s) => s.activeTableNom)
+  const setActiveTable = useCartStore((s) => s.setActiveTable)
+  const heldCarts = useCartStore((s) => s.heldCarts)
+
+  const { data: articles = [], isFetching: articlesFetching } = usePOSProducts(debouncedSearch, activeCategory)
+
+  const { data: categories = [] } = useCategoriesList()
+
+  const handleSelectTable = (table: TableResto) => {
+    setActiveTable(table.id, table.nom)
+    if (table.ticket_id) {
+      // Reprendre le ticket si existant
+      resumeCart(table.ticket_id)
+    } else {
+      clearCartStore() // Assure qu'on démarre sur un panier vide
+    }
+  }
+
+  useEffect(() => {
+    searchRef.current?.focus()
+  }, [])
+
+  const subtotal = cart.reduce((s, i) => s + i.quantite * i.prix_unitaire, 0)
+  const totalTVA = cart.reduce((s, i) => s + i.quantite * i.prix_unitaire * (i.tva / 100), 0)
+  const totalTTC = subtotal + totalTVA
+  const discount = parseFloat(discountPercent) || 0
+  const discountAmount = totalTTC * (discount / 100)
+  
+  // -- Fidélité --
+  const activeClient = clients.find(c => c.id === selectedClient)
+  const isLoyaltyActive = settings.fidelite_actif === "true"
+  const ptsValueDH = parseFloat(settings.fidelite_valeur_1_point) || 1
+  const ptsFor1DH = parseFloat(settings.fidelite_dh_pour_1_point) || 100
+  
+  // Points que le client va gagner avec ce panier
+  const ptsEarned = isLoyaltyActive ? Math.floor((totalTTC - discountAmount) / ptsFor1DH) : 0
+  
+  // Points que le client va utiliser
+  const maxPtsUsable = Math.floor((totalTTC - discountAmount) / ptsValueDH) // Ne pas rendre d'argent sur les points
+  const ptsToUse = (useLoyaltyPoints && activeClient) ? Math.min(activeClient.points_fidelite, maxPtsUsable) : 0
+  const loyaltyDiscount = ptsToUse * ptsValueDH
+
+  const netAmount = Math.max(0, totalTTC - discountAmount - loyaltyDiscount)
+  const cashAmount = parseFloat(cashGiven) || 0
+  const change = paymentMode === "especes" ? Math.max(0, cashAmount - netAmount) : 0
+  const itemCount = cart.reduce((s, i) => s + i.quantite, 0)
+
+  const filteredArticles = articles.filter((a) => {
+    if (activeCategory !== "all" && a.categorie_id !== activeCategory) return false
+    if (!debouncedSearch) return true
+    const q = debouncedSearch.toLowerCase()
+    return a.designation.toLowerCase().includes(q) || a.code_barre?.includes(debouncedSearch)
+  })
+
+  const addToCart = useCallback((article: Article) => {
+    if (article.stock <= 0) {
+      toast.error("Stock épuisé", { description: `${article.designation} n'est plus disponible` })
+      return
+    }
+    const existing = cart.find((i) => i.article_id === article.id)
+    if (existing && existing.quantite + 1 > article.stock) {
+      toast.error("Stock maximum atteint", { description: `Stock disponible: ${article.stock}` })
+      return
+    }
+    addItem({ article_id: article.id, designation: article.designation, quantite: 1, prix_unitaire: article.prix_vente, tva: article.tva, remise_ligne: 0 })
+    searchRef.current?.focus()
+  }, [cart, addItem])
+
+  const updateQuantity = useCallback((articleId: number, quantity: number, maxStock?: number) => {
+    if (maxStock && quantity > maxStock) {
+      toast.error("Stock maximum atteint", { description: `Stock disponible: ${maxStock}` })
+      return
+    }
+    updateQuantityStore(articleId, quantity)
+  }, [updateQuantityStore])
+
+  const removeFromCart = useCallback((articleId: number) => {
+    removeItem(articleId)
+  }, [removeItem])
+
+  const clearCart = useCallback(() => {
+    clearCartStore()
+    searchRef.current?.focus()
+  }, [clearCartStore])
+
+  const handleHoldCart = useCallback(() => {
+    const items = useCartStore.getState().items
+    if (items.length === 0) {
+      toast.info("Panier vide", { description: "Aucun article à mettre en attente" })
+      return
+    }
+    const label = `Ticket #${useCartStore.getState().heldCarts.length + 1}`
+    holdCart(label)
+    toast.success("Ticket mis en attente", { description: label })
+    searchRef.current?.focus()
+  }, [holdCart])
+
+  const handleResumeCart = useCallback((id: string, label: string) => {
+    const currentItems = useCartStore.getState().items
+    if (currentItems.length > 0) {
+      holdCart(`Ticket #${useCartStore.getState().heldCarts.length + 1}`)
+    }
+    resumeCart(id)
+    setShowHeldPanel(false)
+    toast.success("Ticket repris", { description: label })
+    searchRef.current?.focus()
+  }, [holdCart, resumeCart])
+
+  const removeLastItem = useCallback(() => {
+    const items = useCartStore.getState().items
+    if (items.length > 0) {
+      removeItem(items[items.length - 1].article_id)
+    }
+  }, [removeItem])
+
+  const handleValidateSale = () => {
+    if (cart.length === 0) return
+    if (paymentMode === "especes" && cashAmount < netAmount) {
+      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(netAmount - cashAmount)}` })
+      return
+    }
+    setProcessing(true)
+    createSaleMutation.mutate()
+  }
+
+  const cartRef = useRef(cart)
+  cartRef.current = cart
+  const currentSearch = useRef(search)
+  currentSearch.current = search
+  const articlesRef = useRef(articles)
+  const lastReceiptRef = useRef<ReceiptData | null>(null)
+  lastReceiptRef.current = lastReceipt
+
+  const printLastReceipt = useCallback(() => {
+    if (lastReceiptRef.current) {
+      printViaTauri(lastReceiptRef.current)
+    }
+  }, [])
+
+  articlesRef.current = articles
+  const handlerRef = useRef({ handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart })
+
+  useEffect(() => {
+    handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart }
+  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT"
+
+      switch (e.key) {
+        case "F1":
+          e.preventDefault()
+          searchRef.current?.focus()
+          searchRef.current?.select()
+          break
+        case "F2":
+          e.preventDefault()
+          handlerRef.current.clearCart()
+          break
+        case "F4":
+          e.preventDefault()
+          if (cartRef.current.length > 0) {
+            handlerRef.current.removeLastItem()
+          }
+          searchRef.current?.focus()
+          break
+        case "F5":
+          e.preventDefault()
+          if (cartRef.current.length > 0) {
+            handlerRef.current.handleValidateSale()
+          }
+          queryClient.invalidateQueries({ queryKey: ["articles"] })
+          break
+        case "F6":
+          e.preventDefault()
+          const cur = useCartStore.getState().paymentMode
+          const idx = PAYMENT_CYCLE.indexOf(cur)
+          setPaymentMode(PAYMENT_CYCLE[(idx + 1) % PAYMENT_CYCLE.length])
+          break
+        case "F7":
+          e.preventDefault()
+          handlerRef.current.handleHoldCart()
+          break
+        case "F8":
+          e.preventDefault()
+          setShowHeldPanel((prev) => !prev)
+          break
+        case "Escape":
+          if (isInput && (e.target as HTMLInputElement).value) {
+            return
+          }
+          setShowHeldPanel(false)
+          searchRef.current?.focus()
+          break
+        case "Enter":
+          if (!isInput && currentSearch.current.trim()) {
+            e.preventDefault()
+            const exact = articlesRef.current.find((a) => a.code_barre === currentSearch.current.trim())
+            if (exact) {
+              handlerRef.current.addToCart(exact)
+            }
+          }
+          break
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [queryClient, setPaymentMode])
+
+  const createSaleMutation = useMutation({
+    mutationFn: async () => {
+      const items = cart.map((i) => ({
+        article_id: i.article_id,
+        quantite: i.quantite,
+        prix_unitaire: i.prix_unitaire,
+        tva: i.tva,
+        remise_ligne: i.remise_ligne || 0,
+        note: i.note || null,
+      }))
+      const isSplit = paymentSplits.length > 0
+      const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
+      return invoke<number>("create_vente", {
+        clientId: selectedClient,
+        caissierId: user?.id ?? 0,
+        articles: items,
+        montantRemise: discountAmount,
+        modePaiement: isSplit ? paymentSplits.map((s) => s.mode).join("+") : paymentMode,
+        splits: isSplit ? paymentSplits : null,
+        dtype: documentType,
+        points_utilises: ptsToUse,
+        points_gagnes: ptsEarned,
+      })
+    },
+    onSuccess: (venteId) => {
+      const clientObj = clients.find((c) => c.id === selectedClient)
+      const clientName = clientObj?.nom || "Client de passage"
+      const clientIce = clientObj?.ice || null
+      const isSplit = paymentSplits.length > 0
+      setLastReceipt({
+        shopName: settings.shop_name || "SuperCaisse",
+        shopAddress: settings.shop_address || "",
+        shopPhone: settings.shop_phone || "",
+        shopIce: settings.tax_number || null,
+        receiptFooter: settings.receipt_footer || "Merci de votre visite",
+        venteId,
+        date: new Date().toISOString(),
+        caissier: user?.nom || "",
+        client: clientName,
+        clientIce,
+        items: cart.map((i) => {
+          const baseTotal = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
+          const remiseLigne = baseTotal * ((i.remise_ligne || 0) / 100)
+          return {
+            designation: i.designation,
+            quantite: i.quantite,
+            prix_unitaire: i.prix_unitaire,
+            tva: i.tva,
+            total_ligne: baseTotal - remiseLigne,
+            remise_ligne: i.remise_ligne || 0,
+          }
+        }),
+        montantTotal: subtotal,
+        montantRemise: discountAmount + loyaltyDiscount,
+        netPaye: netAmount,
+        modePaiement: isSplit ? paymentSplits.map((s) => `${s.mode} ${formatCurrency(s.amount)}`).join(" + ") : paymentMode,
+        monnaie: change,
+      })
+
+      // Libérer la table si on est en mode restaurant
+      const curTable = useCartStore.getState().activeTableId
+      if (isRestaurant && curTable) {
+        updateTableMutation.mutate({ id: curTable, statut: "libre", ticket_id: null })
+      }
+
+      toast.success(documentType.charAt(0).toUpperCase() + documentType.slice(1) + " enregistré(e)", {
+        description: `Ref #${venteId} - ${formatCurrency(netAmount)}`,
+        action: { label: "Imprimer", onClick: () => printLastReceipt() },
+      })
+      clearCart()
+      queryClient.invalidateQueries({ queryKey: ["articles"] })
+      queryClient.invalidateQueries({ queryKey: ["stats"] })
+      queryClient.invalidateQueries({ queryKey: ["ventes"] })
+      setLastSync(new Date())
+    },
+    onError: (error) => {
+      toast.error("Erreur", { description: String(error) })
+    },
+    onSettled: () => setProcessing(false),
+  })
+
+  const handleBarcodeScan = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && search.trim()) {
+      const exact = articles.find((a) => a.code_barre === search.trim())
+      if (exact) {
+        addToCart(exact)
+        setSearch("")
+      }
+    }
+  }
+
+  // --- Session Blocker ---
+  if (!isSessionLoading && !currentSession) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-muted/30">
+        <div className="bg-card p-8 rounded-xl shadow-xl max-w-sm w-full text-center space-y-6">
+          <div className="bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <PlayCircle className="h-8 w-8 text-primary" />
+          </div>
+          <h2 className="text-2xl font-bold tracking-tight">Ouvrir la caisse</h2>
+          <p className="text-muted-foreground text-sm">
+            Vous devez déclarer votre fond de caisse initial pour commencer à encaisser.
+          </p>
+          <div className="space-y-2 text-left">
+            <label className="text-sm font-medium">Fond de caisse initial (DH)</label>
+            <Input 
+              type="number" 
+              value={fondInitial} 
+              onChange={(e) => setFondInitial(e.target.value)} 
+              className="h-12 text-lg text-center"
+              min="0"
+              step="0.01"
+              autoFocus
+            />
+          </div>
+          <Button 
+            className="w-full h-12 text-lg" 
+            disabled={openSessionMutation.isPending}
+            onClick={() => {
+              if (user?.id) {
+                openSessionMutation.mutate({ caissierId: user.id, fondInitial: parseFloat(fondInitial) || 0 })
+              }
+            }}
+          >
+            {openSessionMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
+            Ouvrir la session
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-screen w-full bg-background overflow-hidden">
+      {/* Left Panel - Products */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {/* Top Bar */}
+        <div className="flex-shrink-0 border-b border-border bg-card">
+          <div className="flex items-center gap-4 p-3 lg:px-6">
+            <div className="relative flex-1 max-w-2xl">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+              <Input
+                ref={searchRef}
+                type="text"
+                placeholder="Scanner code-barres ou rechercher un produit..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={handleBarcodeScan}
+                className="pl-12 pr-12 h-12 text-base bg-muted/50 border-none ring-1 ring-border focus:ring-2 focus:ring-primary/30 transition-all"
+                autoComplete="off"
+              />
+              <Barcode className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground/40" />
+            </div>
+            <div className="hidden sm:flex items-center gap-2">
+              {articlesFetching && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+              <Badge variant="outline" className="gap-1.5 text-xs">
+                <Package className="h-3 w-3" />
+                {articles.length} articles
+              </Badge>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative"
+              onClick={handleHoldCart}
+              title="Mettre en attente (F7)"
+            >
+              <PauseCircle className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative"
+              onClick={() => setShowHeldPanel((p) => !p)}
+              title="Tickets en attente (F8)"
+            >
+              <PlayCircle className="h-5 w-5" />
+              {heldCarts.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {heldCarts.length}
+                </span>
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative"
+              onClick={() => setShowShortcuts(!showShortcuts)}
+              title="Raccourcis clavier"
+            >
+              <Keyboard className="h-5 w-5" />
+            </Button>
+          </div>
+
+          {/* Category Pills & Table Badge */}
+          <div className="px-3 lg:px-6 pb-3 overflow-x-auto scrollbar-thin flex items-center gap-2">
+            {isRestaurant && activeTableNom && (
+              <Badge variant="outline" className="text-sm px-3 py-1.5 flex items-center gap-2 border-primary/50 shrink-0">
+                <Coffee className="h-4 w-4 text-primary" />
+                {activeTableNom}
+              </Badge>
+            )}
+            <CategoryPills
+              categories={categories}
+              articles={articles}
+              activeCategory={activeCategory}
+              onCategoryChange={setActiveCategory}
+            />
+          </div>
+
+          {/* Keyboard Shortcuts Bar */}
+          {showShortcuts && (
+            <div className="px-3 lg:px-6 pb-3 animate-fade-in">
+              <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 border border-border">
+                {SHORTCUTS.map((s) => (
+                  <kbd key={s.key} className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-background border shadow-sm">
+                    <span className="text-primary font-semibold">{s.key}</span>
+                    <span className="text-muted-foreground">{s.label}</span>
+                  </kbd>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Products Grid */}
+        <div className="flex-1 overflow-y-auto scrollbar-thin p-3 lg:p-6">
+          <ProductGrid
+            articles={filteredArticles}
+            onAddToCart={addToCart}
+          />
+        </div>
+      </div>
+
+      {/* Right Panel - Cart */}
+      <CartPanel
+        articles={articles}
+        clients={clients}
+        processing={processing}
+        lastReceipt={lastReceipt}
+        subtotal={subtotal}
+        totalTVA={totalTVA}
+        netAmount={netAmount}
+        discount={discount}
+        discountAmount={discountAmount}
+        cashAmount={cashAmount}
+        change={change}
+        itemCount={itemCount}
+        onUpdateQuantity={updateQuantity}
+        onRemoveItem={removeFromCart}
+        onClearCart={clearCart}
+        onValidateSale={handleValidateSale}
+        onPrintLastReceipt={printLastReceipt}
+        documentType={documentType}
+        setDocumentType={setDocumentType}
+        isLoyaltyActive={isLoyaltyActive}
+        ptsValueDH={ptsValueDH}
+        ptsEarned={ptsEarned}
+        loyaltyDiscount={loyaltyDiscount}
+        ptsToUse={ptsToUse}
+        isRestaurant={isRestaurant}
+      />
+
+      {/* Held Tickets Panel */}
+      {showHeldPanel && (
+        <div className="absolute inset-0 z-50 flex justify-end" onClick={() => setShowHeldPanel(false)}>
+          <div
+            className="relative w-80 h-full bg-card border-l border-border shadow-2xl flex flex-col animate-slide-in-right"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <PauseCircle className="h-5 w-5 text-primary" />
+                <h2 className="font-semibold text-sm">Tickets en attente</h2>
+                <Badge variant="secondary">{heldCarts.length}</Badge>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setShowHeldPanel(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="flex gap-2 p-4">
+              <Button variant="outline" size="sm" onClick={() => invoke("open_cash_drawer").catch(e => toast.error("Erreur tiroir", { description: String(e) }))}>
+                <LockOpen className="h-4 w-4 mr-2" />
+                Ouvrir Tiroir
+              </Button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {heldCarts.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground text-sm">
+                  <PauseCircle className="h-8 w-8 mx-auto mb-3 opacity-30" />
+                  Aucun ticket en attente
+                </div>
+              ) : (
+                heldCarts.map((held) => (
+                  <div
+                    key={held.id}
+                    className="rounded-lg border border-border bg-muted/30 p-3 space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{held.label}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {held.state.items.length} article{held.state.items.length > 1 ? "s" : ""} •{" "}
+                          {formatCurrency(
+                            held.state.items.reduce((s, i) => s + i.quantite * i.prix_unitaire, 0)
+                          )}
+                        </p>
+                        <p className="text-xs text-muted-foreground/60">
+                          {new Date(held.date).toLocaleTimeString("fr-MA", { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
+                        onClick={() => deleteHeldCart(held.id)}
+                        title="Supprimer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <div className="pt-1">
+                      <p className="text-xs text-muted-foreground mb-1.5 font-medium">Articles :</p>
+                      <div className="space-y-0.5 max-h-20 overflow-y-auto">
+                        {held.state.items.map((item) => (
+                          <div key={item.article_id} className="flex justify-between text-xs text-muted-foreground">
+                            <span className="truncate max-w-[140px]">{item.designation}</span>
+                            <span className="shrink-0 ml-1">×{item.quantite}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full h-8 text-xs gap-1.5"
+                      onClick={() => handleResumeCart(held.id, held.label)}
+                    >
+                      <PlayCircle className="h-3.5 w-3.5" />
+                      Reprendre ce ticket
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-3 border-t border-border">
+              <p className="text-xs text-muted-foreground text-center">
+                F7 — Mettre en attente · F8 — Ouvrir ce panneau
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sélecteur de table (Restaurant) */}
+      <Dialog open={isRestaurant && activeTableId === null && !isSessionLoading && !!currentSession} onOpenChange={() => {}}>
+        <DialogContent className="max-w-4xl bg-muted/30">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center justify-center gap-2">
+              <Coffee className="h-6 w-6" />
+              Plan de salle
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 max-h-[70vh] overflow-y-auto">
+            {tablesLoading ? (
+              <div className="col-span-full flex justify-center py-10"><Loader2 className="h-8 w-8 animate-spin" /></div>
+            ) : (
+              tables.map(table => (
+                <button
+                  key={table.id}
+                  onClick={() => handleSelectTable(table)}
+                  className={`p-6 rounded-2xl shadow-sm border-2 text-center transition-all ${
+                    table.statut === "occupee" 
+                      ? "bg-destructive/10 border-destructive text-destructive hover:bg-destructive/20" 
+                      : "bg-card border-border hover:border-primary/50 hover:shadow-md"
+                  }`}
+                >
+                  <p className="font-bold text-lg mb-2">{table.nom}</p>
+                  <Badge variant={table.statut === "occupee" ? "destructive" : "secondary"}>
+                    {table.statut === "occupee" ? "Occupée" : "Libre"}
+                  </Badge>
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Toaster />
+    </div>
+  )
+}
