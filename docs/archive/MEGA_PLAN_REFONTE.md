@@ -1,3 +1,10 @@
+> **ARCHIVÉ — 2026-09-20.** Ce document a été déplacé et n'est plus la source de vérité sur
+> l'état du projet : une revue de code indépendante (`AUDIT_ARCHITECTURE_SENIOR_2026-09.md`,
+> à la racine du dépôt) a constaté que les statuts "✅ TERMINÉ" listés ci-dessous ne
+> correspondent pas au code réel (chaîne documentaire, multi-magasin, PDF, fidélité, WhatsApp
+> notamment). Conservé uniquement comme trace historique de planification.
+> Le suivi d'avancement à jour vit désormais dans `ROADMAP_STATUS.md` à la racine du dépôt.
+
 # MEGA PLAN REFONTE — RitajPOS SuperCaisse
 
 > Plan de transformation basé sur `SPEC_FONCTIONNELLE_RITAJ_RETAIL_MAROC.md`
