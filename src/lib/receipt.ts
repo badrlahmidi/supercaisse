@@ -12,6 +12,9 @@ export interface ReceiptData {
   client: string
   clientIce?: string | null
   shopIce?: string | null
+  shopIf?: string | null
+  shopRc?: string | null
+  shopPatente?: string | null
   items: Array<{
     designation: string
     quantite: number
@@ -89,6 +92,9 @@ export function generateReceiptHTML(data: ReceiptData): string {
     ${data.shopAddress}<br>
     ${data.shopPhone}<br>
     ${data.shopIce ? `ICE: ${data.shopIce}` : ""}
+    ${data.shopIf ? `<br>IF: ${data.shopIf}` : ""}
+    ${data.shopRc ? `<br>RC: ${data.shopRc}` : ""}
+    ${data.shopPatente ? `<br>Patente: ${data.shopPatente}` : ""}
   </div>
   <div class="divider"></div>
   <div class="infos">
@@ -148,7 +154,10 @@ export function generateReceiptEscPos(data: ReceiptData): string {
     .line(data.shopPhone)
   
   if (data.shopIce) builder.line(`ICE: ${data.shopIce}`)
-  
+  if (data.shopIf) builder.line(`IF: ${data.shopIf}`)
+  if (data.shopRc) builder.line(`RC: ${data.shopRc}`)
+  if (data.shopPatente) builder.line(`Patente: ${data.shopPatente}`)
+
   builder.line("--------------------------------")
     .align("left")
     .line(`Document #${data.venteId}`)

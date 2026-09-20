@@ -10,6 +10,16 @@
 >
 > Dernière vérification : 2026-09-20, par lecture intégrale de `src-tauri/src/{db,commands,lib}.rs`
 > et `src/{pages,routes,hooks,lib}/**`.
+>
+> **Mise à jour 2026-09-20 (soir)** : 3 correctifs de cet audit ont été implémentés et validés
+> (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run` 68/68, `vite build` — tous verts ;
+> une CI GitHub Actions existe désormais dans `.github/workflows/ci.yml` pour que ces statuts
+> restent vérifiés automatiquement) : stock multi-magasin unifié, en-tête légal ICE/IF/RC/Patente
+> séparé, durcissement des `.unwrap()` Rust sur les chemins critiques. Détail dans les sections
+> correspondantes ci-dessous. Une erreur de l'audit initial a aussi été corrigée : la contrainte
+> `UNIQUE` sur `code_barre` existait déjà (`db.rs:430`, une simple recherche `CREATE TABLE` sans
+> chercher `CREATE INDEX` l'avait fait manquer) — jamais confirmé sans le grep exact, y compris
+> nos propres constats précédents.
 
 ## Légende
 | Symbole | Signification |
@@ -40,7 +50,7 @@
 | Import/Export CSV articles | ✅ | `import_articles_csv`, export frontend `Articles.tsx` |
 | Alertes stock bas / rupture | ✅ | `get_articles_stock_alerte` |
 | Mouvements de stock tracés | ✅ | table `mouvements_stock`, page `MouvementsStock.tsx` |
-| Contrainte UNIQUE code-barres | ⬜ | aucune contrainte `UNIQUE` sur `articles.code_barre` dans `db.rs` — doublon silencieux possible |
+| Contrainte UNIQUE code-barres | ✅ | `db.rs:430` — index `UNIQUE` conditionnel sur `code_barre` (corrige une erreur de l'audit initial, qui l'avait déclarée absente) |
 | Inventaire physique (comptage vs théorique) | ⬜ | aucune commande/table dédiée |
 | Péremption / DLC-DLUO | ⬜ | aucune colonne date d'expiration sur `articles` |
 | Traçabilité lot / numéro de série | ⬜ | aucune table/colonne lot |
@@ -51,7 +61,7 @@
 | Numérotation séquentielle par type/année (FA-YYYY-NNNNN) | ✅ | table `numerotation`, logique transactionnelle dans `create_vente` |
 | Ventilation TVA multi-taux sur le document imprimé | ✅ | `receipt.ts:38-49` |
 | ICE client sur vente B2B | ✅ | champ `clients.ice`, affiché sur reçu |
-| ICE/IF/RC/Patente de l'entreprise (en-tête légal) | 🔶 | un seul champ texte libre `settings.tax_number` ("ICE/IF") ; **aucun champ RC ni Patente** |
+| ICE/IF/RC/Patente de l'entreprise (en-tête légal) | ✅ | 4 champs distincts (`settings.ice/if_number/rc_number/patente`), migration automatique de l'ancien `tax_number` vers `ice`, affichés sur le ticket HTML et ESC/POS (`Settings.tsx`, `receipt.ts`) |
 | Document PDF archivable (facture/avoir) | ⬜ | aucune génération PDF dans le projet (`grep -ri pdf` négatif) |
 | Non-suppression facture (annulation via statut) | ✅ | `annuler_vente` change le statut, pas de `delete_vente` exposé |
 | Chaîne Devis → Commande → BL → Facture → Avoir avec conversion | ⬜ | seul un champ `ventes.dtype` existe (facture/devis/bl/avoir) sur l'unique table `ventes`, sans statuts de workflow, sans `parent_document_id`, sans écran de conversion, sans route dédiée dans `router.tsx` |
@@ -87,8 +97,9 @@
 | Item | Statut | Preuve |
 |---|---|---|
 | SQLite local embarqué (offline par nature) | ✅ | pas de dépendance réseau identifiée |
-| Multi-magasin avec stock isolé par magasin | ⬜ **cassé** | deux modèles de stock coexistent et sont déconnectés : `create_vente` décrémente la colonne globale `articles.stock` (`commands.rs:401-402`) sans jamais toucher `article_stocks` (par magasin), qui n'est lu/écrit que par `create_transfert`/`validate_transfert`. Une vente au magasin B ne reflète jamais sur le stock que voit le magasin A → survente garantie dès 2 points de vente |
-| Transfert de stock inter-magasins | 🔶 | commandes `create_transfert`/`validate_transfert` existent, mais ne servent à rien tant que le point ci-dessus n'est pas corrigé |
+| Stock cohérent (agrégat unifié) | ✅ | `article_stocks` (par magasin) est désormais la seule source d'écriture ; `articles.stock` est recalculé comme `SUM(article_stocks.quantite)` à chaque mouvement via le helper `adjust_article_stock` (`commands.rs`), appelé depuis `create_vente`, `annuler_vente`, `create_achat`, `update_achat_status`, `update_article_stock`, `add_article`, `import_articles_csv`, `validate_transfert`. Corrige la survente garantie constatée dans l'audit initial |
+| Multi-magasin réellement opérable (sélection du magasin actif, création de boutiques) | ⬜ | reste à construire : `add_magasin` (commande ajoutée) n'a pas d'UI ; `sessions_caisse.magasin_id` est renseigné à l'ouverture de session mais toujours avec le magasin par défaut (`default_magasin_id`) faute de sélecteur ; aucun écran ne permet de créer une 2ᵉ boutique ni de choisir un poste de caisse par magasin |
+| Transfert de stock inter-magasins | 🔶 | commandes `create_transfert`/`validate_transfert` fonctionnent et sont maintenant cohérentes avec l'agrégat, mais sans UI pour créer un 2ᵉ magasin, restent inutilisables en pratique |
 | Sync multi-device temps réel / résolution de conflits | ⬜ | aucune couche réseau/sync dans le projet — SQLite fichier local unique |
 | Sauvegarde/export/import DB | ✅ | `backup_database`/`export_database`/`import_database` |
 | Migrations SQL versionnées | ⬜ | schéma évolue via `ALTER TABLE` exécutés au démarrage, erreurs avalées (`.ok()`) |
@@ -115,7 +126,7 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 
 | Axe | Réellement tenu |
 |---|---|
-| Checklist "prêt marché" (9 exigences, cf. `AUDIT_ARCHITECTURE_SENIOR_2026-09.md §7`) | 4/9 |
+| Checklist "prêt marché" (9 exigences, cf. `AUDIT_ARCHITECTURE_SENIOR_2026-09.md §7`) | 5/9 (mentions légales ICE/IF/RC/Patente maintenant présentes ; reste bloquant : pas de PDF, pas de bilingue FR/AR, multi-magasin toujours sans UI, spécialisation vertical) |
 | Verticaux demandés couverts fonctionnellement (sur 4) | 1 (supermarché, partiel) |
 | Sprints "TERMINÉ" annoncés par l'ancien plan et confirmés par le code | 2 sur 6 (bugs sécurité Sprint 1, POS de base Sprint 2) |
 
@@ -123,11 +134,13 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 
 ## Prochaines actions (ordre d'exécution recommandé)
 
-1. Corriger le double modèle de stock (`articles.stock` vs `article_stocks`) — bloquant pour toute promesse multi-magasin.
-2. Séparer ICE / IF / RC / Patente en champs distincts + générer un vrai PDF facture.
-3. Mettre en place une CI (`tsc --noEmit`, `oxlint`, `vitest run`, `cargo check`) pour que ce document reste vérifiable automatiquement et ne redevienne pas un `MEGA_PLAN_REFONTE.md` bis.
+1. ~~Corriger le double modèle de stock~~ ✅ fait 2026-09-20 (`adjust_article_stock`, cf. section P2 ci-dessus).
+2. ~~Séparer ICE / IF / RC / Patente en champs distincts~~ ✅ fait 2026-09-20. Reste : générer un vrai PDF facture (toujours ⬜).
+3. ~~Mettre en place une CI~~ ✅ fait 2026-09-20 (`.github/workflows/ci.yml`).
 4. Ajouter lot + date de péremption au niveau article (sert supermarché ET pharmacie).
 5. Câbler `article_variantes` (commandes Tauri + UI) pour rendre le prêt-à-porter vendable.
 6. Ajouter multi-prix (public/grossiste) + produits composés/kits (sert pâtisserie/matériel ET le générique déjà écrit dans `SPEC_FONCTIONNELLE_RITAJ_RETAIL_MAROC.md §3.1`).
+7. Construire l'UI multi-magasin (sélection du magasin actif à l'ouverture de session, écran de création de boutique sur `add_magasin`) pour que le travail du point 1 devienne utilisable, pas seulement sûr.
+8. Génération PDF facture/avoir (bloquant commercial restant le plus important de la checklist "prêt marché").
 
 Détail complet des constats et recommandations : voir `AUDIT_ARCHITECTURE_SENIOR_2026-09.md`.

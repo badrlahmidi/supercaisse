@@ -51,7 +51,10 @@ const settingsSchema = z.object({
   shop_address: z.string().optional(),
   shop_phone: z.string().optional(),
   shop_email: z.string().email().optional().or(z.literal("")),
-  tax_number: z.string().optional(),
+  ice: z.string().optional(),
+  if_number: z.string().optional(),
+  rc_number: z.string().optional(),
+  patente: z.string().optional(),
   default_tva: z.number().min(0).max(100).default(20),
   receipt_footer: z.string().optional(),
   currency: z.string().default("MAD"),
@@ -136,7 +139,10 @@ export default function Settings() {
       shop_address: "",
       shop_phone: "",
       shop_email: "",
-      tax_number: "",
+      ice: "",
+      if_number: "",
+      rc_number: "",
+      patente: "",
       default_tva: 20,
       receipt_footer: "Merci de votre visite",
       currency: "MAD",
@@ -216,12 +222,35 @@ export default function Settings() {
                     <Input type="email" {...settingsForm.register("shop_email")} id="email" placeholder="contact@magasin.ma" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="tax_number">Numéro fiscal (ICE/IF)</Label>
-                    <Input {...settingsForm.register("tax_number")} id="tax_number" placeholder="Optionnel" />
-                  </div>
-                  <div className="space-y-2">
                     <Label htmlFor="tva_defaut">TVA par défaut (%)</Label>
                     <Input type="number" min="0" max="100" step="0.1" {...settingsForm.register("default_tva", { valueAsNumber: true })} id="tva_defaut" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Identifiants légaux (facture conforme DGI)</CardTitle>
+                <CardDescription>ICE, IF, RC et Patente sont 4 identifiants distincts exigés sur toute facture professionnelle au Maroc</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="ice">ICE (Identifiant Commun de l'Entreprise)</Label>
+                    <Input {...settingsForm.register("ice")} id="ice" placeholder="15 chiffres" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="if_number">IF (Identifiant Fiscal)</Label>
+                    <Input {...settingsForm.register("if_number")} id="if_number" placeholder="Optionnel" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rc_number">RC (Registre de Commerce)</Label>
+                    <Input {...settingsForm.register("rc_number")} id="rc_number" placeholder="Optionnel" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="patente">Patente</Label>
+                    <Input {...settingsForm.register("patente")} id="patente" placeholder="Optionnel" />
                   </div>
                 </div>
               </CardContent>

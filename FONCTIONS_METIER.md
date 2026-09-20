@@ -7,6 +7,9 @@
 > **Légende** : ✅ Inclus et utilisable tel quel · 🔶 Inclus mais incomplet / à risque /
 > comportement à corriger · ⬜ Manquant.
 > Dernière mise à jour : 2026-09-20 (recomptée depuis `ROADMAP_STATUS.md` du même jour).
+>
+> **Mise à jour du soir** : stock multi-magasin, en-tête légal DGI (ICE/IF/RC/Patente) et
+> détection doublon code-barres sont passés en ✅ — détail dans `ROADMAP_STATUS.md`.
 
 ---
 
@@ -42,7 +45,7 @@
 | Fiche produit (prix, TVA, stock, catégorie, fournisseur, image) | ✅ | |
 | Import/export en masse (CSV) | ✅ | |
 | Désactivation d'article sans le supprimer | ✅ | |
-| Détection doublon code-barres | ⬜ | Deux articles peuvent porter le même code-barres sans avertissement |
+| Détection doublon code-barres | ✅ | Contrainte unique en base (corrige une erreur de l'audit initial, qui l'avait déclarée absente) |
 | Génération automatique de code-barres interne | ⬜ | |
 | Étiquettes code-barres imprimables (planches PDF) | ⬜ | |
 | Prix multiple (public / grossiste / promo) | ⬜ | Un seul prix de vente par article |
@@ -60,8 +63,9 @@
 | Valorisation du stock (affichage) | ✅ | |
 | Inventaire physique (comptage vs théorique) | ⬜ | |
 | Suggestion de réapprovisionnement automatique | ⬜ | |
-| Stock isolé par boutique (multi-magasin) | 🔶 | **À corriger en priorité** : la vente décrémente un stock global unique, pas le stock du magasin où elle a lieu — deux boutiques peuvent se "voler" du stock sans le savoir |
-| Transfert de stock entre boutiques | 🔶 | La fonction existe mais n'a pas d'effet réel tant que le point ci-dessus n'est pas corrigé |
+| Cohérence du stock (pas de survente inter-boutique) | ✅ | Corrigé : le stock global affiché est maintenant un agrégat toujours recalculé depuis le détail par boutique, plus deux compteurs déconnectés |
+| Utilisation réelle du multi-boutique (choisir sa boutique, en créer une 2ᵉ) | ⬜ | La donnée est fiable mais il manque encore l'écran pour créer une boutique et choisir sur quel poste on travaille |
+| Transfert de stock entre boutiques | 🔶 | La fonction est fiable côté données, mais reste inutilisable sans écran pour créer une 2ᵉ boutique |
 
 ## 4. Achats & Fournisseurs
 
@@ -101,7 +105,7 @@
 | Numérotation séquentielle par type de document/année | ✅ | |
 | TVA multi-taux avec ventilation sur le ticket | ✅ | |
 | ICE du client affiché sur vente B2B | ✅ | |
-| ICE / IF / RC / Patente de l'entreprise sur le document | 🔶 | Un seul champ texte libre confondant ICE et IF ; RC et Patente absents — **non conforme en l'état pour un contrôle DGI** |
+| ICE / IF / RC / Patente de l'entreprise sur le document | ✅ | 4 champs distincts, saisis dans Réglages et affichés sur le ticket |
 | Document PDF archivable (facture, avoir) | ⬜ | Le "ticket" est du HTML imprimé à la volée, pas un fichier conservable |
 | Non-suppression d'une facture validée | ✅ | Annulation par changement de statut uniquement |
 | Chaîne Devis → Commande → BL → Facture → Avoir | ⬜ | N'existe pas comme parcours utilisable ; seul un indicateur technique sans écran dédié |
@@ -154,17 +158,20 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 30 |
-| 🔶 Inclus mais à corriger/compléter | 15 |
+| ✅ Inclus et utilisable | 33 |
+| 🔶 Inclus mais à corriger/compléter | 13 |
 | ⬜ Manquant | 32 |
 
-## Les 5 "🔶 à améliorer" les plus prioritaires (risque business le plus élevé)
+*(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
 
-1. **Stock isolé par boutique** — corrige un risque de survente réelle, condition pour vendre le produit à un client multi-boutique.
-2. **ICE/IF/RC/Patente de l'entreprise** — condition de conformité DGI, bloquant commercial direct.
+## Les "🔶 à améliorer" les plus prioritaires (risque business le plus élevé)
+
+1. ~~Stock isolé par boutique~~ ✅ corrigé le 2026-09-20 — reste une action UI (item 3 ci-dessous), plus un risque de survente.
+2. ~~ICE/IF/RC/Patente de l'entreprise~~ ✅ corrigé le 2026-09-20.
 3. **Impression Windows-only** — décide si on assume "Windows uniquement" comme contrainte produit ou si on corrige pour élargir le marché adressable.
 4. **Sélecteur de secteur d'activité cosmétique** — soit on retire "Mode"/"Vrac" de la liste tant qu'ils ne font rien (évite de tromper le client au moment de la configuration), soit on les câble.
 5. **Fidélité invisible côté gérant** — la donnée existe et s'accumule déjà en base ; l'écran de consultation/config est un développement relativement court par rapport à sa valeur perçue commerciale.
+6. **Utilisation réelle du multi-boutique** — la donnée est maintenant fiable (point 1), mais il manque l'écran pour créer une 2ᵉ boutique et choisir son poste de caisse.
 
 ## Les fonctions manquantes qui structurent le plus la suite
 
@@ -180,6 +187,6 @@
 Deux familles de décisions différentes, à ne pas mélanger :
 
 - **Les ⬜ manquants** : rien à détecter, c'est un pur exercice de priorisation/backlog — pas besoin de QA, juste une décision "on le fait maintenant ou plus tard".
-- **Les 🔶 à améliorer** : c'est là qu'un plan de Q/A cible vraiment quelque chose d'utile, parce que le mot "à améliorer" cache des réalités très différentes selon la ligne (bug silencieux type stock multi-boutique, limite d'environnement type impression Windows, écran manquant type fidélité). Je recommande un **plan de Q/A court, un scénario par ligne 🔶** (15 scénarios), pour transformer chaque "à améliorer" en spécification précise de correction avant de chiffrer le développement — plutôt qu'un audit généraliste qui re-testerait aussi les ✅ déjà confirmés.
+- **Les 🔶 à améliorer** : c'est là qu'un plan de Q/A cible vraiment quelque chose d'utile, parce que le mot "à améliorer" cache des réalités très différentes selon la ligne (limite d'environnement type impression Windows, écran manquant type fidélité). Un scénario par ligne 🔶 restante (13 scénarios) transforme chaque "à améliorer" en spécification précise de correction avant de chiffrer le développement — plutôt qu'un audit généraliste qui re-testerait aussi les ✅ déjà confirmés.
 
-Dis-moi si tu veux que j'enchaîne sur ce plan de Q/A des 15 lignes 🔶, ou si tu préfères qu'on parte direct sur le développement d'un des points prioritaires ci-dessus (le stock multi-boutique et l'en-tête légal DGI sont les deux qui bloquent le plus la suite).
+Le stock multi-boutique et l'en-tête légal DGI (les deux points qui bloquaient le plus la suite) sont traités. Prochaines cibles naturelles : génération PDF facture, écran multi-boutique (créer une 2ᵉ boutique, choisir son poste), traçabilité lot/péremption (sert supermarché ET pharmacie), ou le plan de Q/A sur les 13 lignes 🔶 restantes.

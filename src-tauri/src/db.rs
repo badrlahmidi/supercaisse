@@ -144,7 +144,10 @@ pub struct Settings {
     pub shop_address: Option<String>,
     pub shop_phone: Option<String>,
     pub shop_email: Option<String>,
-    pub tax_number: Option<String>,
+    pub ice: Option<String>,
+    pub if_number: Option<String>,
+    pub rc_number: Option<String>,
+    pub patente: Option<String>,
     pub default_tva: f64,
     pub receipt_footer: Option<String>,
     pub currency: String,
@@ -411,6 +414,18 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE achats ADD COLUMN statut_paiement TEXT DEFAULT 'non_paye'", []);
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN session_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE journal_caisse ADD COLUMN session_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER", []);
+
+    // Migration en-tête légal : l'ancien champ unique 'tax_number' (ICE/IF confondus)
+    // devient 'ice' ; 'if_number'/'rc_number'/'patente' sont ajoutés en distinct.
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) SELECT 'ice', value FROM settings WHERE key = 'tax_number'",
+        [],
+    ).ok();
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('if_number', '')", []).ok();
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('rc_number', '')", []).ok();
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('patente', '')", []).ok();
+    conn.execute("DELETE FROM settings WHERE key = 'tax_number'", []).ok();
 
     conn.execute_batch("
         CREATE INDEX IF NOT EXISTS idx_articles_code_barre ON articles(code_barre);
@@ -481,7 +496,10 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             ("shop_address", ""),
             ("shop_phone", ""),
             ("shop_email", ""),
-            ("tax_number", ""),
+            ("ice", ""),
+            ("if_number", ""),
+            ("rc_number", ""),
+            ("patente", ""),
             ("default_tva", "20"),
             ("receipt_footer", "Merci de votre visite"),
             ("currency", "MAD"),

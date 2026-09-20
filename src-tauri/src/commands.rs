@@ -5,6 +5,32 @@ use rusqlite::{backup::Backup, params, Connection};
 use std::time::Duration;
 use tauri::State;
 
+// ─── Stock multi-magasin ───
+// `article_stocks` (par magasin) est la source de vérité ; `articles.stock` est
+// maintenu comme agrégat (somme sur tous les magasins) pour rester compatible avec
+// tout le code qui lit encore ce champ (grille POS, alertes, exports). Tant qu'il
+// n'existe qu'un seul magasin, `articles.stock` == la valeur de ce magasin, donc ce
+// changement est invisible en usage mono-boutique et corrige la dérive constatée en
+// multi-boutique (cf. AUDIT_ARCHITECTURE_SENIOR_2026-09.md §2).
+
+fn default_magasin_id(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("SELECT id FROM magasins ORDER BY id LIMIT 1", [], |r| r.get(0))
+        .map_err(|e| format!("Aucun magasin configuré: {}", e))
+}
+
+fn adjust_article_stock(conn: &Connection, article_id: i64, magasin_id: i64, delta: f64) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES (?1, ?2, ?3)
+         ON CONFLICT(article_id, magasin_id) DO UPDATE SET quantite = quantite + ?3",
+        params![article_id, magasin_id, delta],
+    ).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE articles SET stock = (SELECT COALESCE(SUM(quantite), 0) FROM article_stocks WHERE article_id = ?1) WHERE id = ?1",
+        params![article_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ─── Auth ───
 
 #[tauri::command]
@@ -236,7 +262,12 @@ pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: 
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id],
     ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let article_id = conn.last_insert_rowid();
+    if stock != 0.0 {
+        let magasin_id = default_magasin_id(&conn)?;
+        adjust_article_stock(&conn, article_id, magasin_id, stock)?;
+    }
+    Ok(article_id)
 }
 
 #[tauri::command]
@@ -262,12 +293,12 @@ pub fn delete_article(db: State<DbState>, id: i64) -> Result<(), String> {
 pub fn update_article_stock(db: State<DbState>, article_id: i64, quantite: f64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("UPDATE articles SET stock = stock + ?1 WHERE id = ?2", params![quantite, article_id])
-        .map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&tx)?;
+    adjust_article_stock(&tx, article_id, magasin_id, quantite)?;
     let mtype = if quantite >= 0.0 { "entree" } else { "sortie" };
     tx.execute(
-        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_type) VALUES (?1, ?2, ?3, 'ajustement')",
-        params![article_id, quantite.abs(), mtype],
+        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_type, magasin_id) VALUES (?1, ?2, ?3, 'ajustement', ?4)",
+        params![article_id, quantite.abs(), mtype, magasin_id],
     ).map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -283,6 +314,7 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&tx)?;
     let mut montant_total = 0.0;
     for a in &articles {
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
@@ -387,7 +419,7 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
     }
 
     for a in &articles {
-        let article_id = a["article_id"].as_i64().unwrap();
+        let article_id = a["article_id"].as_i64().ok_or("article_id manquant ou invalide dans la ligne")?;
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
         let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
         let tva = a["tva"].as_f64().unwrap_or(0.0);
@@ -401,11 +433,10 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         ).map_err(|e| e.to_string())?;
 
         if document_type == "facture" || document_type == "bl" {
-            tx.execute("UPDATE articles SET stock = stock - ?1 WHERE id = ?2", params![qte, article_id])
-                .map_err(|e| e.to_string())?;
+            adjust_article_stock(&tx, article_id, magasin_id, -qte)?;
             tx.execute(
-                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type) VALUES (?1, ?2, 'sortie', ?3, 'vente')",
-                params![article_id, qte, vente_id],
+                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente', ?4)",
+                params![article_id, qte, vente_id, magasin_id],
             ).map_err(|e| e.to_string())?;
         }
     }
@@ -446,22 +477,23 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
     }
 
     // Remettre le stock
+    let magasin_id = default_magasin_id(&tx)?;
     let mut stmt = tx.prepare("SELECT article_id, quantite FROM vente_articles WHERE vente_id = ?1").map_err(|e| e.to_string())?;
     let lignes = stmt.query_map(params![vente_id], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
     }).map_err(|e| e.to_string())?;
+    let lignes: Vec<(i64, f64)> = lignes.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
+    drop(stmt);
 
-    for ligne in lignes {
-        let (article_id, qte) = ligne.map_err(|e| e.to_string())?;
-        tx.execute("UPDATE articles SET stock = stock + ?1 WHERE id = ?2", params![qte, article_id]).map_err(|e| e.to_string())?;
+    for (article_id, qte) in lignes {
+        adjust_article_stock(&tx, article_id, magasin_id, qte)?;
         tx.execute(
-            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente')",
-            params![article_id, qte, vente_id],
+            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente', ?4)",
+            params![article_id, qte, vente_id, magasin_id],
         ).map_err(|e| e.to_string())?;
     }
 
     tx.execute("UPDATE ventes SET statut = 'annulee' WHERE id = ?1", params![vente_id]).map_err(|e| e.to_string())?;
-    drop(stmt);
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -570,6 +602,7 @@ pub fn create_achat(db: State<DbState>, fournisseur_id: Option<i64>, reference: 
     articles: Vec<serde_json::Value>, statut_livraison: Option<String>, statut_paiement: Option<String>) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&tx)?;
     let mut montant_total = 0.0;
     for a in &articles {
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
@@ -585,7 +618,7 @@ pub fn create_achat(db: State<DbState>, fournisseur_id: Option<i64>, reference: 
     ).map_err(|e| e.to_string())?;
     let achat_id = tx.last_insert_rowid();
     for a in &articles {
-        let article_id = a["article_id"].as_i64().unwrap();
+        let article_id = a["article_id"].as_i64().ok_or("article_id manquant ou invalide dans la ligne")?;
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
         let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
         let total_ligne = qte * pu;
@@ -595,11 +628,12 @@ pub fn create_achat(db: State<DbState>, fournisseur_id: Option<i64>, reference: 
         ).map_err(|e| e.to_string())?;
 
         if sl == "recu" {
-            tx.execute("UPDATE articles SET stock = stock + ?1, prix_achat = ?2 WHERE id = ?3",
-                params![qte, pu, article_id]).map_err(|e| e.to_string())?;
+            tx.execute("UPDATE articles SET prix_achat = ?1 WHERE id = ?2", params![pu, article_id])
+                .map_err(|e| e.to_string())?;
+            adjust_article_stock(&tx, article_id, magasin_id, qte)?;
             tx.execute(
-                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type) VALUES (?1, ?2, 'entree', ?3, 'achat')",
-                params![article_id, qte, achat_id],
+                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'achat', ?4)",
+                params![article_id, qte, achat_id, magasin_id],
             ).map_err(|e| e.to_string())?;
         }
     }
@@ -716,23 +750,34 @@ pub fn get_current_session(db: State<DbState>, caissier_id: i64) -> Result<Optio
 #[tauri::command]
 pub fn open_session(db: State<DbState>, caissier_id: i64, fond_initial: f64) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    
+
     // Check if already open
     let count: i64 = conn.query_row(
         "SELECT count(*) FROM sessions_caisse WHERE caissier_id = ?1 AND statut = 'ouverte'",
         params![caissier_id],
         |row| row.get(0)
     ).unwrap_or(0);
-    
+
     if count > 0 {
         return Err("Une session est déjà ouverte pour ce caissier".to_string());
     }
 
+    let magasin_id = default_magasin_id(&conn)?;
     conn.execute(
-        "INSERT INTO sessions_caisse (caissier_id, fond_initial, statut) VALUES (?1, ?2, 'ouverte')",
-        params![caissier_id, fond_initial]
+        "INSERT INTO sessions_caisse (caissier_id, fond_initial, statut, magasin_id) VALUES (?1, ?2, 'ouverte', ?3)",
+        params![caissier_id, fond_initial, magasin_id]
     ).map_err(|e| e.to_string())?;
-    
+
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn add_magasin(db: State<DbState>, nom: String, adresse: Option<String>) -> Result<i64, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO magasins (nom, adresse) VALUES (?1, ?2)",
+        params![nom, adresse],
+    ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -799,17 +844,20 @@ pub fn update_achat_status(db: State<DbState>, achat_id: i64, statut_livraison: 
     ).map_err(|e| e.to_string())?;
 
     if old_sl != "recu" && statut_livraison == "recu" {
+        let magasin_id = default_magasin_id(&tx)?;
         let mut stmt = tx.prepare("SELECT article_id, quantite, prix_unitaire FROM achat_articles WHERE achat_id = ?1").map_err(|e| e.to_string())?;
         let lignes = stmt.query_map(params![achat_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?, row.get::<_, f64>(2)?))
         }).map_err(|e| e.to_string())?;
+        let lignes: Vec<(i64, f64, f64)> = lignes.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
+        drop(stmt);
 
-        for ligne in lignes {
-            let (article_id, qte, pu) = ligne.map_err(|e| e.to_string())?;
-            tx.execute("UPDATE articles SET stock = stock + ?1, prix_achat = ?2 WHERE id = ?3", params![qte, pu, article_id]).map_err(|e| e.to_string())?;
+        for (article_id, qte, pu) in lignes {
+            tx.execute("UPDATE articles SET prix_achat = ?1 WHERE id = ?2", params![pu, article_id]).map_err(|e| e.to_string())?;
+            adjust_article_stock(&tx, article_id, magasin_id, qte)?;
             tx.execute(
-                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type) VALUES (?1, ?2, 'entree', ?3, 'achat_reception')",
-                params![article_id, qte, achat_id],
+                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'achat_reception', ?4)",
+                params![article_id, qte, achat_id, magasin_id],
             ).map_err(|e| e.to_string())?;
         }
     }
@@ -905,6 +953,7 @@ pub fn get_mouvements_stock(db: State<DbState>, article_id: Option<i64>, debut: 
 #[tauri::command]
 pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&conn)?;
     let mut imported = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
@@ -934,7 +983,15 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![code_barre, designation, prix_achat, prix_vente, tva, stock, stock_alerte, image_url],
         ) {
-            Ok(_) => imported += 1,
+            Ok(_) => {
+                imported += 1;
+                if stock != 0.0 {
+                    let article_id = conn.last_insert_rowid();
+                    if let Err(e) = adjust_article_stock(&conn, article_id, magasin_id, stock) {
+                        errors.push(format!("Ligne {} (stock): {}", i+1, e));
+                    }
+                }
+            }
             Err(e) => errors.push(format!("Ligne {}: {}", i+1, e)),
         }
     }
@@ -983,13 +1040,13 @@ pub fn get_stats(db: State<DbState>) -> Result<serde_json::Value, String> {
         GROUP BY a.id
         ORDER BY qte_vendue DESC
         LIMIT 5
-    ").unwrap();
+    ").map_err(|e| e.to_string())?;
     let top_articles = stmt.query_map([], |r| {
         Ok(serde_json::json!({
             "designation": r.get::<_, String>(0)?,
             "quantite": r.get::<_, f64>(1)?
         }))
-    }).unwrap().filter_map(Result::ok).collect::<Vec<_>>();
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
 
     // Top 5 Clients
     let mut stmt = conn.prepare("
@@ -1000,13 +1057,13 @@ pub fn get_stats(db: State<DbState>) -> Result<serde_json::Value, String> {
         GROUP BY c.id
         ORDER BY depense DESC
         LIMIT 5
-    ").unwrap();
+    ").map_err(|e| e.to_string())?;
     let top_clients = stmt.query_map([], |r| {
         Ok(serde_json::json!({
             "nom": r.get::<_, String>(0)?,
             "depense": r.get::<_, f64>(1)?
         }))
-    }).unwrap().filter_map(Result::ok).collect::<Vec<_>>();
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
 
     Ok(serde_json::json!({
         "total_ventes_30j": total_ventes_30j,
@@ -1196,7 +1253,7 @@ pub fn create_transfert(
     let transfert_id = tx.last_insert_rowid();
 
     for a in articles {
-        let article_id = a["article_id"].as_i64().unwrap();
+        let article_id = a["article_id"].as_i64().ok_or("article_id manquant ou invalide dans la ligne")?;
         let quantite = a["quantite"].as_f64().unwrap_or(0.0);
         tx.execute(
             "INSERT INTO transfert_lignes (transfert_id, article_id, quantite) VALUES (?1, ?2, ?3)",
@@ -1228,27 +1285,17 @@ pub fn validate_transfert(db: State<DbState>, transfert_id: i64) -> Result<(), S
 
     for res in lignes {
         let (article_id, qte) = res.map_err(|e| e.to_string())?;
-        
-        // 1. Soustraire de la source
-        tx.execute(
-            "UPDATE article_stocks SET quantite = quantite - ?1 WHERE article_id = ?2 AND magasin_id = ?3",
-            params![qte, article_id, source_id]
-        ).map_err(|e| e.to_string())?;
-        
-        // Tracabilité (Sortie)
+
+        // 1. Soustraire de la source (upsert : évite de perdre la sortie si l'article
+        // n'avait encore aucune ligne article_stocks pour ce magasin)
+        adjust_article_stock(&tx, article_id, source_id, -qte)?;
         tx.execute(
             "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'transfert', ?4)",
             params![article_id, qte, transfert_id, source_id]
         ).map_err(|e| e.to_string())?;
 
-        // 2. Ajouter à la destination (Créer la ligne si elle n'existe pas)
-        tx.execute(
-            "INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES (?1, ?2, ?3)
-             ON CONFLICT(article_id, magasin_id) DO UPDATE SET quantite = quantite + ?3",
-            params![article_id, dest_id, qte]
-        ).map_err(|e| e.to_string())?;
-
-        // Tracabilité (Entrée)
+        // 2. Ajouter à la destination
+        adjust_article_stock(&tx, article_id, dest_id, qte)?;
         tx.execute(
             "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'transfert', ?4)",
             params![article_id, qte, transfert_id, dest_id]
@@ -1337,7 +1384,7 @@ pub fn delete_utilisateur(db: State<DbState>, id: i64) -> Result<(), String> {
 #[tauri::command]
 pub fn get_tables(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, nom, statut, ticket_id FROM tables_resto ORDER BY id").unwrap();
+    let mut stmt = conn.prepare("SELECT id, nom, statut, ticket_id FROM tables_resto ORDER BY id").map_err(|e| e.to_string())?;
     let tables = stmt.query_map([], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
@@ -1345,7 +1392,7 @@ pub fn get_tables(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> 
             "statut": row.get::<_, String>(2)?,
             "ticket_id": row.get::<_, Option<String>>(3)?,
         }))
-    }).unwrap().filter_map(Result::ok).collect::<Vec<_>>();
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
     Ok(tables)
 }
 
@@ -1379,7 +1426,10 @@ pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
         shop_address: map.get("shop_address").filter(|s| !s.is_empty()).cloned(),
         shop_phone: map.get("shop_phone").filter(|s| !s.is_empty()).cloned(),
         shop_email: map.get("shop_email").filter(|s| !s.is_empty()).cloned(),
-        tax_number: map.get("tax_number").filter(|s| !s.is_empty()).cloned(),
+        ice: map.get("ice").filter(|s| !s.is_empty()).cloned(),
+        if_number: map.get("if_number").filter(|s| !s.is_empty()).cloned(),
+        rc_number: map.get("rc_number").filter(|s| !s.is_empty()).cloned(),
+        patente: map.get("patente").filter(|s| !s.is_empty()).cloned(),
         default_tva: map.get("default_tva").and_then(|v| v.parse::<f64>().ok()).unwrap_or(20.0),
         receipt_footer: map.get("receipt_footer").filter(|s| !s.is_empty()).cloned(),
         currency: map.get("currency").cloned().unwrap_or_else(|| "MAD".to_string()),
@@ -1388,7 +1438,8 @@ pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
 
 #[tauri::command]
 pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Option<String>, shop_phone: Option<String>,
-    shop_email: Option<String>, tax_number: Option<String>, default_tva: f64,
+    shop_email: Option<String>, ice: Option<String>, if_number: Option<String>, rc_number: Option<String>,
+    patente: Option<String>, default_tva: f64,
     receipt_footer: Option<String>, currency: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let pairs: Vec<(&str, String)> = vec![
@@ -1396,7 +1447,10 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
         ("shop_address", shop_address.unwrap_or_default()),
         ("shop_phone", shop_phone.unwrap_or_default()),
         ("shop_email", shop_email.unwrap_or_default()),
-        ("tax_number", tax_number.unwrap_or_default()),
+        ("ice", ice.unwrap_or_default()),
+        ("if_number", if_number.unwrap_or_default()),
+        ("rc_number", rc_number.unwrap_or_default()),
+        ("patente", patente.unwrap_or_default()),
         ("default_tva", default_tva.to_string()),
         ("receipt_footer", receipt_footer.unwrap_or_default()),
         ("currency", currency),

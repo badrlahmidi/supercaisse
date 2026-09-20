@@ -75,6 +75,7 @@ pub fn run() {
             commands::open_session,
             commands::close_session,
             commands::get_magasins,
+            commands::add_magasin,
             commands::create_transfert,
             commands::validate_transfert,
             commands::get_tables,

@@ -53,7 +53,10 @@ interface Settings {
   shop_address: string | null
   shop_phone: string | null
   shop_email: string | null
-  tax_number: string | null
+  ice: string | null
+  if_number: string | null
+  rc_number: string | null
+  patente: string | null
   default_tva: number
   receipt_footer: string | null
   currency: string
@@ -108,7 +111,10 @@ const mockSettings: Settings = {
   shop_address: null,
   shop_phone: null,
   shop_email: null,
-  tax_number: null,
+  ice: null,
+  if_number: null,
+  rc_number: null,
+  patente: null,
   default_tva: 20,
   receipt_footer: "Merci de votre visite",
   currency: "MAD",
