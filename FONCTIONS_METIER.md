@@ -51,7 +51,7 @@
 | Étiquettes code-barres imprimables (planches PDF) | ⬜ | |
 | Prix multiple (public / grossiste / promo) | ⬜ | Un seul prix de vente par article |
 | Produits composés / kits | ⬜ | |
-| Variantes taille/couleur avec stock dédié | ⬜ | La structure existe en base mais rien ne permet de la créer ou de la vendre |
+| Variantes taille/couleur avec stock dédié | 🔶 | Créer/lister/ajuster/supprimer une déclinaison avec son propre code-barres : fait. Vendre une déclinaison précise depuis la caisse : pas encore câblé côté panier (le backend est prêt) |
 | Traçabilité lot / date de péremption | ✅ | Case à cocher par article, réception de lot avec numéro + date, écran d'alerte dédié (page Péremptions) |
 
 ## 3. Stock
@@ -161,8 +161,8 @@
 | | Nombre de fonctions |
 |---|---|
 | ✅ Inclus et utilisable | 36 |
-| 🔶 Inclus mais à corriger/compléter | 13 |
-| ⬜ Manquant | 29 |
+| 🔶 Inclus mais à corriger/compléter | 14 |
+| ⬜ Manquant | 28 |
 
 *(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
 
@@ -179,7 +179,7 @@
 
 - ~~Traçabilité lot/péremption~~ ✅ fait 2026-09-20 (sert à la fois supermarché et pharmacie)
 - ~~Document PDF archivable~~ ✅ fait 2026-09-20 (condition d'entrée pour toute facturation professionnelle sérieuse)
-- Variantes taille/couleur exploitables en vente (condition d'entrée pour le prêt-à-porter)
+- Variantes taille/couleur vendables depuis la caisse (le catalogue/stock est prêt depuis le 2026-09-20 ; il manque le câblage panier — cf. `ROADMAP_STATUS.md`)
 - Multi-prix + produits composés (condition d'entrée pour le matériel/pâtisserie)
 - Notion d'ordonnance + tiers-payant AMO/mutuelle (dernier verrou spécifique à la pharmacie, au-delà du socle technique lot/péremption)
 

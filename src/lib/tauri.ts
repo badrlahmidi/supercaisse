@@ -104,6 +104,16 @@ const mockArticles: Article[] = [
 
 const mockLots: Record<number, ArticleLot[]> = {}
 
+interface ArticleVariante {
+  id: number
+  taille: string | null
+  couleur: string | null
+  code_barre: string | null
+  stock_dedie: number
+}
+
+const mockVariantes: Record<number, ArticleVariante[]> = {}
+
 const mockClients: Client[] = [
   { id: 1, code: "CL001", nom: "Client de passage", adresse: null, telephone: null, email: null, credit_plafond: 0, credit_actuel: 0 },
 ]
@@ -188,6 +198,33 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
       if (lot) lot.quantite -= quantite as number
     }
   },
+
+  // Variantes
+  add_article_variante: ({ article_id, taille, couleur, code_barre, stock_initial }) => {
+    nextId++
+    const v: ArticleVariante = { id: nextId, taille: (taille as string) || null, couleur: (couleur as string) || null, code_barre: (code_barre as string) || null, stock_dedie: stock_initial as number }
+    mockVariantes[article_id as number] = [...(mockVariantes[article_id as number] || []), v]
+    return nextId
+  },
+  get_article_variantes: ({ article_id }) => mockVariantes[article_id as number] || [],
+  update_article_variante: ({ id, taille, couleur, code_barre }) => {
+    for (const list of Object.values(mockVariantes)) {
+      const v = list.find((v) => v.id === id)
+      if (v) { v.taille = (taille as string) || null; v.couleur = (couleur as string) || null; v.code_barre = (code_barre as string) || null }
+    }
+  },
+  adjust_article_variante_stock: ({ id, quantite }) => {
+    for (const list of Object.values(mockVariantes)) {
+      const v = list.find((v) => v.id === id)
+      if (v) v.stock_dedie += quantite as number
+    }
+  },
+  delete_article_variante: ({ id }) => {
+    for (const key of Object.keys(mockVariantes)) {
+      mockVariantes[Number(key)] = mockVariantes[Number(key)].filter((v) => v.id !== id)
+    }
+  },
+  find_variante_by_barcode: () => null,
 
   // Ventes
   create_vente: () => { nextId++; return nextId },

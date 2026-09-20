@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { invoke } from "@/lib/tauri"
 import { useProductsList, useCreateProduct, useUpdateProduct, useDeleteProduct } from "@/hooks/useProducts"
 import { useCategoriesList } from "@/hooks/useCategories"
 import { useFournisseursList } from "@/hooks/useFournisseurs"
@@ -15,12 +17,28 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { useDebounce } from "@/hooks/useDebounce"
+
+interface ArticleVariante {
+  id: number
+  taille: string | null
+  couleur: string | null
+  code_barre: string | null
+  stock_dedie: number
+}
+
+const varianteSchema = z.object({
+  taille: z.string().optional(),
+  couleur: z.string().optional(),
+  code_barre: z.string().optional(),
+  stock_initial: z.number().min(0).default(0),
+})
+type VarianteForm = z.infer<typeof varianteSchema>
 
 interface Article {
   id: number
@@ -72,14 +90,64 @@ export default function Articles() {
   const [showForm, setShowForm] = useState(false)
   const [importing, setImporting] = useState(false)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [variantesArticle, setVariantesArticle] = useState<Article | null>(null)
+  const [showVariantes, setShowVariantes] = useState(false)
 
   const { data: articles, isLoading, refetch } = useProductsList(debouncedSearch)
   const { data: categories } = useCategoriesList()
   const { data: fournisseurs } = useFournisseursList()
+  const queryClient = useQueryClient()
 
   const createMutation = useCreateProduct()
   const updateMutation = useUpdateProduct()
   const deleteMutation = useDeleteProduct()
+
+  const { data: variantes } = useQuery({
+    queryKey: ["article_variantes", variantesArticle?.id],
+    queryFn: () => invoke<ArticleVariante[]>("get_article_variantes", { article_id: variantesArticle?.id }),
+    enabled: showVariantes && !!variantesArticle,
+  })
+
+  const varianteForm = useForm<VarianteForm>({
+    resolver: zodResolver(varianteSchema),
+    defaultValues: { taille: "", couleur: "", code_barre: "", stock_initial: 0 },
+  })
+
+  const invalidateVariantes = () => queryClient.invalidateQueries({ queryKey: ["article_variantes", variantesArticle?.id] })
+
+  const addVarianteMutation = useMutation({
+    mutationFn: (data: VarianteForm) => invoke("add_article_variante", {
+      article_id: variantesArticle?.id,
+      taille: data.taille || null,
+      couleur: data.couleur || null,
+      code_barre: data.code_barre || null,
+      stock_initial: data.stock_initial,
+    }),
+    onSuccess: () => {
+      toast.success("Variante ajoutée")
+      varianteForm.reset({ taille: "", couleur: "", code_barre: "", stock_initial: 0 })
+      invalidateVariantes()
+    },
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const deleteVarianteMutation = useMutation({
+    mutationFn: (id: number) => invoke("delete_article_variante", { id }),
+    onSuccess: () => { toast.success("Variante supprimée"); invalidateVariantes() },
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const adjustVarianteStockMutation = useMutation({
+    mutationFn: ({ id, quantite }: { id: number; quantite: number }) => invoke("adjust_article_variante_stock", { id, quantite }),
+    onSuccess: () => invalidateVariantes(),
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const openVariantes = (article: Article) => {
+    setVariantesArticle(article)
+    varianteForm.reset({ taille: "", couleur: "", code_barre: "", stock_initial: 0 })
+    setShowVariantes(true)
+  }
 
   const form = useForm<ArticleForm>({
     resolver: zodResolver(articleSchema),
@@ -281,10 +349,13 @@ export default function Articles() {
                     <TableCell>{article.fournisseur_nom || "—"}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(article)}>
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(article)} title="Modifier">
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(article.id)}>
+                        <Button variant="ghost" size="icon" onClick={() => openVariantes(article)} title="Déclinaisons taille/couleur">
+                          <Tags className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(article.id)} title="Supprimer">
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
@@ -506,6 +577,102 @@ export default function Articles() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showVariantes} onOpenChange={setShowVariantes}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Déclinaisons — {variantesArticle?.designation}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Chaque déclinaison (taille/couleur) a son propre code-barres et son propre stock.
+              Non encore vendable directement depuis le POS — voir <code>ROADMAP_STATUS.md</code>.
+            </p>
+            <form
+              onSubmit={varianteForm.handleSubmit((data) => addVarianteMutation.mutate(data))}
+              className="grid grid-cols-4 gap-2 items-end p-3 bg-muted/30 rounded-lg"
+            >
+              <div className="space-y-1">
+                <Label htmlFor="v_taille" className="text-xs">Taille</Label>
+                <Input {...varianteForm.register("taille")} id="v_taille" placeholder="M, 42..." className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="v_couleur" className="text-xs">Couleur</Label>
+                <Input {...varianteForm.register("couleur")} id="v_couleur" placeholder="Bleu..." className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="v_code_barre" className="text-xs">Code-barres</Label>
+                <Input {...varianteForm.register("code_barre")} id="v_code_barre" placeholder="Optionnel" className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="v_stock" className="text-xs">Stock initial</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  min="0"
+                  {...varianteForm.register("stock_initial", { valueAsNumber: true })}
+                  id="v_stock"
+                  className="h-9"
+                />
+              </div>
+              <Button type="submit" size="sm" className="col-span-4" disabled={addVarianteMutation.isPending}>
+                {addVarianteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                Ajouter cette déclinaison
+              </Button>
+            </form>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Taille</TableHead>
+                  <TableHead>Couleur</TableHead>
+                  <TableHead>Code-barres</TableHead>
+                  <TableHead className="text-right">Stock</TableHead>
+                  <TableHead className="w-[90px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {variantes?.map((v) => (
+                  <TableRow key={v.id}>
+                    <TableCell>{v.taille || "—"}</TableCell>
+                    <TableCell>{v.couleur || "—"}</TableCell>
+                    <TableCell className="font-mono text-sm">{v.code_barre || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost" size="icon" className="h-6 w-6"
+                          onClick={() => adjustVarianteStockMutation.mutate({ id: v.id, quantite: -1 })}
+                          disabled={v.stock_dedie <= 0}
+                        >-</Button>
+                        <span className="w-8 text-center">{v.stock_dedie}</span>
+                        <Button
+                          variant="ghost" size="icon" className="h-6 w-6"
+                          onClick={() => adjustVarianteStockMutation.mutate({ id: v.id, quantite: 1 })}
+                        >+</Button>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" onClick={() => deleteVarianteMutation.mutate(v.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!variantes?.length && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-6 text-muted-foreground text-sm">
+                      Aucune déclinaison pour cet article
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowVariantes(false)}>Fermer</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

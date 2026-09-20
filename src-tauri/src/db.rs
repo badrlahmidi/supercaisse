@@ -416,6 +416,12 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE journal_caisse ADD COLUMN session_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN suivi_lot INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE article_variantes ADD COLUMN code_barre TEXT", []);
+    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN variante_id INTEGER", []);
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_variantes_code_barre_unique ON article_variantes(code_barre) WHERE code_barre IS NOT NULL AND code_barre != ''",
+        [],
+    ).ok();
 
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS article_lots (
