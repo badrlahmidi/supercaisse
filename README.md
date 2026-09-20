@@ -9,6 +9,7 @@ destiné au marché marocain.
 |---|---|
 | `AGENTS.md` | Stack technique, conventions de code, structure du projet — à lire avant toute contribution |
 | `ROADMAP_STATUS.md` | **État d'avancement réel**, vérifié module par module dans le code (source de vérité pour "qu'est-ce qui marche aujourd'hui ?") |
+| `FONCTIONS_METIER.md` | Inventaire des fonctions métier — inclus / à améliorer / manquant, vue business pour prioriser le backlog |
 | `AUDIT_ARCHITECTURE_SENIOR_2026-09.md` | Audit architecture, conformité fiscale marocaine (DGI) et couverture par vertical retail (supermarché, pharmacie/para, prêt-à-porter, matériel pâtisserie) |
 | `SPEC_FONCTIONNELLE_RITAJ_RETAIL_MAROC.md` | Cahier des charges cible (vision produit, pas état d'avancement) |
 | `QA_POS_Supermarche.md` | Scénarios de non-régression du module POS |
