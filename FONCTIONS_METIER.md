@@ -9,8 +9,8 @@
 > Dernière mise à jour : 2026-09-20 (recomptée depuis `ROADMAP_STATUS.md` du même jour).
 >
 > **Mise à jour du soir** : stock multi-magasin, en-tête légal DGI (ICE/IF/RC/Patente), PDF
-> facture archivable et détection doublon code-barres sont passés en ✅ — détail dans
-> `ROADMAP_STATUS.md`.
+> facture archivable, traçabilité lot/péremption et détection doublon code-barres sont passés
+> en ✅ — détail dans `ROADMAP_STATUS.md`.
 
 ---
 
@@ -52,7 +52,7 @@
 | Prix multiple (public / grossiste / promo) | ⬜ | Un seul prix de vente par article |
 | Produits composés / kits | ⬜ | |
 | Variantes taille/couleur avec stock dédié | ⬜ | La structure existe en base mais rien ne permet de la créer ou de la vendre |
-| Traçabilité lot / date de péremption | ⬜ | Aucun champ sur la fiche produit |
+| Traçabilité lot / date de péremption | ✅ | Case à cocher par article, réception de lot avec numéro + date, écran d'alerte dédié (page Péremptions) |
 
 ## 3. Stock
 
@@ -62,6 +62,7 @@
 | Historique des mouvements de stock | ✅ | |
 | Alertes seuil bas / rupture | ✅ | |
 | Valorisation du stock (affichage) | ✅ | |
+| Alertes péremption avec horizon paramétrable (7/15/30/90 jours) | ✅ | Écran dédié, retrait du stock en un clic (péremption/casse) |
 | Inventaire physique (comptage vs théorique) | ⬜ | |
 | Suggestion de réapprovisionnement automatique | ⬜ | |
 | Cohérence du stock (pas de survente inter-boutique) | ✅ | Corrigé : le stock global affiché est maintenant un agrégat toujours recalculé depuis le détail par boutique, plus deux compteurs déconnectés |
@@ -159,9 +160,9 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 34 |
+| ✅ Inclus et utilisable | 36 |
 | 🔶 Inclus mais à corriger/compléter | 13 |
-| ⬜ Manquant | 31 |
+| ⬜ Manquant | 29 |
 
 *(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
 
@@ -176,10 +177,11 @@
 
 ## Les fonctions manquantes qui structurent le plus la suite
 
-- Traçabilité lot/péremption (sert à la fois supermarché et pharmacie)
+- ~~Traçabilité lot/péremption~~ ✅ fait 2026-09-20 (sert à la fois supermarché et pharmacie)
+- ~~Document PDF archivable~~ ✅ fait 2026-09-20 (condition d'entrée pour toute facturation professionnelle sérieuse)
 - Variantes taille/couleur exploitables en vente (condition d'entrée pour le prêt-à-porter)
 - Multi-prix + produits composés (condition d'entrée pour le matériel/pâtisserie)
-- Document PDF archivable (condition d'entrée pour toute facturation professionnelle sérieuse)
+- Notion d'ordonnance + tiers-payant AMO/mutuelle (dernier verrou spécifique à la pharmacie, au-delà du socle technique lot/péremption)
 
 ---
 

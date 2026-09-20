@@ -35,6 +35,7 @@ interface Article {
   categorie_nom?: string
   fournisseur_nom?: string
   actif: boolean
+  suivi_lot?: boolean
 }
 
 interface Category {
@@ -59,6 +60,7 @@ const articleSchema = z.object({
   stock_alerte: z.number().min(0).optional().nullable(),
   categorie_id: z.number().optional().nullable(),
   fournisseur_id: z.number().optional().nullable(),
+  suivi_lot: z.boolean().default(false),
 })
 
 type ArticleForm = z.infer<typeof articleSchema>
@@ -92,6 +94,7 @@ export default function Articles() {
       stock_alerte: null,
       categorie_id: null,
       fournisseur_id: null,
+      suivi_lot: false,
     },
   })
 
@@ -118,6 +121,7 @@ export default function Articles() {
       stock_alerte: article.stock_alerte,
       categorie_id: article.categorie_id,
       fournisseur_id: null,
+      suivi_lot: article.suivi_lot || false,
     })
     setImagePreview(article.image_url ?? null)
     setShowForm(true)
@@ -137,6 +141,7 @@ export default function Articles() {
       stock_alerte: null,
       categorie_id: null,
       fournisseur_id: null,
+      suivi_lot: false,
     })
     setImagePreview(null)
     setShowForm(true)
@@ -452,6 +457,18 @@ export default function Articles() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2 md:col-span-2 flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="suivi_lot"
+                  className="h-4 w-4"
+                  checked={form.watch("suivi_lot")}
+                  onChange={(e) => form.setValue("suivi_lot", e.target.checked)}
+                />
+                <Label htmlFor="suivi_lot" className="cursor-pointer">
+                  Suivi de lot / date de péremption (DLC-DLUO) — supermarché, pharmacie
+                </Label>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="fournisseur_id">Fournisseur</Label>

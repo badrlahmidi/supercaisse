@@ -11,12 +11,13 @@
 > Dernière vérification : 2026-09-20, par lecture intégrale de `src-tauri/src/{db,commands,lib}.rs`
 > et `src/{pages,routes,hooks,lib}/**`.
 >
-> **Mise à jour 2026-09-20 (soir)** : 4 correctifs de cet audit ont été implémentés et validés
-> (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run` 68/68, `vite build` — tous verts ;
+> **Mise à jour 2026-09-20 (soir)** : 5 correctifs/ajouts de cet audit ont été implémentés et
+> validés (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run` 68/68, `vite build` — tous verts ;
 > une CI GitHub Actions existe désormais dans `.github/workflows/ci.yml` pour que ces statuts
 > restent vérifiés automatiquement) : stock multi-magasin unifié, en-tête légal ICE/IF/RC/Patente
 > séparé, durcissement des `.unwrap()` Rust sur les chemins critiques, génération PDF facture/avoir
-> (`jsPDF` + commande `save_document_pdf`). Détail dans les sections correspondantes ci-dessous. Une erreur de l'audit initial a aussi été corrigée : la contrainte
+> (`jsPDF` + commande `save_document_pdf`), traçabilité lot/péremption (DLC-DLUO) avec écran
+> d'alerte dédié. Détail dans les sections correspondantes ci-dessous. Une erreur de l'audit initial a aussi été corrigée : la contrainte
 > `UNIQUE` sur `code_barre` existait déjà (`db.rs:430`, une simple recherche `CREATE TABLE` sans
 > chercher `CREATE INDEX` l'avait fait manquer) — jamais confirmé sans le grep exact, y compris
 > nos propres constats précédents.
@@ -52,8 +53,9 @@
 | Mouvements de stock tracés | ✅ | table `mouvements_stock`, page `MouvementsStock.tsx` |
 | Contrainte UNIQUE code-barres | ✅ | `db.rs:430` — index `UNIQUE` conditionnel sur `code_barre` (corrige une erreur de l'audit initial, qui l'avait déclarée absente) |
 | Inventaire physique (comptage vs théorique) | ⬜ | aucune commande/table dédiée |
-| Péremption / DLC-DLUO | ⬜ | aucune colonne date d'expiration sur `articles` |
-| Traçabilité lot / numéro de série | ⬜ | aucune table/colonne lot |
+| Péremption / DLC-DLUO | ✅ | table `article_lots` (numéro de lot + date de péremption + quantité par magasin), toggle `articles.suivi_lot`, écran `Articles.tsx` (case à cocher), `Stock.tsx` (dialog lots par article), page `PeremptionsStock.tsx` (alerte globale par horizon, retrait du stock) |
+| Traçabilité lot / numéro de série | ✅ | `article_lots.numero_lot`, réception via `add_article_lot`, consultable via `get_article_lots` |
+| FEFO automatique à la vente (consommer le lot qui périme en premier) | ⬜ | `create_vente` décrémente l'agrégat, pas un lot précis — limite connue, documentée dans le code (`commands.rs`, section "Lots / péremption") |
 
 ### Facturation / conformité fiscale
 | Item | Statut | Preuve |
@@ -114,9 +116,9 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 
 | Vertical | Statut | Ce qui manque pour un MVP vendable |
 |---|---|---|
-| Supermarché / épicerie | 🔶 ~70% | DLC/péremption, inventaire physique, vrac/poids réellement câblé |
+| Supermarché / épicerie | 🔶 ~80% | DLC/péremption ✅ (2026-09-20), reste : inventaire physique, vrac/poids réellement câblé |
 | Restaurant / café | 🔶 | tables + statuts existants (`tables_resto`), mais pas de KDS, pas de split bill, pas de menus composés |
-| Pharmacie / parapharmacie | ⬜ ~10% | absente du sélecteur ; aucune traçabilité lot/péremption (obligation réglementaire, pas confort) ; pas de notion d'ordonnance ; pas de tiers-payant AMO/mutuelle |
+| Pharmacie / parapharmacie | ⬜ ~25% | lot/péremption ✅ (2026-09-20, socle technique correct) ; reste bloquant : toujours absente du sélecteur `business_type` ; pas de notion d'ordonnance ; pas de tiers-payant AMO/mutuelle |
 | Prêt-à-porter (mode) | ⬜ ~5% | table `article_variantes` (taille/couleur) existe en base mais **aucune commande Tauri ni page** ne l'exploite — schéma orphelin |
 | Matériel & outils pâtisserie | ⬜ ~0% | pas de multi-prix (public/grossiste), pas de produits composés/kits, pas d'unités de vente multiples |
 
@@ -138,7 +140,7 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 2. ~~Séparer ICE / IF / RC / Patente en champs distincts~~ ✅ fait 2026-09-20.
 3. ~~Mettre en place une CI~~ ✅ fait 2026-09-20 (`.github/workflows/ci.yml`).
 4. ~~Génération PDF facture/avoir~~ ✅ fait 2026-09-20 (`jsPDF` + `save_document_pdf`, cf. section Facturation ci-dessus). Reste : le PDF est généré à la demande (bouton), pas encore archivé/horodaté de façon opposable (pas de scellement, de numérotation de fichier garantie unique au-delà du nom).
-5. Ajouter lot + date de péremption au niveau article (sert supermarché ET pharmacie).
+5. ~~Ajouter lot + date de péremption au niveau article~~ ✅ fait 2026-09-20 (`article_lots`, cf. section Catalogue & Stock ci-dessus). Reste : pas de FEFO automatique à la vente (limite documentée dans le code), pas de notion d'ordonnance/tiers-payant pour la pharmacie.
 6. Câbler `article_variantes` (commandes Tauri + UI) pour rendre le prêt-à-porter vendable.
 7. Ajouter multi-prix (public/grossiste) + produits composés/kits (sert pâtisserie/matériel ET le générique déjà écrit dans `SPEC_FONCTIONNELLE_RITAJ_RETAIL_MAROC.md §3.1`).
 8. Construire l'UI multi-magasin (sélection du magasin actif à l'ouverture de session, écran de création de boutique sur `add_magasin`) pour que le travail du point 1 devienne utilisable, pas seulement sûr.

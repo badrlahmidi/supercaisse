@@ -17,6 +17,7 @@ export interface Product {
   fournisseur_id?: number | null
   fournisseur_nom?: string
   actif: boolean
+  suivi_lot?: boolean
 }
 
 export function useProductsList(search?: string) {

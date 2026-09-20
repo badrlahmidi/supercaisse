@@ -20,6 +20,15 @@ interface Article {
   actif: boolean
   categorie_nom?: string
   fournisseur_nom?: string
+  suivi_lot?: boolean
+}
+
+interface ArticleLot {
+  id: number
+  numero_lot: string | null
+  date_peremption: string | null
+  quantite: number
+  date_reception: string
 }
 
 interface Client {
@@ -93,6 +102,8 @@ const mockArticles: Article[] = [
   { id: 1, code_barre: "123456789", designation: "Produit Test", prix_achat: 5, prix_vente: 10, tva: 20, stock: 100, stock_alerte: 10, categorie_id: 1, fournisseur_id: null, actif: true, categorie_nom: "Alimentation" },
 ]
 
+const mockLots: Record<number, ArticleLot[]> = {}
+
 const mockClients: Client[] = [
   { id: 1, code: "CL001", nom: "Client de passage", adresse: null, telephone: null, email: null, credit_plafond: 0, credit_actuel: 0 },
 ]
@@ -159,6 +170,24 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   update_article: ({ id, ...rest }) => { const a = mockArticles.find(a => a.id === id); if (a) Object.assign(a, rest) },
   delete_article: ({ id }) => { const idx = mockArticles.findIndex(a => a.id === id); if (idx >= 0) mockArticles.splice(idx, 1) },
   update_article_stock: ({ article_id, quantite }) => { const a = mockArticles.find(a => a.id === article_id); if (a) a.stock += quantite as number },
+
+  // Lots / péremption
+  add_article_lot: ({ article_id, numero_lot, date_peremption, quantite }) => {
+    nextId++
+    const lot: ArticleLot = { id: nextId, numero_lot: (numero_lot as string) || null, date_peremption: (date_peremption as string) || null, quantite: quantite as number, date_reception: new Date().toISOString() }
+    mockLots[article_id as number] = [...(mockLots[article_id as number] || []), lot]
+    const a = mockArticles.find(a => a.id === article_id)
+    if (a) a.stock += quantite as number
+    return nextId
+  },
+  get_article_lots: ({ article_id }) => mockLots[article_id as number] || [],
+  get_lots_peremption_proche: () => [],
+  discard_article_lot: ({ lot_id, quantite }) => {
+    for (const lots of Object.values(mockLots)) {
+      const lot = lots.find((l) => l.id === lot_id)
+      if (lot) lot.quantite -= quantite as number
+    }
+  },
 
   // Ventes
   create_vente: () => { nextId++; return nextId },

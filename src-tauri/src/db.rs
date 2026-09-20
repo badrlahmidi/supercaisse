@@ -415,6 +415,23 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN session_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE journal_caisse ADD COLUMN session_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE articles ADD COLUMN suivi_lot INTEGER DEFAULT 0", []);
+
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS article_lots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL,
+            magasin_id INTEGER NOT NULL,
+            numero_lot TEXT,
+            date_peremption TEXT,
+            quantite REAL NOT NULL DEFAULT 0,
+            date_reception TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (article_id) REFERENCES articles(id),
+            FOREIGN KEY (magasin_id) REFERENCES magasins(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_article_lots_article ON article_lots(article_id);
+        CREATE INDEX IF NOT EXISTS idx_article_lots_peremption ON article_lots(date_peremption);
+    ")?;
 
     // Migration en-tête légal : l'ancien champ unique 'tax_number' (ICE/IF confondus)
     // devient 'ice' ; 'if_number'/'rc_number'/'patente' sont ajoutés en distinct.

@@ -209,7 +209,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         Some(ref q) if !q.is_empty() => (
             format!("SELECT a.id, a.code_barre, a.designation, a.prix_achat, a.prix_vente, a.tva, a.stock, a.stock_alerte,
                     a.categorie_id, a.fournisseur_id, a.actif, {image_col},
-                    c.nom as categorie_nom, f.nom as fournisseur_nom
+                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot
              FROM articles a
              LEFT JOIN categories c ON a.categorie_id = c.id
              LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -220,7 +220,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         _ => (
             format!("SELECT a.id, a.code_barre, a.designation, a.prix_achat, a.prix_vente, a.tva, a.stock, a.stock_alerte,
                     a.categorie_id, a.fournisseur_id, a.actif, {image_col},
-                    c.nom as categorie_nom, f.nom as fournisseur_nom
+                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot
              FROM articles a
              LEFT JOIN categories c ON a.categorie_id = c.id
              LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -232,6 +232,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
     let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
         let actif_int: i32 = row.get(10)?;
+        let suivi_lot_int: Option<i32> = row.get(14)?;
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
             "code_barre": row.get::<_, Option<String>>(1)?,
@@ -247,6 +248,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
             "image_url": row.get::<_, Option<String>>(11)?,
             "categorie_nom": row.get::<_, Option<String>>(12)?,
             "fournisseur_nom": row.get::<_, Option<String>>(13)?,
+            "suivi_lot": suivi_lot_int.unwrap_or(0) != 0,
         }))
     }).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -255,12 +257,12 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
 #[tauri::command]
 pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: String, description: Option<String>,
     image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock: f64, stock_alerte: Option<f64>,
-    categorie_id: Option<i64>, fournisseur_id: Option<i64>) -> Result<i64, String> {
+    categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO articles (code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id],
+        "INSERT INTO articles (code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot.unwrap_or(false) as i32],
     ).map_err(|e| e.to_string())?;
     let article_id = conn.last_insert_rowid();
     if stock != 0.0 {
@@ -273,11 +275,11 @@ pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: 
 #[tauri::command]
 pub fn update_article(db: State<DbState>, id: i64, code_barre: Option<String>, designation: String, description: Option<String>,
     image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock_alerte: Option<f64>,
-    categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool) -> Result<(), String> {
+    categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11 WHERE id=?12",
-        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, id],
+        "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12 WHERE id=?13",
+        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -300,6 +302,106 @@ pub fn update_article_stock(db: State<DbState>, article_id: i64, quantite: f64) 
         "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_type, magasin_id) VALUES (?1, ?2, ?3, 'ajustement', ?4)",
         params![article_id, quantite.abs(), mtype, magasin_id],
     ).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ─── Lots / péremption (DLC-DLUO) ───
+// Couche informative au-dessus du stock agrégé : chaque réception avec suivi de lot
+// crée une ligne `article_lots` ET incrémente `article_stocks`/`articles.stock` via
+// adjust_article_stock, donc le total reste toujours cohérent avec ou sans lots.
+// La vente ne consomme pas encore un lot précis (pas de FEFO automatique) : c'est une
+// limite connue, trackée dans ROADMAP_STATUS.md.
+
+#[tauri::command]
+pub fn add_article_lot(db: State<DbState>, article_id: i64, numero_lot: Option<String>,
+    date_peremption: Option<String>, quantite: f64) -> Result<i64, String> {
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&tx)?;
+    tx.execute(
+        "INSERT INTO article_lots (article_id, magasin_id, numero_lot, date_peremption, quantite) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![article_id, magasin_id, numero_lot, date_peremption, quantite],
+    ).map_err(|e| e.to_string())?;
+    let lot_id = tx.last_insert_rowid();
+    if quantite != 0.0 {
+        adjust_article_stock(&tx, article_id, magasin_id, quantite)?;
+        tx.execute(
+            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'lot', ?4)",
+            params![article_id, quantite, lot_id, magasin_id],
+        ).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(lot_id)
+}
+
+#[tauri::command]
+pub fn get_article_lots(db: State<DbState>, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, numero_lot, date_peremption, quantite, date_reception
+         FROM article_lots WHERE article_id = ?1
+         ORDER BY (date_peremption IS NULL), date_peremption ASC"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![article_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "numero_lot": row.get::<_, Option<String>>(1)?,
+            "date_peremption": row.get::<_, Option<String>>(2)?,
+            "quantite": row.get::<_, f64>(3)?,
+            "date_reception": row.get::<_, String>(4)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_lots_peremption_proche(db: State<DbState>, jours: i64) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT l.id, l.article_id, a.designation, l.numero_lot, l.date_peremption, l.quantite
+         FROM article_lots l
+         JOIN articles a ON a.id = l.article_id
+         WHERE l.quantite > 0 AND l.date_peremption IS NOT NULL
+           AND date(l.date_peremption) <= date('now', ?1 || ' days')
+         ORDER BY l.date_peremption ASC"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![jours.to_string()], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "article_id": row.get::<_, i64>(1)?,
+            "designation": row.get::<_, String>(2)?,
+            "numero_lot": row.get::<_, Option<String>>(3)?,
+            "date_peremption": row.get::<_, String>(4)?,
+            "quantite": row.get::<_, f64>(5)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn discard_article_lot(db: State<DbState>, lot_id: i64, quantite: f64, motif: Option<String>) -> Result<(), String> {
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let (article_id, magasin_id, lot_quantite): (i64, i64, f64) = tx.query_row(
+        "SELECT article_id, magasin_id, quantite FROM article_lots WHERE id = ?1",
+        params![lot_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|_| "Lot introuvable".to_string())?;
+
+    if quantite <= 0.0 || quantite > lot_quantite {
+        return Err(format!("Quantité invalide (disponible dans ce lot : {})", lot_quantite));
+    }
+
+    tx.execute("UPDATE article_lots SET quantite = quantite - ?1 WHERE id = ?2", params![quantite, lot_id])
+        .map_err(|e| e.to_string())?;
+    adjust_article_stock(&tx, article_id, magasin_id, -quantite)?;
+    tx.execute(
+        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, ?4, ?5)",
+        params![article_id, quantite, lot_id, motif.unwrap_or_else(|| "peremption".to_string()), magasin_id],
+    ).map_err(|e| e.to_string())?;
+
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
