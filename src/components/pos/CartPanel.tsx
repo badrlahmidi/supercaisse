@@ -5,7 +5,7 @@ import { Badge } from "@/ui/Badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
 import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
-import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send } from "lucide-react"
+import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
 
 interface Article {
   id: number
@@ -54,6 +54,8 @@ interface CartPanelProps {
   onClearCart: () => void
   onValidateSale: () => void
   onPrintLastReceipt: () => void
+  onGeneratePdf: () => void
+  generatingPdf?: boolean
   documentType: string
   setDocumentType: (type: string) => void
   isLoyaltyActive: boolean
@@ -77,7 +79,7 @@ const QUICK_AMOUNTS = [10, 20, 50, 100, 200, 500]
 export default function CartPanel({
   articles, clients, processing, lastReceipt,
   subtotal, totalTVA, netAmount, discount, discountAmount, cashAmount, change, itemCount,
-  onUpdateQuantity, onRemoveItem, onClearCart, onValidateSale, onPrintLastReceipt,
+  onUpdateQuantity, onRemoveItem, onClearCart, onValidateSale, onPrintLastReceipt, onGeneratePdf, generatingPdf,
   documentType, setDocumentType, isLoyaltyActive, ptsValueDH, ptsEarned, loyaltyDiscount, ptsToUse, isRestaurant
 }: CartPanelProps) {
   const cart = useCartStore((s) => s.items)
@@ -155,9 +157,14 @@ export default function CartPanel({
         </div>
         <div className="flex items-center gap-1">
           {lastReceipt && (
-            <Button variant="ghost" size="sm" onClick={onPrintLastReceipt}>
-              <Printer className="h-4 w-4" />
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" onClick={onPrintLastReceipt} title="Imprimer">
+                <Printer className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onGeneratePdf} disabled={generatingPdf} title="Générer PDF">
+                {generatingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              </Button>
+            </>
           )}
           {cart.length > 0 && (
             <>

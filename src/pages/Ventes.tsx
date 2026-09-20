@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { useSalesList, useCancelSale } from "@/hooks/useSales"
 import { Card, CardContent } from "@/ui/Card"
@@ -9,10 +10,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/ui/Dialog"
 import { Label } from "@/ui/Label"
 import { formatCurrency, formatDateTime, exportCSV } from "@/lib/utils"
-import { Search, Eye, ReceiptText, Loader2, Download, SearchX, Ban, AlertTriangle, MessageCircle } from "lucide-react"
+import { saveFacturePdf, type ReceiptData } from "@/lib/receipt"
+import { Search, Eye, ReceiptText, Loader2, Download, SearchX, Ban, AlertTriangle, MessageCircle, FileText } from "lucide-react"
 import { format, subDays } from "date-fns"
+import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
+import type { Settings } from "@/lib/tauri"
 
 interface Vente {
   id: number
@@ -28,6 +32,7 @@ interface Vente {
   client_nom: string | null
   caissier_nom: string | null
   client_telephone?: string | null
+  client_ice?: string | null
 }
 
 interface VenteDetail {
@@ -40,6 +45,7 @@ interface VenteDetail {
     prix_unitaire: number
     tva: number
     total_ligne: number
+    remise_ligne?: number | null
   }>
 }
 
@@ -50,9 +56,15 @@ export default function Ventes() {
   const [selectedVente, setSelectedVente] = useState<VenteDetail | null>(null)
   const [showDetail, setShowDetail] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState<Vente | null>(null)
+  const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null)
 
   const { data: ventes, isLoading } = useSalesList(dateDebut, dateFin)
   const cancelMutation = useCancelSale()
+
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => invoke<Settings>("get_settings"),
+  })
 
   const loadDetail = async (venteId: number) => {
     try {
@@ -61,6 +73,50 @@ export default function Ventes() {
       setShowDetail(true)
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const generatePdf = async (venteId: number) => {
+    setGeneratingPdfId(venteId)
+    try {
+      const detail = await invoke<VenteDetail>("get_vente_details", { venteId })
+      const netPaye = detail.vente.montant_total - detail.vente.montant_remise
+      const data: ReceiptData = {
+        shopName: settings?.shop_name || "SuperCaisse",
+        shopAddress: settings?.shop_address || "",
+        shopPhone: settings?.shop_phone || "",
+        shopIce: settings?.ice || null,
+        shopIf: settings?.if_number || null,
+        shopRc: settings?.rc_number || null,
+        shopPatente: settings?.patente || null,
+        receiptFooter: settings?.receipt_footer || "Merci de votre visite",
+        venteId: detail.vente.id,
+        docType: detail.vente.dtype,
+        docNumero: detail.vente.numero_facture,
+        date: detail.vente.date,
+        caissier: detail.vente.caissier_nom || "",
+        client: detail.vente.client_nom || "Client de passage",
+        clientIce: detail.vente.client_ice,
+        items: detail.lignes.map((l) => ({
+          designation: l.designation,
+          quantite: l.quantite,
+          prix_unitaire: l.prix_unitaire,
+          tva: l.tva,
+          total_ligne: l.total_ligne,
+          remise_ligne: l.remise_ligne || 0,
+        })),
+        montantTotal: detail.vente.montant_total,
+        montantRemise: detail.vente.montant_remise,
+        netPaye,
+        modePaiement: detail.vente.mode_paiement,
+        monnaie: 0,
+      }
+      const path = await saveFacturePdf(data)
+      toast.success(`PDF généré : ${path}`)
+    } catch (err) {
+      toast.error(`Échec de la génération du PDF : ${String(err)}`)
+    } finally {
+      setGeneratingPdfId(null)
     }
   }
 
@@ -221,6 +277,19 @@ export default function Ventes() {
                         <Button variant="ghost" size="icon" onClick={() => loadDetail(vente.id)} title="Voir détails">
                           <Eye className="h-4 w-4" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => generatePdf(vente.id)}
+                          disabled={generatingPdfId === vente.id}
+                          title="Générer le PDF"
+                        >
+                          {generatingPdfId === vente.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <FileText className="h-4 w-4" />
+                          )}
+                        </Button>
                         {vente.client_telephone && (
                           <Button variant="ghost" size="icon" onClick={() => sendWhatsAppInvoice(vente)} title="Envoyer par WhatsApp">
                             <MessageCircle className="h-4 w-4 text-[#25D366]" />
@@ -318,6 +387,19 @@ export default function Ventes() {
             <Button variant="outline" onClick={() => setShowDetail(false)}>
               Fermer
             </Button>
+            {selectedVente && (
+              <Button
+                onClick={() => generatePdf(selectedVente.vente.id)}
+                disabled={generatingPdfId === selectedVente.vente.id}
+              >
+                {generatingPdfId === selectedVente.vente.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <FileText className="h-4 w-4 mr-2" />
+                )}
+                Générer PDF
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

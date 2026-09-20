@@ -58,6 +58,7 @@ pub fn run() {
             commands::print_escpos,
             commands::open_cash_drawer,
             commands::print_receipt,
+            commands::save_document_pdf,
             commands::get_articles_stock_alerte,
             commands::get_journal_caisse,
             commands::add_journal_caisse,

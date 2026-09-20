@@ -8,8 +8,9 @@
 > comportement à corriger · ⬜ Manquant.
 > Dernière mise à jour : 2026-09-20 (recomptée depuis `ROADMAP_STATUS.md` du même jour).
 >
-> **Mise à jour du soir** : stock multi-magasin, en-tête légal DGI (ICE/IF/RC/Patente) et
-> détection doublon code-barres sont passés en ✅ — détail dans `ROADMAP_STATUS.md`.
+> **Mise à jour du soir** : stock multi-magasin, en-tête légal DGI (ICE/IF/RC/Patente), PDF
+> facture archivable et détection doublon code-barres sont passés en ✅ — détail dans
+> `ROADMAP_STATUS.md`.
 
 ---
 
@@ -106,7 +107,7 @@
 | TVA multi-taux avec ventilation sur le ticket | ✅ | |
 | ICE du client affiché sur vente B2B | ✅ | |
 | ICE / IF / RC / Patente de l'entreprise sur le document | ✅ | 4 champs distincts, saisis dans Réglages et affichés sur le ticket |
-| Document PDF archivable (facture, avoir) | ⬜ | Le "ticket" est du HTML imprimé à la volée, pas un fichier conservable |
+| Document PDF archivable (facture, avoir) | ✅ | Génération PDF A4 avec mentions légales, disponible depuis la liste des ventes et juste après l'encaissement |
 | Non-suppression d'une facture validée | ✅ | Annulation par changement de statut uniquement |
 | Chaîne Devis → Commande → BL → Facture → Avoir | ⬜ | N'existe pas comme parcours utilisable ; seul un indicateur technique sans écran dédié |
 | Veille facturation électronique DGI | ⬜ | Non commencé (acceptable à ce stade du calendrier réglementaire marocain) |
@@ -158,9 +159,9 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 33 |
+| ✅ Inclus et utilisable | 34 |
 | 🔶 Inclus mais à corriger/compléter | 13 |
-| ⬜ Manquant | 32 |
+| ⬜ Manquant | 31 |
 
 *(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
 

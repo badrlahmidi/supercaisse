@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
 import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
-import { printViaTauri, type ReceiptData } from "@/lib/receipt"
+import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useCartStore } from "@/store/cart"
 import { toast } from "sonner"
@@ -237,6 +237,20 @@ export default function POS() {
   const printLastReceipt = useCallback(() => {
     if (lastReceiptRef.current) {
       printViaTauri(lastReceiptRef.current)
+    }
+  }, [])
+
+  const [generatingPdf, setGeneratingPdf] = useState(false)
+  const generateLastReceiptPdf = useCallback(async () => {
+    if (!lastReceiptRef.current) return
+    setGeneratingPdf(true)
+    try {
+      const path = await saveFacturePdf(lastReceiptRef.current)
+      toast.success(`PDF généré : ${path}`)
+    } catch (err) {
+      toast.error(`Échec de la génération du PDF : ${String(err)}`)
+    } finally {
+      setGeneratingPdf(false)
     }
   }, [])
 
@@ -571,6 +585,8 @@ export default function POS() {
         onClearCart={clearCart}
         onValidateSale={handleValidateSale}
         onPrintLastReceipt={printLastReceipt}
+        onGeneratePdf={generateLastReceiptPdf}
+        generatingPdf={generatingPdf}
         documentType={documentType}
         setDocumentType={setDocumentType}
         isLoyaltyActive={isLoyaltyActive}

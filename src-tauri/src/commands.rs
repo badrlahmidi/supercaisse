@@ -552,7 +552,7 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let vente = conn.query_row(
         "SELECT v.id, v.date, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.numero_facture,
-                c.nom as client_nom, c.telephone as client_tel, u.nom as caissier_nom, v.dtype
+                c.nom as client_nom, c.telephone as client_tel, u.nom as caissier_nom, v.dtype, c.ice as client_ice
          FROM ventes v
          LEFT JOIN clients c ON v.client_id = c.id
          LEFT JOIN utilisateurs u ON v.caissier_id = u.id
@@ -571,11 +571,12 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
                 "client_tel": row.get::<_, Option<String>>(8)?,
                 "caissier_nom": row.get::<_, Option<String>>(9)?,
                 "dtype": row.get::<_, String>(10)?,
+                "client_ice": row.get::<_, Option<String>>(11)?,
             }))
         }
     ).map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT va.id, va.article_id, a.designation, va.quantite, va.prix_unitaire, va.tva, va.total_ligne
+        "SELECT va.id, va.article_id, a.designation, va.quantite, va.prix_unitaire, va.tva, va.total_ligne, va.remise_ligne
          FROM vente_articles va
          JOIN articles a ON va.article_id = a.id
          WHERE va.vente_id = ?1"
@@ -589,6 +590,7 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
             "prix_unitaire": row.get::<_, f64>(4)?,
             "tva": row.get::<_, f64>(5)?,
             "total_ligne": row.get::<_, f64>(6)?,
+            "remise_ligne": row.get::<_, Option<f64>>(7)?,
         }))
     }).map_err(|e| e.to_string())?;
     let lignes: Vec<_> = lignes.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
@@ -1478,6 +1480,27 @@ pub fn print_receipt(data: String) -> Result<(), String> {
         .args(["-Command", &ps])
         .output();
     Ok(())
+}
+
+#[tauri::command]
+pub fn save_document_pdf(base64_data: String, filename: String) -> Result<String, String> {
+    let bytes = general_purpose::STANDARD.decode(&base64_data)
+        .map_err(|e| format!("Erreur de décodage base64: {}", e))?;
+
+    let safe_name: String = filename
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .collect();
+    let safe_name = if safe_name.is_empty() { "document.pdf".to_string() } else { safe_name };
+    let safe_name = if safe_name.to_lowercase().ends_with(".pdf") { safe_name } else { format!("{}.pdf", safe_name) };
+
+    let docs_dir = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join("documents");
+    std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
+    let doc_path = docs_dir.join(safe_name);
+    std::fs::write(&doc_path, &bytes).map_err(|e| format!("Erreur d'écriture du PDF: {}", e))?;
+    Ok(doc_path.to_string_lossy().to_string())
 }
 
 // ─── Backup / Export / Import ───

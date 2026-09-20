@@ -241,6 +241,9 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   print_receipt: () => true,
   print_ticket: () => true,
 
+  // Documents
+  save_document_pdf: ({ filename }) => `documents/${filename || "document"}.pdf`,
+
   // Backup
   backup_database: () => "backups/supercaisse_20240101_120000.db",
   export_database: () => "exports/supercaisse_export_20240101_120000.db",

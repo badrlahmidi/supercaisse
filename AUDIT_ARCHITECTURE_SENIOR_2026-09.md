@@ -18,10 +18,12 @@
 **Note globale : 5/10 — bon socle technique généraliste, non industrialisable en l'état sur les 4 verticaux demandés, conformité DGI à sécuriser avant toute commercialisation.**
 
 > **Addendum 2026-09-20 (soir) — suivi des correctifs.** Ce document reste tel qu'audité :
-> les constats ci-dessous ne sont pas réécrits a posteriori, par principe d'audit. Trois points
+> les constats ci-dessous ne sont pas réécrits a posteriori, par principe d'audit. Quatre points
 > ont depuis été corrigés et validés (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run`
 > 68/68, `vite build`) : le double modèle de stock (§2, §5 item 1), l'en-tête légal ICE/IF/RC/
-> Patente (§3.3, §5 item 2) et les 9 `.unwrap()` Rust sur chemins critiques (§3.2, §5 item 8).
+> Patente (§3.3, §5 item 2), les 9 `.unwrap()` Rust sur chemins critiques (§3.2, §5 item 8), et
+> la génération PDF facture/avoir (§2, §3.3 — absence de PDF signalée comme "aucune génération
+> PDF dans le projet") via `jsPDF` côté frontend + une commande `save_document_pdf` côté Rust.
 > Une CI GitHub Actions a aussi été ajoutée. Une erreur de cet audit a été identifiée en cours
 > de correction : la contrainte `UNIQUE` sur `code_barre` existait déjà (`db.rs:430`) — non
 > détectée initialement faute d'avoir cherché `CREATE INDEX` en plus de `CREATE TABLE`. L'état

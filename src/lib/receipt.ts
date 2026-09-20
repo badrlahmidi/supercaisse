@@ -1,5 +1,6 @@
 import { formatCurrency, formatDateTime } from "@/lib/utils"
 import { EscPosBuilder } from "./escpos"
+import { jsPDF } from "jspdf"
 
 export interface ReceiptData {
   shopName: string
@@ -15,6 +16,8 @@ export interface ReceiptData {
   shopIf?: string | null
   shopRc?: string | null
   shopPatente?: string | null
+  docType?: string
+  docNumero?: string | null
   items: Array<{
     designation: string
     quantite: number
@@ -28,6 +31,13 @@ export interface ReceiptData {
   netPaye: number
   modePaiement: string
   monnaie: number
+}
+
+const DOC_TITLES: Record<string, string> = {
+  facture: "FACTURE",
+  devis: "DEVIS",
+  bl: "BON DE LIVRAISON",
+  avoir: "AVOIR",
 }
 
 export function generateReceiptHTML(data: ReceiptData): string {
@@ -224,6 +234,133 @@ export function generateReceiptEscPos(data: ReceiptData): string {
     .openDrawer()
     
   return builder.toBase64()
+}
+
+export function generateFacturePdfBase64(data: ReceiptData): string {
+  const doc = new jsPDF({ unit: "mm", format: "a4" })
+  const pageWidth = doc.internal.pageSize.getWidth()
+  const marginX = 15
+  let y = 18
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(16)
+  doc.text(data.shopName, marginX, y)
+  y += 6
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(9)
+  if (data.shopAddress) { doc.text(data.shopAddress, marginX, y); y += 4.5 }
+  if (data.shopPhone) { doc.text(data.shopPhone, marginX, y); y += 4.5 }
+
+  const legalMentions = [
+    data.shopIce ? `ICE: ${data.shopIce}` : null,
+    data.shopIf ? `IF: ${data.shopIf}` : null,
+    data.shopRc ? `RC: ${data.shopRc}` : null,
+    data.shopPatente ? `Patente: ${data.shopPatente}` : null,
+  ].filter(Boolean).join("   ")
+  if (legalMentions) { doc.text(legalMentions, marginX, y); y += 4.5 }
+
+  const docTitle = DOC_TITLES[data.docType || "facture"] || "FACTURE"
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(14)
+  doc.text(docTitle, pageWidth - marginX, 18, { align: "right" })
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(10)
+  doc.text(`N° ${data.docNumero || `#${data.venteId}`}`, pageWidth - marginX, 25, { align: "right" })
+  doc.text(formatDateTime(data.date), pageWidth - marginX, 30, { align: "right" })
+
+  y = Math.max(y, 32) + 4
+  doc.setDrawColor(180)
+  doc.line(marginX, y, pageWidth - marginX, y)
+  y += 7
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(10)
+  doc.text("Client", marginX, y)
+  y += 5
+  doc.setFont("helvetica", "normal")
+  doc.text(data.client, marginX, y)
+  y += 4.5
+  if (data.clientIce) { doc.text(`ICE: ${data.clientIce}`, marginX, y); y += 4.5 }
+  doc.text(`Caissier: ${data.caissier}`, marginX, y)
+  y += 8
+
+  const colX = { designation: marginX, qte: 110, pu: 130, tva: 152, total: 170 }
+  doc.setFillColor(240, 240, 240)
+  doc.rect(marginX, y - 4.5, pageWidth - marginX * 2, 7, "F")
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(9)
+  doc.text("Désignation", colX.designation + 1, y)
+  doc.text("Qté", colX.qte, y, { align: "right" })
+  doc.text("PU TTC", colX.pu, y, { align: "right" })
+  doc.text("TVA", colX.tva, y, { align: "right" })
+  doc.text("Total TTC", colX.total, y, { align: "right" })
+  y += 6
+
+  doc.setFont("helvetica", "normal")
+  for (const item of data.items) {
+    if (y > 270) { doc.addPage(); y = 20 }
+    doc.text(item.designation.substring(0, 55), colX.designation + 1, y)
+    doc.text(String(item.quantite), colX.qte, y, { align: "right" })
+    doc.text(formatCurrency(item.prix_unitaire), colX.pu, y, { align: "right" })
+    doc.text(`${item.tva}%`, colX.tva, y, { align: "right" })
+    doc.text(formatCurrency(item.total_ligne), colX.total, y, { align: "right" })
+    y += 5.5
+  }
+
+  y += 2
+  doc.setDrawColor(180)
+  doc.line(marginX, y, pageWidth - marginX, y)
+  y += 7
+
+  const totalsX = pageWidth - marginX
+  doc.setFontSize(9)
+  doc.text("Sous-total TTC", totalsX - 45, y)
+  doc.text(formatCurrency(data.montantTotal), totalsX, y, { align: "right" })
+  y += 5
+  if (data.montantRemise > 0) {
+    doc.text("Remise", totalsX - 45, y)
+    doc.text(`-${formatCurrency(data.montantRemise)}`, totalsX, y, { align: "right" })
+    y += 5
+  }
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(11)
+  doc.text("Net à payer", totalsX - 45, y)
+  doc.text(formatCurrency(data.netPaye), totalsX, y, { align: "right" })
+  y += 8
+
+  const tvaBreakdown = data.items.reduce((acc, item) => {
+    if (item.tva > 0) {
+      const baseLigne = item.total_ligne / (1 + item.tva / 100)
+      acc[item.tva] = (acc[item.tva] || 0) + (item.total_ligne - baseLigne)
+    }
+    return acc
+  }, {} as Record<number, number>)
+
+  if (Object.keys(tvaBreakdown).length > 0) {
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(9)
+    doc.text("Ventilation TVA", marginX, y)
+    y += 5
+    doc.setFont("helvetica", "normal")
+    for (const [taux, montant] of Object.entries(tvaBreakdown)) {
+      doc.text(`TVA ${taux}% : ${formatCurrency(montant)}`, marginX, y)
+      y += 4.5
+    }
+  }
+
+  doc.setFontSize(8)
+  doc.setTextColor(120)
+  doc.text(data.receiptFooter, marginX, 285)
+
+  return doc.output("datauristring").split(",")[1]
+}
+
+export async function saveFacturePdf(data: ReceiptData): Promise<string> {
+  const { invoke } = await import("@/lib/tauri")
+  const base64Data = generateFacturePdfBase64(data)
+  const filename = `${data.docType || "facture"}_${data.docNumero || data.venteId}`
+  return invoke<string>("save_document_pdf", { base64Data, filename })
 }
 
 export async function printViaTauri(data: ReceiptData) {
