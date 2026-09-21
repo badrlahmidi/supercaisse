@@ -1483,14 +1483,21 @@ pub fn get_stats(db: State<DbState>) -> Result<serde_json::Value, String> {
 pub fn print_ticket(texte: String) -> Result<(), String> {
     let path = std::env::temp_dir().join("ticket_impression.txt");
     std::fs::write(&path, &texte).map_err(|e| format!("Erreur écriture ticket: {}", e))?;
-    let path_str = path.to_string_lossy().replace("'", "''");
-    let ps = format!(
-        "Start-Process -FilePath 'notepad.exe' -ArgumentList '/p', '{}' -WindowStyle Hidden -Wait",
-        path_str
-    );
-    let _ = std::process::Command::new("powershell")
-        .args(["-NonInteractive", "-Command", &ps])
-        .output();
+
+    if cfg!(target_os = "windows") {
+        let path_str = path.to_string_lossy().replace("'", "''");
+        let ps = format!(
+            "Start-Process -FilePath 'notepad.exe' -ArgumentList '/p', '{}' -WindowStyle Hidden -Wait",
+            path_str
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NonInteractive", "-Command", &ps])
+            .output();
+    } else {
+        let _ = std::process::Command::new("lp")
+            .arg(path.to_string_lossy().as_ref())
+            .output();
+    }
     Ok(())
 }
 
@@ -1499,37 +1506,46 @@ pub fn print_escpos(db: State<DbState>, base64_data: String) -> Result<(), Strin
     let printer_name: String = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row("SELECT value FROM settings WHERE key = 'printer_name'", [], |r| r.get(0))
-            .unwrap_or_else(|_| "POS-80".to_string()) // Imprimante par défaut
+            .unwrap_or_else(|_| "POS-80".to_string())
     };
-    
-    // Décoder la trame base64 (générée par le frontend)
+
     let bytes = general_purpose::STANDARD.decode(base64_data)
         .map_err(|e| format!("Erreur de décodage base64: {}", e))?;
-    
+
     let path = std::env::temp_dir().join("ticket_escpos.bin");
     std::fs::write(&path, &bytes).map_err(|e| format!("Erreur d'écriture du flux binaire: {}", e))?;
-    
+
     let path_str = path.to_string_lossy().to_string();
-    
-    // L'imprimante doit être partagée ou définie comme "\\localhost\NOM"
-    let printer_path = if printer_name.starts_with("\\\\") {
-        printer_name.clone()
+
+    if cfg!(target_os = "windows") {
+        let printer_path = if printer_name.starts_with("\\\\") {
+            printer_name.clone()
+        } else {
+            format!("\\\\localhost\\{}", printer_name)
+        };
+        let args = format!("COPY /B \"{}\" \"{}\"", path_str, printer_path);
+        let output = std::process::Command::new("cmd")
+            .args(["/c", &args])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Erreur d'impression ESC/POS: {}", err));
+        }
+    } else if printer_name.starts_with("/dev/") {
+        std::fs::write(&printer_name, &bytes)
+            .map_err(|e| format!("Erreur écriture vers {}: {}", printer_name, e))?;
     } else {
-        format!("\\\\localhost\\{}", printer_name)
-    };
-    
-    // Envoi des octets bruts directement au Spooler Windows via COPY /B
-    let args = format!("COPY /B \"{}\" \"{}\"", path_str, printer_path);
-    let output = std::process::Command::new("cmd")
-        .args(["/c", &args])
-        .output()
-        .map_err(|e| e.to_string())?;
-        
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Erreur d'impression ESC/POS native: {}", err));
+        let output = std::process::Command::new("lp")
+            .args(["-d", &printer_name, "-o", "raw", &path_str])
+            .output()
+            .map_err(|e| format!("Erreur lp: {}", e))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Erreur d'impression ESC/POS: {}", err));
+        }
     }
-    
+
     Ok(())
 }
 
@@ -1876,13 +1892,24 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
 pub fn print_receipt(data: String) -> Result<(), String> {
     let path = std::env::temp_dir().join("ticket_impression.html");
     std::fs::write(&path, &data).map_err(|e| format!("Erreur écriture ticket: {}", e))?;
-    let ps = format!(
-        "Start-Process -FilePath '{}' -WindowStyle Normal -Wait",
-        path.to_string_lossy().replace("'", "''")
-    );
-    let _ = std::process::Command::new("powershell")
-        .args(["-Command", &ps])
-        .output();
+
+    if cfg!(target_os = "windows") {
+        let ps = format!(
+            "Start-Process -FilePath '{}' -WindowStyle Normal -Wait",
+            path.to_string_lossy().replace("'", "''")
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-Command", &ps])
+            .output();
+    } else if cfg!(target_os = "macos") {
+        let _ = std::process::Command::new("open")
+            .arg(path.to_string_lossy().as_ref())
+            .output();
+    } else {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(path.to_string_lossy().as_ref())
+            .output();
+    }
     Ok(())
 }
 

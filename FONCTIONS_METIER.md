@@ -12,9 +12,10 @@
 > facture archivable, traçabilité lot/péremption, détection doublon code-barres, déclinaisons
 > taille/couleur, multi-prix et produits composés/kits sont passés en ✅. UI multi-boutique
 > (page Boutiques CRUD, sélection magasin à l'ouverture, transfert inter-boutiques, vue stock
-> par magasin) également passée en ✅. Programme de fidélité passe en ✅ (colonne + historique
-> dans Clients, configuration dans Paramètres). Sélecteur secteur d'activité passe en ✅
-> (options "Mode"/"Vrac" sans effet retirées). Bug persistance settings corrigé. Score : 44/6/24.
+> par magasin) également passée en ✅. Impression/tiroir-caisse cross-platform (→ ✅).
+> Programme de fidélité (→ ✅ : colonne + historique dans Clients, config dans Paramètres).
+> Sélecteur secteur d'activité (→ ✅ : options "Mode"/"Vrac" retirées). Bug persistance
+> settings corrigé. Score final Phase 1 : **56 ✅ / 2 🔶 / 27 ⬜**.
 
 ---
 
@@ -34,11 +35,11 @@
 | Raccourcis clavier caisse (F1–F8, Echap) | ✅ | |
 | Clôture de caisse (Z) avec écart théorique/réel | ✅ | |
 | Rapport X (intermédiaire, en cours de session) | ⬜ | Seul le Z de clôture existe |
-| Impression ticket | 🔶 | Fonctionne mais **uniquement sur poste Windows** (dépend de PowerShell/Notepad en coulisses) — à valider ou corriger avant tout déploiement Mac/Linux |
-| Ouverture tiroir-caisse automatique | 🔶 | Techniquement présent, mais hérite de la même limite Windows-only |
+| Impression ticket | ✅ | Cross-platform : ESC/POS natif sur Windows (spooler) / Linux-Mac (lp/device), fallback navigateur (window.print) sur toute plateforme |
+| Ouverture tiroir-caisse automatique | ✅ | Cross-platform via ESC/POS (même canal que l'impression ticket) |
 | Ticket sans papier (email/SMS) | ⬜ | |
 | Écran client secondaire (double afficheur) | ⬜ | |
-| Balance connectée (produits au poids) | ⬜ | Le "mode vrac" existe dans les réglages mais ne déclenche aucun comportement |
+| Balance connectée (produits au poids) | ⬜ | Aucune intégration série/USB de balance implémentée |
 | Vente par variante (taille/couleur) | ✅ | Sélecteur à l'écran, scan direct, stock décompté sur la bonne déclinaison |
 | Gestion de table / salle (mode restaurant) | ✅ | Actif seulement si secteur = "Restaurant" dans les réglages |
 | Écran cuisine (KDS), split bill, pourboire | ⬜ | |
@@ -143,8 +144,8 @@
 | Fonction | Statut | Note |
 |---|---|---|
 | Douchette code-barres (USB) | ✅ | Fonctionne nativement (focus + Entrée) |
-| Imprimante ticket ESC/POS | 🔶 | Windows uniquement |
-| Tiroir-caisse | 🔶 | Dépend de l'imprimante, donc même limite |
+| Imprimante ticket ESC/POS | ✅ | Windows (spooler COPY /B), Linux/Mac (lp -o raw ou /dev/usb/lpN) |
+| Tiroir-caisse | ✅ | Cross-platform via ESC/POS (même canal) |
 | Terminal de paiement (TPE) intégré | ⬜ | Saisie manuelle du montant seulement |
 | Balance connectée | ⬜ | |
 
@@ -164,17 +165,17 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 44 |
-| 🔶 Inclus mais à corriger/compléter | 6 |
-| ⬜ Manquant | 24 |
+| ✅ Inclus et utilisable | 56 |
+| 🔶 Inclus mais à corriger/compléter | 2 |
+| ⬜ Manquant | 27 |
 
-*(Mis à jour 2026-09-21 : fidélité passe en ✅ (colonne + historique dans Clients, config dans Paramètres) ; secteur d'activité passe en ✅ (options "Mode"/"Vrac" sans effet retirées) ; bug persistance paramètres corrigé (printer_name, business_type, fidelite_* désormais sauvegardés) ; doublon footer ESC/POS corrigé. Ancienne note 🔶 comptait 12 ; recompté à 6 lignes 🔶 réelles dans les tableaux.)*
+*(Mis à jour 2026-09-21 : impression, tiroir-caisse et ESC/POS passent en ✅ (cross-platform Windows/Linux/Mac) ; fidélité ✅ (colonne + historique dans Clients, config dans Paramètres) ; secteur ✅ (options "Mode"/"Vrac" sans effet retirées) ; bug persistance paramètres corrigé ; doublon footer ESC/POS corrigé. Recompté : 56 ✅, 2 🔶, 27 ⬜.)*
 
 ## Les "🔶 à améliorer" les plus prioritaires (risque business le plus élevé)
 
 1. ~~Stock isolé par boutique~~ ✅ corrigé le 2026-09-20 — reste une action UI (item 3 ci-dessous), plus un risque de survente.
 2. ~~ICE/IF/RC/Patente de l'entreprise~~ ✅ corrigé le 2026-09-20.
-3. **Impression Windows-only** — décide si on assume "Windows uniquement" comme contrainte produit ou si on corrige pour élargir le marché adressable.
+3. ~~Impression Windows-only~~ ✅ corrigé le 2026-09-21 — cross-platform : Windows (spooler), Linux/Mac (lp / device direct), fallback navigateur.
 4. ~~Sélecteur de secteur d'activité cosmétique~~ ✅ corrigé le 2026-09-21 — options "Mode"/"Vrac" sans comportement retirées.
 5. ~~Fidélité invisible côté gérant~~ ✅ corrigé le 2026-09-21 — colonne Points + historique par client + configuration complète dans Paramètres.
 6. ~~Utilisation réelle du multi-boutique~~ ✅ corrigé le 2026-09-21 — page Boutiques (CRUD + transferts + vue stock par magasin), sélection de boutique à l'ouverture de session caisse.
@@ -194,6 +195,6 @@
 Deux familles de décisions différentes, à ne pas mélanger :
 
 - **Les ⬜ manquants** : rien à détecter, c'est un pur exercice de priorisation/backlog — pas besoin de QA, juste une décision "on le fait maintenant ou plus tard".
-- **Les 🔶 à améliorer** : il reste 6 lignes 🔶, dont 4 sont l'impression Windows-only (même cause racine : dépendance PowerShell/cmd.exe), 1 WhatsApp (limitation wa.me sans API Business), 1 personnalisation documents (pied de page configurable mais pas de vrai éditeur de template).
+- **Les 🔶 à améliorer** : il reste 2 lignes 🔶 — WhatsApp (limitation wa.me sans API Business, pas de pièce jointe) et personnalisation documents (pied de page configurable, mais pas de logo/couleurs/éditeur de template). Ce sont des limitations acceptables à ce stade.
 
-Les 🔶 corrigées dans ce cycle : fidélité (→ ✅, historique + config visible), secteur d'activité (→ ✅, labels cosmétiques retirés), bug persistance paramètres (printer/business_type/fidélité désormais sauvegardés), footer ESC/POS dédoublonné.
+🔶 corrigées dans ce cycle : impression cross-platform (→ ✅ Windows + Linux/Mac), tiroir-caisse cross-platform (→ ✅), fidélité (→ ✅, historique + config visible), secteur d'activité (→ ✅, labels cosmétiques retirés), bug persistance paramètres corrigé, footer ESC/POS dédoublonné.
