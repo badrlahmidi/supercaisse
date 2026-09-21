@@ -151,6 +151,12 @@ pub struct Settings {
     pub default_tva: f64,
     pub receipt_footer: Option<String>,
     pub currency: String,
+    pub printer_name: Option<String>,
+    pub fidelite_actif: Option<String>,
+    pub fidelite_dh_pour_1_point: Option<String>,
+    pub fidelite_valeur_1_point: Option<String>,
+    pub business_type: Option<String>,
+    pub idle_timeout: Option<String>,
 }
 
 pub struct DbState {
@@ -391,6 +397,17 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             stock_dedie REAL DEFAULT 0,
             FOREIGN KEY (article_id) REFERENCES articles(id)
         );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            utilisateur_id INTEGER,
+            action TEXT NOT NULL,
+            detail TEXT,
+            reference_type TEXT,
+            reference_id INTEGER,
+            FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id)
+        );
     ")?;
 
     // Ajout des colonnes pour la migration des bases existantes
@@ -401,7 +418,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     // Configuration par défaut de la fidélité si elle n'existe pas
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_actif', 'true')", [])?;
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_dh_pour_1_point', '100')", [])?; // Dépenser 100 DH donne 1 point
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_valeur_1_point', '1')", [])?; // 1 point = 1 DH de réduction
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_valeur_1_point', '1')", [])?;
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('idle_timeout', '300')", [])?;
 
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN image_url TEXT", []);
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN numero_facture TEXT", []);
@@ -483,6 +501,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_paiements_client ON paiements(client_id);
         CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_caisse(date);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_code_barre_unique ON articles(code_barre) WHERE code_barre IS NOT NULL AND code_barre != '';
+        CREATE INDEX IF NOT EXISTS idx_audit_log_date ON audit_log(date);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
     ")?;
 
     // Migration du stock existant vers le "Magasin Principal"

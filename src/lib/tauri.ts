@@ -85,6 +85,7 @@ interface Settings {
   fidelite_actif: string
   fidelite_dh_pour_1_point: string
   fidelite_valeur_1_point: string
+  idle_timeout: string
 }
 
 interface SessionCaisse {
@@ -171,6 +172,7 @@ const mockSettings: Settings = {
   fidelite_actif: "true",
   fidelite_dh_pour_1_point: "100",
   fidelite_valeur_1_point: "1",
+  idle_timeout: "300",
 }
 
 let nextId = 100
@@ -339,6 +341,9 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
 
   // Fidélité
   get_mouvements_fidelite: () => [],
+  get_rapport_x: () => ({ session_id: 1, date_ouverture: new Date().toISOString(), fond_initial: 0, nb_ventes: 0, ca_total: 0, total_remises: 0, nb_annulations: 0, nb_articles_vendus: 0, par_mode: [] }),
+  get_releve_client: () => ({ client_id: 1, nom: "Client", credit_actuel: 0, credit_plafond: 0, ventes: [], paiements: [] }),
+  get_audit_log: () => [],
 
   // Stock movements
   get_mouvements_stock: () => [],

@@ -31,6 +31,13 @@ fn adjust_article_stock(conn: &Connection, article_id: i64, magasin_id: i64, del
     Ok(())
 }
 
+fn log_audit(conn: &Connection, utilisateur_id: Option<i64>, action: &str, detail: &str, reference_type: Option<&str>, reference_id: Option<i64>) {
+    let _ = conn.execute(
+        "INSERT INTO audit_log (utilisateur_id, action, detail, reference_type, reference_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![utilisateur_id, action, detail, reference_type, reference_id],
+    );
+}
+
 // ─── Auth ───
 
 #[tauri::command]
@@ -267,12 +274,23 @@ pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: 
     categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>,
     prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let effective_code_barre = match &code_barre {
+        Some(cb) if !cb.trim().is_empty() => code_barre.clone(),
+        _ => None,
+    };
     conn.execute(
         "INSERT INTO articles (code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot, prix_grossiste, est_kit)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32],
+        params![effective_code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32],
     ).map_err(|e| e.to_string())?;
     let article_id = conn.last_insert_rowid();
+    if effective_code_barre.is_none() {
+        let auto_barcode = format!("INT-{:06}", article_id);
+        conn.execute(
+            "UPDATE articles SET code_barre = ?1 WHERE id = ?2",
+            params![auto_barcode, article_id],
+        ).map_err(|e| e.to_string())?;
+    }
     if stock != 0.0 {
         let magasin_id = default_magasin_id(&conn)?;
         adjust_article_stock(&conn, article_id, magasin_id, stock)?;
@@ -286,17 +304,38 @@ pub fn update_article(db: State<DbState>, id: i64, code_barre: Option<String>, d
     categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>,
     prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let old: Option<(f64, f64, String)> = conn.query_row(
+        "SELECT prix_vente, prix_achat, designation FROM articles WHERE id = ?1", params![id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    ).ok();
     conn.execute(
         "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12, prix_grossiste=?13, est_kit=?14 WHERE id=?15",
         params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32, id],
     ).map_err(|e| e.to_string())?;
+    if let Some((old_pv, old_pa, old_name)) = old {
+        let mut changes = Vec::new();
+        if (old_pv - prix_vente).abs() > 0.001 { changes.push(format!("prix vente: {:.2} → {:.2}", old_pv, prix_vente)); }
+        if (old_pa - prix_achat).abs() > 0.001 { changes.push(format!("prix achat: {:.2} → {:.2}", old_pa, prix_achat)); }
+        if old_name != designation { changes.push(format!("nom: {} → {}", old_name, designation)); }
+        if !changes.is_empty() {
+            log_audit(&conn, None, "modifier_article",
+                &format!("{} (ID {}) — {}", designation, id, changes.join(", ")),
+                Some("article"), Some(id));
+        }
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub fn delete_article(db: State<DbState>, id: i64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let designation: String = conn.query_row(
+        "SELECT designation FROM articles WHERE id = ?1", params![id], |r| r.get(0)
+    ).unwrap_or_else(|_| format!("ID {}", id));
     conn.execute("DELETE FROM articles WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    log_audit(&conn, None, "supprimer_article",
+        &format!("Suppression article: {} (ID {})", designation, id),
+        Some("article"), Some(id));
     Ok(())
 }
 
@@ -811,7 +850,16 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
         }
     }
 
+    let numero_facture: Option<String> = tx.query_row(
+        "SELECT numero_facture FROM ventes WHERE id = ?1", params![vente_id], |r| r.get(0)
+    ).ok();
+    let montant: f64 = tx.query_row(
+        "SELECT montant_total FROM ventes WHERE id = ?1", params![vente_id], |r| r.get(0)
+    ).unwrap_or(0.0);
     tx.execute("UPDATE ventes SET statut = 'annulee' WHERE id = ?1", params![vente_id]).map_err(|e| e.to_string())?;
+    log_audit(&tx, None, "annuler_vente",
+        &format!("Annulation vente #{} ({}) - Montant: {:.2}", vente_id, numero_facture.unwrap_or_default(), montant),
+        Some("vente"), Some(vente_id));
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1847,6 +1895,12 @@ pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
         default_tva: map.get("default_tva").and_then(|v| v.parse::<f64>().ok()).unwrap_or(20.0),
         receipt_footer: map.get("receipt_footer").filter(|s| !s.is_empty()).cloned(),
         currency: map.get("currency").cloned().unwrap_or_else(|| "MAD".to_string()),
+        printer_name: map.get("printer_name").filter(|s| !s.is_empty()).cloned(),
+        fidelite_actif: map.get("fidelite_actif").cloned(),
+        fidelite_dh_pour_1_point: map.get("fidelite_dh_pour_1_point").cloned(),
+        fidelite_valeur_1_point: map.get("fidelite_valeur_1_point").cloned(),
+        business_type: map.get("business_type").cloned(),
+        idle_timeout: map.get("idle_timeout").cloned(),
     })
 }
 
@@ -1857,7 +1911,8 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
     receipt_footer: Option<String>, currency: String,
     printer_name: Option<String>, business_type: Option<String>,
     fidelite_actif: Option<String>, fidelite_dh_pour_1_point: Option<String>,
-    fidelite_valeur_1_point: Option<String>) -> Result<(), String> {
+    fidelite_valeur_1_point: Option<String>,
+    idle_timeout: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let pairs: Vec<(&str, String)> = vec![
         ("shop_name", shop_name),
@@ -1876,6 +1931,7 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
         ("fidelite_actif", fidelite_actif.unwrap_or_else(|| "true".to_string())),
         ("fidelite_dh_pour_1_point", fidelite_dh_pour_1_point.unwrap_or_else(|| "100".to_string())),
         ("fidelite_valeur_1_point", fidelite_valeur_1_point.unwrap_or_else(|| "1".to_string())),
+        ("idle_timeout", idle_timeout.unwrap_or_else(|| "300".to_string())),
     ];
     for (key, value) in pairs {
         conn.execute(
@@ -1883,6 +1939,7 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
             params![key, value],
         ).map_err(|e| e.to_string())?;
     }
+    log_audit(&conn, None, "modifier_parametres", "Mise à jour des paramètres boutique", None, None);
     Ok(())
 }
 
@@ -1999,6 +2056,153 @@ pub fn get_mouvements_fidelite(db: State<DbState>, client_id: i64) -> Result<Vec
             "mtype": row.get::<_, String>(4)?,
             "date": row.get::<_, String>(5)?,
             "numero_facture": row.get::<_, Option<String>>(6)?
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+// ─── Rapport X (intermédiaire) ───
+
+#[tauri::command]
+pub fn get_rapport_x(db: State<DbState>, session_id: i64) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let (date_ouverture, fond_initial): (String, f64) = conn.query_row(
+        "SELECT date_ouverture, fond_initial FROM sessions_caisse WHERE id = ?1",
+        params![session_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|_| "Session introuvable".to_string())?;
+
+    let nb_ventes: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0);
+
+    let ca_total: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(montant_total - montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0.0);
+
+    let total_remises: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0.0);
+
+    let nb_annulations: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ventes WHERE session_id = ?1 AND statut = 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0);
+
+    let nb_articles_vendus: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(va.quantite), 0) FROM vente_articles va JOIN ventes v ON v.id = va.vente_id WHERE v.session_id = ?1 AND v.statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0.0);
+
+    let mut stmt = conn.prepare(
+        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee' GROUP BY mode_paiement"
+    ).map_err(|e| e.to_string())?;
+    let par_mode = stmt.query_map(params![session_id], |r| {
+        Ok(serde_json::json!({
+            "mode": r.get::<_, String>(0)?,
+            "total": r.get::<_, f64>(1)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "session_id": session_id,
+        "date_ouverture": date_ouverture,
+        "fond_initial": fond_initial,
+        "nb_ventes": nb_ventes,
+        "ca_total": ca_total,
+        "total_remises": total_remises,
+        "nb_annulations": nb_annulations,
+        "nb_articles_vendus": nb_articles_vendus,
+        "par_mode": par_mode,
+    }))
+}
+
+// ─── Relevé client ───
+
+#[tauri::command]
+pub fn get_releve_client(db: State<DbState>, client_id: i64) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let (nom, credit_actuel, credit_plafond): (String, f64, f64) = conn.query_row(
+        "SELECT nom, COALESCE(credit_actuel, 0), COALESCE(credit_plafond, 0) FROM clients WHERE id = ?1",
+        params![client_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).map_err(|_| "Client introuvable".to_string())?;
+
+    let mut stmt = conn.prepare(
+        "SELECT v.id, v.date, v.numero_facture, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.dtype
+         FROM ventes v WHERE v.client_id = ?1
+         ORDER BY v.date DESC LIMIT 200"
+    ).map_err(|e| e.to_string())?;
+    let ventes = stmt.query_map(params![client_id], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "date": r.get::<_, String>(1)?,
+            "numero_facture": r.get::<_, Option<String>>(2)?,
+            "montant_total": r.get::<_, f64>(3)?,
+            "montant_remise": r.get::<_, f64>(4)?,
+            "mode_paiement": r.get::<_, String>(5)?,
+            "statut": r.get::<_, String>(6)?,
+            "dtype": r.get::<_, Option<String>>(7)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let mut stmt2 = conn.prepare(
+        "SELECT p.id, p.date, p.montant, p.type, p.reference
+         FROM paiements p WHERE p.client_id = ?1
+         ORDER BY p.date DESC LIMIT 200"
+    ).map_err(|e| e.to_string())?;
+    let paiements = stmt2.query_map(params![client_id], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "date": r.get::<_, String>(1)?,
+            "montant": r.get::<_, f64>(2)?,
+            "type": r.get::<_, String>(3)?,
+            "reference": r.get::<_, Option<String>>(4)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "client_id": client_id,
+        "nom": nom,
+        "credit_actuel": credit_actuel,
+        "credit_plafond": credit_plafond,
+        "ventes": ventes,
+        "paiements": paiements,
+    }))
+}
+
+// ─── Journal d'audit ───
+
+#[tauri::command]
+pub fn get_audit_log(db: State<DbState>, debut: Option<String>, fin: Option<String>, action_filter: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut where_clause = String::new();
+    let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if let Some(d) = &debut { if !d.is_empty() { where_clause.push_str(" AND a.date >= ?"); qp.push(Box::new(d.clone())); } }
+    if let Some(f) = &fin { if !f.is_empty() { where_clause.push_str(" AND a.date <= ?"); qp.push(Box::new(f.clone())); } }
+    if let Some(af) = &action_filter { if !af.is_empty() { where_clause.push_str(" AND a.action = ?"); qp.push(Box::new(af.clone())); } }
+    let sql = format!(
+        "SELECT a.id, a.date, a.utilisateur_id, a.action, a.detail, a.reference_type, a.reference_id, u.nom as user_nom
+         FROM audit_log a LEFT JOIN utilisateurs u ON a.utilisateur_id = u.id
+         WHERE 1=1 {} ORDER BY a.date DESC LIMIT 500", where_clause
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let pr: Vec<&dyn rusqlite::types::ToSql> = qp.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(pr.as_slice(), |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "date": row.get::<_, String>(1)?,
+            "utilisateur_id": row.get::<_, Option<i64>>(2)?,
+            "action": row.get::<_, String>(3)?,
+            "detail": row.get::<_, Option<String>>(4)?,
+            "reference_type": row.get::<_, Option<String>>(5)?,
+            "reference_id": row.get::<_, Option<i64>>(6)?,
+            "user_nom": row.get::<_, Option<String>>(7)?,
         }))
     }).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())

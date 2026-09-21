@@ -5,12 +5,14 @@ import { Button } from "@/ui/Button"
 import { Menu } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Sidebar from "./Sidebar"
+import IdleLock from "./IdleLock"
 
 export default function Layout() {
   const { sidebarCollapsed } = useUIStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   return (
+    <IdleLock>
     <div className="flex h-screen bg-background">
       <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
 
@@ -37,5 +39,6 @@ export default function Layout() {
         </div>
       </main>
     </div>
+    </IdleLock>
   )
 }

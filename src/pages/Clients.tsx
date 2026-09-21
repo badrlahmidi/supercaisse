@@ -11,11 +11,11 @@ import { Textarea } from "@/ui/Textarea"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, Download, SearchX, DollarSign, MessageCircle, Star, History } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, Download, SearchX, DollarSign, MessageCircle, Star, History, FileText } from "lucide-react"
 import { Badge } from "@/ui/Badge"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import { formatCurrency, exportCSV } from "@/lib/utils"
+import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
 
 interface Client {
@@ -39,6 +39,15 @@ interface MouvementFidelite {
   mtype: "gain" | "depense"
   date: string
   numero_facture: string | null
+}
+
+interface ReleveClient {
+  client_id: number
+  nom: string
+  credit_actuel: number
+  credit_plafond: number
+  ventes: { id: number; date: string; numero_facture: string; montant_total: number; mode_paiement: string; statut: string }[]
+  paiements: { id: number; date: string; montant: number; type_paiement: string; reference: string | null }[]
 }
 
 const clientSchema = z.object({
@@ -78,9 +87,44 @@ export default function Clients() {
   }
 
   const [deleteConfirm, setDeleteConfirm] = useState<Client | null>(null)
+  const [releveClient, setReleveClient] = useState<Client | null>(null)
+  const [releveData, setReleveData] = useState<ReleveClient | null>(null)
+  const [releveLoading, setReleveLoading] = useState(false)
   const [loyaltyClient, setLoyaltyClient] = useState<Client | null>(null)
   const [loyaltyHistory, setLoyaltyHistory] = useState<MouvementFidelite[]>([])
   const [loyaltyLoading, setLoyaltyLoading] = useState(false)
+
+  const openReleve = async (client: Client) => {
+    setReleveClient(client)
+    setReleveLoading(true)
+    try {
+      const data = await invoke<ReleveClient>("get_releve_client", { clientId: client.id })
+      setReleveData(data)
+    } catch {
+      setReleveData(null)
+    } finally {
+      setReleveLoading(false)
+    }
+  }
+
+  const exportReleveCSV = () => {
+    if (!releveData || !releveClient) return
+    const header = "Type,Date,Référence,Montant,Mode"
+    const venteRows = releveData.ventes.map(v =>
+      `"Vente","${v.date}","${v.numero_facture}","${v.montant_total}","${v.mode_paiement}"`
+    )
+    const paiementRows = releveData.paiements.map(p =>
+      `"Paiement","${p.date}","${p.reference || ""}","${p.montant}","${p.type_paiement}"`
+    )
+    const csv = [header, ...venteRows, ...paiementRows].join("\n")
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `releve_${releveClient.nom.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const openLoyaltyHistory = async (client: Client) => {
     setLoyaltyClient(client)
@@ -229,6 +273,9 @@ export default function Clients() {
                       <div className="flex items-center gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openEdit(client)}>
                           <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => openReleve(client)} title="Relevé de compte">
+                          <FileText className="h-4 w-4 text-blue-500" />
                         </Button>
                         {client.points_fidelite != null && client.points_fidelite > 0 && (
                           <Button variant="ghost" size="icon" onClick={() => openLoyaltyHistory(client)} title="Historique fidélité">
@@ -491,6 +538,97 @@ export default function Clients() {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!releveClient} onOpenChange={() => { setReleveClient(null); setReleveData(null) }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Relevé de compte — {releveClient?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          {releveLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : releveData ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Crédit actuel : </span>
+                  <span className={releveData.credit_actuel > 0 ? "font-bold text-destructive" : "font-bold"}>
+                    {formatCurrency(releveData.credit_actuel)}
+                  </span>
+                  {releveData.credit_plafond > 0 && (
+                    <span className="text-muted-foreground"> / {formatCurrency(releveData.credit_plafond)}</span>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={exportReleveCSV}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+              </div>
+
+              {releveData.ventes.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Ventes ({releveData.ventes.length})</p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Facture</TableHead>
+                        <TableHead>Mode</TableHead>
+                        <TableHead className="text-right">Montant</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {releveData.ventes.map((v) => (
+                        <TableRow key={v.id}>
+                          <TableCell className="text-xs">{formatDate(v.date)}</TableCell>
+                          <TableCell className="font-mono text-xs">{v.numero_facture}</TableCell>
+                          <TableCell className="text-xs capitalize">{v.mode_paiement}</TableCell>
+                          <TableCell className="text-right font-medium">{formatCurrency(v.montant_total)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {releveData.paiements.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Paiements ({releveData.paiements.length})</p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Référence</TableHead>
+                        <TableHead className="text-right">Montant</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {releveData.paiements.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-xs">{formatDate(p.date)}</TableCell>
+                          <TableCell className="text-xs capitalize">{p.type_paiement}</TableCell>
+                          <TableCell className="text-xs">{p.reference || "—"}</TableCell>
+                          <TableCell className="text-right font-medium text-green-600">{formatCurrency(p.montant)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {releveData.ventes.length === 0 && releveData.paiements.length === 0 && (
+                <p className="text-center py-8 text-muted-foreground">Aucune transaction enregistrée</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-center py-8 text-muted-foreground">Erreur de chargement</p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

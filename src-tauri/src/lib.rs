@@ -100,6 +100,9 @@ pub fn run() {
             commands::get_tables,
             commands::update_table_status,
             commands::get_mouvements_fidelite,
+            commands::get_rapport_x,
+            commands::get_releve_client,
+            commands::get_audit_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

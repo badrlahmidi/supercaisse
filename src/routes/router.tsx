@@ -21,6 +21,7 @@ const JournalCaisse = lazy(() => import("@/pages/JournalCaisse"))
 const Magasins = lazy(() => import("@/pages/Magasins"))
 const Settings = lazy(() => import("@/pages/Settings"))
 const Cheques = lazy(() => import("@/pages/Cheques"))
+const AuditLog = lazy(() => import("@/pages/AuditLog"))
 
 function AuthLayout({ children }: { children?: ReactNode }) {
   return (
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
           { path: "journal", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><JournalCaisse /></ProtectedRoute></SuspensePage> },
           { path: "cheques", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Cheques /></ProtectedRoute></SuspensePage> },
           { path: "magasins", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Magasins /></ProtectedRoute></SuspensePage> },
+          { path: "audit", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><AuditLog /></ProtectedRoute></SuspensePage> },
           { path: "settings", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Settings /></ProtectedRoute></SuspensePage> },
         ],
       },

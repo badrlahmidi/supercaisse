@@ -13,7 +13,7 @@ import { Button } from "@/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
-import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee, Store } from "lucide-react"
+import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee, Store, BarChart3 } from "lucide-react"
 import { formatCurrency, cn } from "@/lib/utils"
 import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -48,6 +48,18 @@ interface ArticleVariante {
 interface Category {
   id: number
   nom: string
+}
+
+interface RapportX {
+  session_id: number
+  date_ouverture: string
+  fond_initial: number
+  nb_ventes: number
+  ca_total: number
+  total_remises: number
+  nb_annulations: number
+  nb_articles_vendus: number
+  par_mode: { mode: string; total: number; count: number }[]
 }
 
 interface Client {
@@ -91,6 +103,7 @@ export default function POS() {
   const [documentType, setDocumentType] = useState<string>("facture")
   const [variantPickerArticle, setVariantPickerArticle] = useState<Article | null>(null)
   const [showVariantPicker, setShowVariantPicker] = useState(false)
+  const [showRapportX, setShowRapportX] = useState(false)
 
   const { data: currentSession, isLoading: isSessionLoading } = useCurrentSession(user?.id)
   const openSessionMutation = useOpenSession()
@@ -623,6 +636,16 @@ export default function POS() {
             >
               <Keyboard className="h-5 w-5" />
             </Button>
+            {currentSession && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowRapportX(true)}
+                title="Rapport X (résumé session)"
+              >
+                <BarChart3 className="h-5 w-5" />
+              </Button>
+            )}
           </div>
 
           {/* Category Pills & Table Badge */}
@@ -866,7 +889,95 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
+      <RapportXDialog
+        open={showRapportX}
+        onOpenChange={setShowRapportX}
+        sessionId={currentSession?.id}
+      />
+
       <Toaster />
     </div>
+  )
+}
+
+function RapportXDialog({ open, onOpenChange, sessionId }: { open: boolean; onOpenChange: (v: boolean) => void; sessionId?: number }) {
+  const { data: rapport, isLoading } = useQuery({
+    queryKey: ["rapport_x", sessionId],
+    queryFn: () => invoke<RapportX>("get_rapport_x", { sessionId }),
+    enabled: open && !!sessionId,
+  })
+
+  const MODE_LABELS: Record<string, string> = {
+    especes: "Espèces",
+    carte: "Carte bancaire",
+    cheque: "Chèque",
+    mixte: "Mixte",
+    credit: "Crédit",
+    virement: "Virement",
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5" />
+            Rapport X — Résumé de session
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : rapport ? (
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Ouverture : {new Date(rapport.date_ouverture).toLocaleString("fr-MA")}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold text-primary">{formatCurrency(rapport.ca_total)}</p>
+                <p className="text-xs text-muted-foreground">Chiffre d'affaires</p>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold">{rapport.nb_ventes}</p>
+                <p className="text-xs text-muted-foreground">Ventes</p>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold">{rapport.nb_articles_vendus}</p>
+                <p className="text-xs text-muted-foreground">Articles vendus</p>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold">{formatCurrency(rapport.fond_initial)}</p>
+                <p className="text-xs text-muted-foreground">Fond de caisse</p>
+              </div>
+            </div>
+            {rapport.par_mode.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Par mode de paiement</p>
+                <div className="space-y-1">
+                  {rapport.par_mode.map((m) => (
+                    <div key={m.mode} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-muted/50">
+                      <span>{MODE_LABELS[m.mode] || m.mode}</span>
+                      <span className="font-medium">{formatCurrency(m.total)} ({m.count})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-sm border-t pt-3">
+              <span className="text-muted-foreground">Remises</span>
+              <span className="font-medium text-amber-600">{formatCurrency(rapport.total_remises)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Annulations</span>
+              <span className="font-medium text-destructive">{rapport.nb_annulations}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-center py-8 text-muted-foreground">Aucune donnée de session</p>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

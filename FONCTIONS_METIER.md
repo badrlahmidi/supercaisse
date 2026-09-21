@@ -34,7 +34,7 @@
 | Mise en attente / reprise d'un ticket | ✅ | |
 | Raccourcis clavier caisse (F1–F8, Echap) | ✅ | |
 | Clôture de caisse (Z) avec écart théorique/réel | ✅ | |
-| Rapport X (intermédiaire, en cours de session) | ⬜ | Seul le Z de clôture existe |
+| Rapport X (intermédiaire, en cours de session) | ✅ | Dialog dans POS avec CA, nb ventes, articles vendus, ventilation par mode de paiement, remises, annulations |
 | Impression ticket | ✅ | Cross-platform : ESC/POS natif sur Windows (spooler) / Linux-Mac (lp/device), fallback navigateur (window.print) sur toute plateforme |
 | Ouverture tiroir-caisse automatique | ✅ | Cross-platform via ESC/POS (même canal que l'impression ticket) |
 | Ticket sans papier (email/SMS) | ⬜ | |
@@ -52,7 +52,7 @@
 | Import/export en masse (CSV) | ✅ | |
 | Désactivation d'article sans le supprimer | ✅ | |
 | Détection doublon code-barres | ✅ | Contrainte unique en base (corrige une erreur de l'audit initial, qui l'avait déclarée absente) |
-| Génération automatique de code-barres interne | ⬜ | |
+| Génération automatique de code-barres interne | ✅ | Format INT-{id:06} auto-généré si vide à la création |
 | Étiquettes code-barres imprimables (planches PDF) | ⬜ | |
 | Prix multiple (public / grossiste) | ✅ | Prix grossiste optionnel par article, bascule d'un clic sur la ligne du panier caisse |
 | Produits composés / kits | ✅ | Un kit vend normalement au scan ; le stock de chaque composant est décrémenté automatiquement au prorata |
@@ -91,7 +91,7 @@
 |---|---|---|
 | Fiche client (coordonnées, ICE, plafond crédit) | ✅ | |
 | Historique et enregistrement des paiements client | ✅ | |
-| Relevé de compte client exportable | ⬜ | |
+| Relevé de compte client exportable | ✅ | Dialog avec historique ventes + paiements, export CSV |
 | Programme de fidélité (points) | ✅ | Points calculés à la vente, affichés dans la page Clients (colonne + historique détaillé), configurables dans Paramètres (activer/désactiver, ratio DH/point, valeur point) ; reste ⬜ : paliers/récompenses automatiques |
 | Segmentation client / campagnes marketing | ⬜ | |
 | Relance / envoi facture par WhatsApp | 🔶 | Ouvre un lien WhatsApp pré-rempli avec détails facture — pas d'envoi automatique, pas de pièce jointe PDF (limitation WhatsApp Web) |
@@ -126,8 +126,8 @@
 | Restriction des écrans par rôle | ✅ | |
 | Mot de passe sécurisé (hash + sel) | ✅ | |
 | Permissions fines par module (voir/créer/modifier/exporter) | ⬜ | |
-| Journal d'audit (qui a fait quoi, quand) | ⬜ | Pas de traçabilité des annulations, remises exceptionnelles, changements de prix |
-| Verrouillage automatique après inactivité | ⬜ | |
+| Journal d'audit (qui a fait quoi, quand) | ✅ | Table audit_log + logging annulations/modifications/suppressions/paramètres + page admin filtrable + export CSV |
+| Verrouillage automatique après inactivité | ✅ | Configurable en secondes dans Paramètres > Système, overlay de déverrouillage par mot de passe |
 | PIN rapide de changement de caissier | ⬜ | |
 
 ## 9. Rapports & pilotage

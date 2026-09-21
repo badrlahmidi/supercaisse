@@ -63,6 +63,7 @@ const settingsSchema = z.object({
   fidelite_dh_pour_1_point: z.string().optional().default("100"),
   fidelite_valeur_1_point: z.string().optional().default("1"),
   business_type: z.enum(["standard", "restaurant"]).default("standard"),
+  idle_timeout: z.string().optional().default("300"),
 })
 
 type SettingsForm = z.infer<typeof settingsSchema>
@@ -495,6 +496,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="system" className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -503,19 +505,18 @@ export default function Settings() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Verrouillage automatique</p>
-                  <p className="text-sm text-muted-foreground">Verrouiller l'application après inactivité</p>
-                </div>
-                <Button variant="outline">Configurer</Button>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Journal d'audit</p>
-                  <p className="text-sm text-muted-foreground">Tracer toutes les actions sensibles</p>
-                </div>
-                <Button variant="outline">Voir les logs</Button>
+              <div className="space-y-2">
+                <Label htmlFor="idle_timeout">Délai de verrouillage automatique (secondes)</Label>
+                <p className="text-sm text-muted-foreground">L'application se verrouille après cette période d'inactivité. 0 = désactivé.</p>
+                <Input
+                  type="number"
+                  min="0"
+                  step="30"
+                  {...settingsForm.register("idle_timeout")}
+                  id="idle_timeout"
+                  className="max-w-[200px]"
+                  placeholder="300"
+                />
               </div>
             </CardContent>
           </Card>
@@ -547,6 +548,17 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={updateSettingsMutation.isPending}>
+              {updateSettingsMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enregistrement...</>
+              ) : (
+                "Enregistrer"
+              )}
+            </Button>
+          </div>
+          </form>
         </TabsContent>
 
         <TabsContent value="backup" className="space-y-6">
