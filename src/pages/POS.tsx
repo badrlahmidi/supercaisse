@@ -336,6 +336,7 @@ export default function POS() {
         tva: i.tva,
         remise_ligne: i.remise_ligne || 0,
         note: i.note || null,
+        prix_type: i.prix_type || "public",
       }))
       const isSplit = paymentSplits.length > 0
       const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)

@@ -21,6 +21,16 @@ interface Article {
   categorie_nom?: string
   fournisseur_nom?: string
   suivi_lot?: boolean
+  prix_grossiste?: number | null
+  est_kit?: boolean
+}
+
+interface ArticleComposant {
+  id: number
+  composant_id: number
+  designation: string
+  stock: number
+  quantite: number
 }
 
 interface ArticleLot {
@@ -113,6 +123,7 @@ interface ArticleVariante {
 }
 
 const mockVariantes: Record<number, ArticleVariante[]> = {}
+const mockComposants: Record<number, ArticleComposant[]> = {}
 
 const mockClients: Client[] = [
   { id: 1, code: "CL001", nom: "Client de passage", adresse: null, telephone: null, email: null, credit_plafond: 0, credit_actuel: 0 },
@@ -225,6 +236,27 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     }
   },
   find_variante_by_barcode: () => null,
+
+  // Produits composés (kits)
+  add_article_composant: ({ article_id, composant_id, quantite }) => {
+    nextId++
+    const composant = mockArticles.find((a) => a.id === composant_id)
+    const c: ArticleComposant = { id: nextId, composant_id: composant_id as number, designation: composant?.designation || "Article", stock: composant?.stock || 0, quantite: quantite as number }
+    mockComposants[article_id as number] = [...(mockComposants[article_id as number] || []), c]
+    return nextId
+  },
+  get_article_composants: ({ article_id }) => mockComposants[article_id as number] || [],
+  update_article_composant_quantite: ({ id, quantite }) => {
+    for (const list of Object.values(mockComposants)) {
+      const c = list.find((c) => c.id === id)
+      if (c) c.quantite = quantite as number
+    }
+  },
+  delete_article_composant: ({ id }) => {
+    for (const key of Object.keys(mockComposants)) {
+      mockComposants[Number(key)] = mockComposants[Number(key)].filter((c) => c.id !== id)
+    }
+  },
 
   // Ventes
   create_vente: () => { nextId++; return nextId },

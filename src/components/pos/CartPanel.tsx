@@ -10,6 +10,8 @@ import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Bankno
 interface Article {
   id: number
   stock: number
+  prix_vente?: number
+  prix_grossiste?: number | null
 }
 
 interface Client {
@@ -95,6 +97,7 @@ export default function CartPanel({
   const setCashGiven = useCartStore((s) => s.setCashGiven)
   const setLineDiscount = useCartStore((s) => s.setLineDiscount)
   const setLineNote = useCartStore((s) => s.setLineNote)
+  const setLinePrice = useCartStore((s) => s.setLinePrice)
   const holdCart = useCartStore((s) => s.holdCart)
   const resumeCart = useCartStore((s) => s.resumeCart)
   const deleteHeldCart = useCartStore((s) => s.deleteHeldCart)
@@ -255,6 +258,27 @@ export default function CartPanel({
                       className="w-full h-7 px-2 text-xs bg-background border border-border/50 rounded-md outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-muted-foreground/50 text-muted-foreground"
                     />
                   </div>
+                  {article?.prix_grossiste != null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const grossiste = item.prix_type === "grossiste"
+                        setLinePrice(
+                          item.article_id,
+                          grossiste ? (article.prix_vente ?? item.prix_unitaire) : article.prix_grossiste!,
+                          grossiste ? "public" : "grossiste"
+                        )
+                      }}
+                      className={cn(
+                        "mt-1.5 text-[11px] px-2 py-0.5 rounded-full border transition-colors",
+                        item.prix_type === "grossiste"
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/50"
+                      )}
+                    >
+                      {item.prix_type === "grossiste" ? "Prix grossiste ✓" : "Passer en prix grossiste"}
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"

@@ -14,6 +14,7 @@ interface CartItem {
   tva: number
   remise_ligne: number
   note: string
+  prix_type?: "public" | "grossiste"
 }
 
 interface HeldCart {
@@ -44,6 +45,7 @@ interface CartState {
   setCashGiven: (cash: string) => void
   setLineDiscount: (articleId: number, percent: number) => void
   setLineNote: (articleId: number, note: string) => void
+  setLinePrice: (articleId: number, prixUnitaire: number, prixType: "public" | "grossiste") => void
   addSplit: (mode: string) => void
   removeSplit: (index: number) => void
   updateSplitAmount: (index: number, amount: number) => void
@@ -108,6 +110,12 @@ export const useCartStore = create<CartState>()(
         set((state) => ({
           items: state.items.map((i) =>
             i.article_id === articleId ? { ...i, note } : i
+          ),
+        })),
+      setLinePrice: (articleId, prixUnitaire, prixType) =>
+        set((state) => ({
+          items: state.items.map((i) =>
+            i.article_id === articleId ? { ...i, prix_unitaire: prixUnitaire, prix_type: prixType } : i
           ),
         })),
       addSplit: (mode) =>

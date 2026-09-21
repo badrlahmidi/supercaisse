@@ -18,6 +18,8 @@ export interface Product {
   fournisseur_nom?: string
   actif: boolean
   suivi_lot?: boolean
+  prix_grossiste?: number | null
+  est_kit?: boolean
 }
 
 export function useProductsList(search?: string) {

@@ -423,6 +423,22 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         [],
     ).ok();
 
+    // Multi-prix (public/grossiste) et produits composés (kits)
+    let _ = conn.execute("ALTER TABLE articles ADD COLUMN prix_grossiste REAL", []);
+    let _ = conn.execute("ALTER TABLE articles ADD COLUMN est_kit INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN prix_type TEXT DEFAULT 'public'", []);
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS article_composants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL,
+            composant_id INTEGER NOT NULL,
+            quantite REAL NOT NULL DEFAULT 1,
+            FOREIGN KEY (article_id) REFERENCES articles(id),
+            FOREIGN KEY (composant_id) REFERENCES articles(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_article_composants_article ON article_composants(article_id);
+    ")?;
+
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS article_lots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

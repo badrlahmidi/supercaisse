@@ -209,7 +209,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         Some(ref q) if !q.is_empty() => (
             format!("SELECT a.id, a.code_barre, a.designation, a.prix_achat, a.prix_vente, a.tva, a.stock, a.stock_alerte,
                     a.categorie_id, a.fournisseur_id, a.actif, {image_col},
-                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot
+                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot, a.prix_grossiste, a.est_kit
              FROM articles a
              LEFT JOIN categories c ON a.categorie_id = c.id
              LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -220,7 +220,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         _ => (
             format!("SELECT a.id, a.code_barre, a.designation, a.prix_achat, a.prix_vente, a.tva, a.stock, a.stock_alerte,
                     a.categorie_id, a.fournisseur_id, a.actif, {image_col},
-                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot
+                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot, a.prix_grossiste, a.est_kit
              FROM articles a
              LEFT JOIN categories c ON a.categorie_id = c.id
              LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -233,6 +233,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
         let actif_int: i32 = row.get(10)?;
         let suivi_lot_int: Option<i32> = row.get(14)?;
+        let est_kit_int: Option<i32> = row.get(16)?;
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
             "code_barre": row.get::<_, Option<String>>(1)?,
@@ -249,6 +250,8 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
             "categorie_nom": row.get::<_, Option<String>>(12)?,
             "fournisseur_nom": row.get::<_, Option<String>>(13)?,
             "suivi_lot": suivi_lot_int.unwrap_or(0) != 0,
+            "prix_grossiste": row.get::<_, Option<f64>>(15)?,
+            "est_kit": est_kit_int.unwrap_or(0) != 0,
         }))
     }).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -257,12 +260,13 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
 #[tauri::command]
 pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: String, description: Option<String>,
     image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock: f64, stock_alerte: Option<f64>,
-    categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>) -> Result<i64, String> {
+    categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>,
+    prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO articles (code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot.unwrap_or(false) as i32],
+        "INSERT INTO articles (code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot, prix_grossiste, est_kit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32],
     ).map_err(|e| e.to_string())?;
     let article_id = conn.last_insert_rowid();
     if stock != 0.0 {
@@ -275,11 +279,12 @@ pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: 
 #[tauri::command]
 pub fn update_article(db: State<DbState>, id: i64, code_barre: Option<String>, designation: String, description: Option<String>,
     image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock_alerte: Option<f64>,
-    categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>) -> Result<(), String> {
+    categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>,
+    prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12 WHERE id=?13",
-        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, id],
+        "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12, prix_grossiste=?13, est_kit=?14 WHERE id=?15",
+        params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32, id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -503,6 +508,72 @@ pub fn find_variante_by_barcode(db: State<DbState>, code_barre: String) -> Resul
     ).optional().map_err(|e| e.to_string())
 }
 
+// ─── Produits composés (kits) ───
+// Un kit (articles.est_kit=1) n'a pas son propre stock consommé à la vente : vendre 1
+// kit décrémente chaque composant (article_composants) au prorata de sa quantité.
+// Le kit garde quand même une fiche article normale (prix, TVA, code-barres) pour être
+// scanné/vendu comme n'importe quel article — la résolution kit → composants se fait
+// uniquement au moment de la vente, invisible du panier (pas de refonte d'identité de
+// panier nécessaire, contrairement aux variantes).
+
+fn get_composants(tx: &Connection, article_id: i64) -> Result<Vec<(i64, f64)>, String> {
+    let mut stmt = tx.prepare("SELECT composant_id, quantite FROM article_composants WHERE article_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![article_id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_article_composant(db: State<DbState>, article_id: i64, composant_id: i64, quantite: f64) -> Result<i64, String> {
+    if article_id == composant_id {
+        return Err("Un article ne peut pas être son propre composant".to_string());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO article_composants (article_id, composant_id, quantite) VALUES (?1, ?2, ?3)",
+        params![article_id, composant_id, quantite],
+    ).map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn get_article_composants(db: State<DbState>, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.composant_id, a.designation, a.stock, c.quantite
+         FROM article_composants c
+         JOIN articles a ON a.id = c.composant_id
+         WHERE c.article_id = ?1 ORDER BY a.designation"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![article_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "composant_id": row.get::<_, i64>(1)?,
+            "designation": row.get::<_, String>(2)?,
+            "stock": row.get::<_, f64>(3)?,
+            "quantite": row.get::<_, f64>(4)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_article_composant_quantite(db: State<DbState>, id: i64, quantite: f64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("UPDATE article_composants SET quantite=?1 WHERE id=?2", params![quantite, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_article_composant(db: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM article_composants WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ─── Ventes ───
 
 #[tauri::command]
@@ -625,11 +696,12 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         let tva = a["tva"].as_f64().unwrap_or(0.0);
         let remise_ligne = a["remise_ligne"].as_f64().unwrap_or(0.0);
         let note_ligne = a["note"].as_str().map(|s| s.to_string());
+        let prix_type = a["prix_type"].as_str().unwrap_or("public").to_string();
         let ligne_base = qte * pu * (1.0 + tva / 100.0);
         let total_ligne = ligne_base * (1.0 - remise_ligne / 100.0);
         tx.execute(
-            "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![vente_id, article_id, qte, pu, tva, total_ligne, remise_ligne, note_ligne, variante_id],
+            "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![vente_id, article_id, qte, pu, tva, total_ligne, remise_ligne, note_ligne, variante_id, prix_type],
         ).map_err(|e| e.to_string())?;
 
         if document_type == "facture" || document_type == "bl" {
@@ -641,11 +713,23 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
                     params![article_id, qte, vid, magasin_id],
                 ).map_err(|e| e.to_string())?;
             } else {
-                adjust_article_stock(&tx, article_id, magasin_id, -qte)?;
-                tx.execute(
-                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente', ?4)",
-                    params![article_id, qte, vente_id, magasin_id],
-                ).map_err(|e| e.to_string())?;
+                let composants = get_composants(&tx, article_id)?;
+                if !composants.is_empty() {
+                    for (composant_id, comp_qte) in composants {
+                        let qte_composant = comp_qte * qte;
+                        adjust_article_stock(&tx, composant_id, magasin_id, -qte_composant)?;
+                        tx.execute(
+                            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente_kit', ?4)",
+                            params![composant_id, qte_composant, vente_id, magasin_id],
+                        ).map_err(|e| e.to_string())?;
+                    }
+                } else {
+                    adjust_article_stock(&tx, article_id, magasin_id, -qte)?;
+                    tx.execute(
+                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente', ?4)",
+                        params![article_id, qte, vente_id, magasin_id],
+                    ).map_err(|e| e.to_string())?;
+                }
             }
         }
     }
@@ -703,11 +787,23 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
                 params![article_id, qte, vid, magasin_id],
             ).map_err(|e| e.to_string())?;
         } else {
-            adjust_article_stock(&tx, article_id, magasin_id, qte)?;
-            tx.execute(
-                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente', ?4)",
-                params![article_id, qte, vente_id, magasin_id],
-            ).map_err(|e| e.to_string())?;
+            let composants = get_composants(&tx, article_id)?;
+            if !composants.is_empty() {
+                for (composant_id, comp_qte) in composants {
+                    let qte_composant = comp_qte * qte;
+                    adjust_article_stock(&tx, composant_id, magasin_id, qte_composant)?;
+                    tx.execute(
+                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente_kit', ?4)",
+                        params![composant_id, qte_composant, vente_id, magasin_id],
+                    ).map_err(|e| e.to_string())?;
+                }
+            } else {
+                adjust_article_stock(&tx, article_id, magasin_id, qte)?;
+                tx.execute(
+                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente', ?4)",
+                    params![article_id, qte, vente_id, magasin_id],
+                ).map_err(|e| e.to_string())?;
+            }
         }
     }
 

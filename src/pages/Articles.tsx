@@ -17,7 +17,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
@@ -40,6 +40,20 @@ const varianteSchema = z.object({
 })
 type VarianteForm = z.infer<typeof varianteSchema>
 
+interface ArticleComposant {
+  id: number
+  composant_id: number
+  designation: string
+  stock: number
+  quantite: number
+}
+
+const composantSchema = z.object({
+  composant_id: z.number().min(1, "Article requis"),
+  quantite: z.number().min(0.01, "Quantité requise"),
+})
+type ComposantForm = z.infer<typeof composantSchema>
+
 interface Article {
   id: number
   code_barre: string | null
@@ -54,6 +68,8 @@ interface Article {
   fournisseur_nom?: string
   actif: boolean
   suivi_lot?: boolean
+  prix_grossiste?: number | null
+  est_kit?: boolean
 }
 
 interface Category {
@@ -79,6 +95,8 @@ const articleSchema = z.object({
   categorie_id: z.number().optional().nullable(),
   fournisseur_id: z.number().optional().nullable(),
   suivi_lot: z.boolean().default(false),
+  prix_grossiste: z.number().min(0).optional().nullable(),
+  est_kit: z.boolean().default(false),
 })
 
 type ArticleForm = z.infer<typeof articleSchema>
@@ -92,6 +110,8 @@ export default function Articles() {
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [variantesArticle, setVariantesArticle] = useState<Article | null>(null)
   const [showVariantes, setShowVariantes] = useState(false)
+  const [composantsArticle, setComposantsArticle] = useState<Article | null>(null)
+  const [showComposants, setShowComposants] = useState(false)
 
   const { data: articles, isLoading, refetch } = useProductsList(debouncedSearch)
   const { data: categories } = useCategoriesList()
@@ -149,6 +169,45 @@ export default function Articles() {
     setShowVariantes(true)
   }
 
+  const { data: composants } = useQuery({
+    queryKey: ["article_composants", composantsArticle?.id],
+    queryFn: () => invoke<ArticleComposant[]>("get_article_composants", { article_id: composantsArticle?.id }),
+    enabled: showComposants && !!composantsArticle,
+  })
+
+  const composantForm = useForm<ComposantForm>({
+    resolver: zodResolver(composantSchema),
+    defaultValues: { composant_id: 0, quantite: 1 },
+  })
+
+  const invalidateComposants = () => queryClient.invalidateQueries({ queryKey: ["article_composants", composantsArticle?.id] })
+
+  const addComposantMutation = useMutation({
+    mutationFn: (data: ComposantForm) => invoke("add_article_composant", {
+      article_id: composantsArticle?.id,
+      composant_id: data.composant_id,
+      quantite: data.quantite,
+    }),
+    onSuccess: () => {
+      toast.success("Composant ajouté")
+      composantForm.reset({ composant_id: 0, quantite: 1 })
+      invalidateComposants()
+    },
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const deleteComposantMutation = useMutation({
+    mutationFn: (id: number) => invoke("delete_article_composant", { id }),
+    onSuccess: () => { toast.success("Composant retiré"); invalidateComposants() },
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const openComposants = (article: Article) => {
+    setComposantsArticle(article)
+    composantForm.reset({ composant_id: 0, quantite: 1 })
+    setShowComposants(true)
+  }
+
   const form = useForm<ArticleForm>({
     resolver: zodResolver(articleSchema),
     defaultValues: {
@@ -163,6 +222,8 @@ export default function Articles() {
       categorie_id: null,
       fournisseur_id: null,
       suivi_lot: false,
+      prix_grossiste: null,
+      est_kit: false,
     },
   })
 
@@ -190,6 +251,8 @@ export default function Articles() {
       categorie_id: article.categorie_id,
       fournisseur_id: null,
       suivi_lot: article.suivi_lot || false,
+      prix_grossiste: article.prix_grossiste ?? null,
+      est_kit: article.est_kit || false,
     })
     setImagePreview(article.image_url ?? null)
     setShowForm(true)
@@ -210,6 +273,8 @@ export default function Articles() {
       categorie_id: null,
       fournisseur_id: null,
       suivi_lot: false,
+      prix_grossiste: null,
+      est_kit: false,
     })
     setImagePreview(null)
     setShowForm(true)
@@ -355,6 +420,11 @@ export default function Articles() {
                         <Button variant="ghost" size="icon" onClick={() => openVariantes(article)} title="Déclinaisons taille/couleur">
                           <Tags className="h-4 w-4" />
                         </Button>
+                        {article.est_kit && (
+                          <Button variant="ghost" size="icon" onClick={() => openComposants(article)} title="Composants du kit">
+                            <Boxes className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(article.id)} title="Supprimer">
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -479,6 +549,17 @@ export default function Articles() {
                 )}
               </div>
               <div className="space-y-2">
+                <Label htmlFor="prix_grossiste">Prix grossiste</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  {...form.register("prix_grossiste", { valueAsNumber: true })}
+                  id="prix_grossiste"
+                  placeholder="Optionnel — client professionnel"
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="tva">TVA (%)</Label>
                 <Input
                   type="number"
@@ -539,6 +620,18 @@ export default function Articles() {
                 />
                 <Label htmlFor="suivi_lot" className="cursor-pointer">
                   Suivi de lot / date de péremption (DLC-DLUO) — supermarché, pharmacie
+                </Label>
+              </div>
+              <div className="space-y-2 md:col-span-2 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="est_kit"
+                  className="h-4 w-4"
+                  checked={form.watch("est_kit")}
+                  onChange={(e) => form.setValue("est_kit", e.target.checked)}
+                />
+                <Label htmlFor="est_kit" className="cursor-pointer">
+                  Produit composé / kit (ex. coffret) — le stock des composants est géré dans "Composants" ci-dessous une fois l'article enregistré
                 </Label>
               </div>
               <div className="space-y-2">
@@ -672,6 +765,90 @@ export default function Articles() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowVariantes(false)}>Fermer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showComposants} onOpenChange={setShowComposants}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Composants du kit — {composantsArticle?.designation}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Vendre ce kit décrémente automatiquement le stock de chaque composant ci-dessous, au prorata de la quantité indiquée. Le kit lui-même n'a pas de stock propre.
+            </p>
+            <form
+              onSubmit={composantForm.handleSubmit((data) => addComposantMutation.mutate(data))}
+              className="grid grid-cols-3 gap-2 items-end p-3 bg-muted/30 rounded-lg"
+            >
+              <div className="space-y-1 col-span-2">
+                <Label htmlFor="composant_id" className="text-xs">Article composant</Label>
+                <Select
+                  value={composantForm.watch("composant_id") ? String(composantForm.watch("composant_id")) : ""}
+                  onValueChange={(v) => composantForm.setValue("composant_id", parseInt(v))}
+                >
+                  <SelectTrigger id="composant_id" className="h-9">
+                    <SelectValue placeholder="Sélectionner un article" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {articles?.filter((a) => a.id !== composantsArticle?.id).map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>{a.designation}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="quantite_composant" className="text-xs">Qté / kit</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  {...composantForm.register("quantite", { valueAsNumber: true })}
+                  id="quantite_composant"
+                  className="h-9"
+                />
+              </div>
+              <Button type="submit" size="sm" className="col-span-3" disabled={addComposantMutation.isPending}>
+                {addComposantMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                Ajouter ce composant
+              </Button>
+            </form>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Composant</TableHead>
+                  <TableHead className="text-right">Stock dispo</TableHead>
+                  <TableHead className="text-right">Qté / kit</TableHead>
+                  <TableHead className="w-[50px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {composants?.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium">{c.designation}</TableCell>
+                    <TableCell className="text-right">{c.stock}</TableCell>
+                    <TableCell className="text-right">{c.quantite}</TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" onClick={() => deleteComposantMutation.mutate(c.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!composants?.length && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-6 text-muted-foreground text-sm">
+                      Aucun composant défini pour ce kit
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowComposants(false)}>Fermer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
