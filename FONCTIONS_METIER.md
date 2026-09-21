@@ -36,7 +36,7 @@
 | Ticket sans papier (email/SMS) | ⬜ | |
 | Écran client secondaire (double afficheur) | ⬜ | |
 | Balance connectée (produits au poids) | ⬜ | Le "mode vrac" existe dans les réglages mais ne déclenche aucun comportement |
-| Vente par variante (taille/couleur) | ⬜ | La caisse ne sait vendre qu'un article unique, pas une déclinaison |
+| Vente par variante (taille/couleur) | ✅ | Sélecteur à l'écran, scan direct, stock décompté sur la bonne déclinaison |
 | Gestion de table / salle (mode restaurant) | ✅ | Actif seulement si secteur = "Restaurant" dans les réglages |
 | Écran cuisine (KDS), split bill, pourboire | ⬜ | |
 
@@ -52,7 +52,7 @@
 | Étiquettes code-barres imprimables (planches PDF) | ⬜ | |
 | Prix multiple (public / grossiste) | ✅ | Prix grossiste optionnel par article, bascule d'un clic sur la ligne du panier caisse |
 | Produits composés / kits | ✅ | Un kit vend normalement au scan ; le stock de chaque composant est décrémenté automatiquement au prorata |
-| Variantes taille/couleur avec stock dédié | 🔶 | Créer/lister/ajuster/supprimer une déclinaison avec son propre code-barres : fait. Vendre une déclinaison précise depuis la caisse : pas encore câblé côté panier (le backend est prêt) |
+| Variantes taille/couleur avec stock dédié | ✅ | Création/gestion et vente à la caisse toutes les deux opérationnelles |
 | Traçabilité lot / date de péremption | ✅ | Case à cocher par article, réception de lot avec numéro + date, écran d'alerte dédié (page Péremptions) |
 
 ## 3. Stock
@@ -161,9 +161,9 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 38 |
-| 🔶 Inclus mais à corriger/compléter | 14 |
-| ⬜ Manquant | 26 |
+| ✅ Inclus et utilisable | 40 |
+| 🔶 Inclus mais à corriger/compléter | 13 |
+| ⬜ Manquant | 25 |
 
 *(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
 
@@ -180,7 +180,7 @@
 
 - ~~Traçabilité lot/péremption~~ ✅ fait 2026-09-20 (sert à la fois supermarché et pharmacie)
 - ~~Document PDF archivable~~ ✅ fait 2026-09-20 (condition d'entrée pour toute facturation professionnelle sérieuse)
-- Variantes taille/couleur vendables depuis la caisse (le catalogue/stock est prêt depuis le 2026-09-20 ; il manque le câblage panier — cf. `ROADMAP_STATUS.md`)
+- ~~Variantes taille/couleur vendables depuis la caisse~~ ✅ fait 2026-09-21
 - ~~Multi-prix + produits composés~~ ✅ fait 2026-09-21 (condition d'entrée pour le matériel/pâtisserie)
 - Notion d'ordonnance + tiers-payant AMO/mutuelle (dernier verrou spécifique à la pharmacie, au-delà du socle technique lot/péremption)
 

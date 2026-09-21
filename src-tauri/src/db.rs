@@ -422,6 +422,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_variantes_code_barre_unique ON article_variantes(code_barre) WHERE code_barre IS NOT NULL AND code_barre != ''",
         [],
     ).ok();
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_article_variantes_article ON article_variantes(article_id)", []);
 
     // Multi-prix (public/grossiste) et produits composés (kits)
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN prix_grossiste REAL", []);

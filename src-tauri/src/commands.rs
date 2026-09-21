@@ -209,7 +209,8 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         Some(ref q) if !q.is_empty() => (
             format!("SELECT a.id, a.code_barre, a.designation, a.prix_achat, a.prix_vente, a.tva, a.stock, a.stock_alerte,
                     a.categorie_id, a.fournisseur_id, a.actif, {image_col},
-                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot, a.prix_grossiste, a.est_kit
+                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot, a.prix_grossiste, a.est_kit,
+                    EXISTS(SELECT 1 FROM article_variantes v WHERE v.article_id = a.id) as a_variantes
              FROM articles a
              LEFT JOIN categories c ON a.categorie_id = c.id
              LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -220,7 +221,8 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         _ => (
             format!("SELECT a.id, a.code_barre, a.designation, a.prix_achat, a.prix_vente, a.tva, a.stock, a.stock_alerte,
                     a.categorie_id, a.fournisseur_id, a.actif, {image_col},
-                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot, a.prix_grossiste, a.est_kit
+                    c.nom as categorie_nom, f.nom as fournisseur_nom, a.suivi_lot, a.prix_grossiste, a.est_kit,
+                    EXISTS(SELECT 1 FROM article_variantes v WHERE v.article_id = a.id) as a_variantes
              FROM articles a
              LEFT JOIN categories c ON a.categorie_id = c.id
              LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -234,6 +236,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
         let actif_int: i32 = row.get(10)?;
         let suivi_lot_int: Option<i32> = row.get(14)?;
         let est_kit_int: Option<i32> = row.get(16)?;
+        let a_variantes_int: i32 = row.get(17)?;
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
             "code_barre": row.get::<_, Option<String>>(1)?,
@@ -252,6 +255,7 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
             "suivi_lot": suivi_lot_int.unwrap_or(0) != 0,
             "prix_grossiste": row.get::<_, Option<f64>>(15)?,
             "est_kit": est_kit_int.unwrap_or(0) != 0,
+            "a_variantes": a_variantes_int != 0,
         }))
     }).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())

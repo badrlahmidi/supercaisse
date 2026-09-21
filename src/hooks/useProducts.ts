@@ -20,6 +20,7 @@ export interface Product {
   suivi_lot?: boolean
   prix_grossiste?: number | null
   est_kit?: boolean
+  a_variantes?: boolean
 }
 
 export function useProductsList(search?: string) {

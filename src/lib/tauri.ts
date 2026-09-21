@@ -23,6 +23,7 @@ interface Article {
   suivi_lot?: boolean
   prix_grossiste?: number | null
   est_kit?: boolean
+  a_variantes?: boolean
 }
 
 interface ArticleComposant {

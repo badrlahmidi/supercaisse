@@ -11,14 +11,14 @@
 > Dernière vérification : 2026-09-20, par lecture intégrale de `src-tauri/src/{db,commands,lib}.rs`
 > et `src/{pages,routes,hooks,lib}/**`.
 >
-> **Mise à jour 2026-09-21** : 7 correctifs/ajouts de cet audit ont été implémentés et
-> validés (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run` 68/68, `vite build` — tous verts ;
+> **Mise à jour 2026-09-21** : 8 correctifs/ajouts de cet audit ont été implémentés et
+> validés (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run` 72/72, `vite build` — tous verts ;
 > une CI GitHub Actions existe désormais dans `.github/workflows/ci.yml` pour que ces statuts
 > restent vérifiés automatiquement) : stock multi-magasin unifié, en-tête légal ICE/IF/RC/Patente
 > séparé, durcissement des `.unwrap()` Rust sur les chemins critiques, génération PDF facture/avoir
 > (`jsPDF` + commande `save_document_pdf`), traçabilité lot/péremption (DLC-DLUO) avec écran
-> d'alerte dédié, gestion des déclinaisons taille/couleur (backend complet, vente non câblée —
-> limite explicite, cf. section verticaux), multi-prix (public/grossiste) et produits composés/kits.
+> d'alerte dédié, gestion des déclinaisons taille/couleur avec vente au POS câblée (catalogue le
+> 2026-09-20, panier/caisse le 2026-09-21), multi-prix (public/grossiste) et produits composés/kits.
 > Détail dans les sections correspondantes ci-dessous. Une erreur de l'audit initial a aussi été corrigée : la contrainte
 > `UNIQUE` sur `code_barre` existait déjà (`db.rs:430`, une simple recherche `CREATE TABLE` sans
 > chercher `CREATE INDEX` l'avait fait manquer) — jamais confirmé sans le grep exact, y compris
@@ -124,10 +124,29 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 | Supermarché / épicerie | 🔶 ~80% | DLC/péremption ✅ (2026-09-20), reste : inventaire physique, vrac/poids réellement câblé |
 | Restaurant / café | 🔶 | tables + statuts existants (`tables_resto`), mais pas de KDS, pas de split bill, pas de menus composés |
 | Pharmacie / parapharmacie | ⬜ ~25% | lot/péremption ✅ (2026-09-20, socle technique correct) ; reste bloquant : toujours absente du sélecteur `business_type` ; pas de notion d'ordonnance ; pas de tiers-payant AMO/mutuelle |
-| Prêt-à-porter (mode) | 🔶 ~50% | déclinaisons taille/couleur gérables ✅ (2026-09-20 : création, code-barres, stock dédié, écran dans Articles.tsx) — **mais pas encore vendables depuis le POS** (cf. limite ci-dessous) |
+| Prêt-à-porter (mode) | ✅ ~90% | déclinaisons gérables (2026-09-20) **et vendables depuis le POS** (2026-09-21 : sélecteur de variante, scan direct, panier avec identité par variante) — cf. détail ci-dessous. Reste : pas de photo par variante, pas de code-barres imprimable en planche |
 | Matériel & outils pâtisserie | 🔶 ~55% | multi-prix (public/grossiste) ✅ et produits composés/kits ✅ (2026-09-21) ; reste : pas d'unités de vente multiples (pièce/lot/carton sur une même fiche) |
 
-**Limite explicite prêt-à-porter** : le backend (`create_vente`/`annuler_vente`) sait déjà décrémenter/recréditer le stock d'une variante précise (`vente_articles.variante_id`), et `find_variante_by_barcode` permet de résoudre un scan. Ce qui manque est côté POS uniquement : le panier (`src/store/cart.ts`) identifie aujourd'hui une ligne par `article_id` seul — deux variantes d'un même article (ex. T-shirt bleu M et L) fusionneraient dans la même ligne. Corriger ça demande de faire de `variante_id` une partie de la clé d'identité du panier (`addItem`/`updateQuantity`/`removeItem`/`setLineDiscount`/`setLineNote` dans `cart.ts`, plus le câblage dans `CartPanel.tsx`/`POS.tsx`) — volontairement non fait dans cette passe : c'est le cœur de l'écran qui gère l'argent, et il n'y a pas eu de moyen de le tester visuellement bout en bout dans cet environnement. Prochaine étape recommandée, clairement isolée.
+**Vente des variantes au POS — fait le 2026-09-21.** Le panier (`src/store/cart.ts`) identifie
+désormais chaque ligne par `article_id` **+ `variante_id`** (fonction `sameLigne`), et non plus
+par `article_id` seul : deux variantes du même article (ex. T-shirt bleu M et L) restent deux
+lignes distinctes, testé explicitement (`cart.test.ts`, 4 nouveaux cas : lignes séparées, fusion
+uniquement sur la même variante, `updateQuantity`/`removeItem` ciblés, non-confusion avec la
+ligne sans variante). Flux ajoutés :
+- Clic sur un article à variantes (`Product.a_variantes`, calculé en SQL via `EXISTS` sur
+  `article_variantes`) ouvre un sélecteur (taille/couleur/stock) au lieu d'ajouter directement.
+- Scan d'un code-barres de variante (non trouvé au niveau article) résout via
+  `find_variante_by_barcode` et ajoute directement la bonne ligne, sans passer par le sélecteur.
+- Stock plafond par ligne : capturé au moment de l'ajout (`stock_max` sur la ligne panier), car
+  `CartPanel` n'a pas de source de stock par variante en temps réel — limite mineure acceptée,
+  cohérente avec le fait que le stock article lui-même n'est pas plus "live" pendant une session
+  de caisse.
+- La grille produit n'affiche plus le badge "Rupture"/stock sur un article à variantes (le stock
+  agrégé de l'article n'a jamais reflété le stock par variante, cf. commentaire dans
+  `commands.rs` section "Variantes").
+
+Validé avec les 4 gates (`cargo check`, `tsc --noEmit`, `oxlint`, `vitest run` — 72/72 dont les 4
+nouveaux tests d'identité panier, `vite build`).
 
 ---
 
@@ -136,7 +155,7 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 | Axe | Réellement tenu |
 |---|---|
 | Checklist "prêt marché" (9 exigences, cf. `AUDIT_ARCHITECTURE_SENIOR_2026-09.md §7`) | 6/9 (mentions légales ICE/IF/RC/Patente + PDF facture maintenant présents ; reste bloquant : pas de bilingue FR/AR, multi-magasin toujours sans UI, spécialisation vertical) |
-| Verticaux demandés couverts fonctionnellement (sur 4) | 1 (supermarché, partiel) |
+| Verticaux demandés couverts fonctionnellement (sur 4) | 2 pleinement (supermarché ~80%, prêt-à-porter ~90%), 2 partiels (pharmacie ~25%, pâtisserie/matériel ~55%) |
 | Sprints "TERMINÉ" annoncés par l'ancien plan et confirmés par le code | 2 sur 6 (bugs sécurité Sprint 1, POS de base Sprint 2) |
 
 ---
@@ -148,7 +167,7 @@ Le sélecteur `Settings.tsx` → `business_type` (`standard | restaurant | mode 
 3. ~~Mettre en place une CI~~ ✅ fait 2026-09-20 (`.github/workflows/ci.yml`).
 4. ~~Génération PDF facture/avoir~~ ✅ fait 2026-09-20 (`jsPDF` + `save_document_pdf`, cf. section Facturation ci-dessus). Reste : le PDF est généré à la demande (bouton), pas encore archivé/horodaté de façon opposable (pas de scellement, de numérotation de fichier garantie unique au-delà du nom).
 5. ~~Ajouter lot + date de péremption au niveau article~~ ✅ fait 2026-09-20 (`article_lots`, cf. section Catalogue & Stock ci-dessus). Reste : pas de FEFO automatique à la vente (limite documentée dans le code), pas de notion d'ordonnance/tiers-payant pour la pharmacie.
-6. ~~Câbler `article_variantes` (commandes Tauri + UI)~~ ✅ fait 2026-09-20, gestion complète (créer/lister/ajuster/supprimer, code-barres, backend `create_vente` déjà prêt). Reste : rendre la variante réellement sélectionnable/vendable depuis l'écran de caisse (refonte identité du panier, cf. section P3 ci-dessus).
+6. ~~Câbler `article_variantes` (commandes Tauri + UI)~~ ✅ fait 2026-09-20. ~~Vente au POS~~ ✅ fait 2026-09-21 (refonte identité du panier, sélecteur, scan — cf. section P3 ci-dessus). Prêt-à-porter est désormais le vertical le plus complet après supermarché.
 7. ~~Ajouter multi-prix (public/grossiste) + produits composés/kits~~ ✅ fait 2026-09-21. Multi-prix : champ `prix_grossiste` par article, bascule par ligne au panier POS (`CartPanel.tsx`, aucun risque d'identité panier — c'est juste `prix_unitaire` qui change). Kits : table `article_composants`, un kit décrémente ses composants à la vente/annulation, sans toucher à l'identité panier non plus (résolu côté backend uniquement, invisible du panier).
 8. Construire l'UI multi-magasin (sélection du magasin actif à l'ouverture de session, écran de création de boutique sur `add_magasin`) pour que le travail du point 1 devienne utilisable, pas seulement sûr.
 

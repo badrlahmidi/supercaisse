@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@/lib/tauri"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/context/AuthContext"
 import { usePOSProducts } from "@/hooks/useProducts"
 import { useCategoriesList } from "@/hooks/useCategories"
@@ -13,7 +13,7 @@ import { Button } from "@/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
 import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, cn } from "@/lib/utils"
 import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useCartStore } from "@/store/cart"
@@ -33,6 +33,15 @@ interface Article {
   stock_alerte: number | null
   categorie_id: number | null
   categorie_nom?: string
+  a_variantes?: boolean
+}
+
+interface ArticleVariante {
+  id: number
+  taille: string | null
+  couleur: string | null
+  code_barre: string | null
+  stock_dedie: number
 }
 
 interface Category {
@@ -79,6 +88,8 @@ export default function POS() {
   const [, setLastSync] = useState<Date>(new Date())
 
   const [documentType, setDocumentType] = useState<string>("facture")
+  const [variantPickerArticle, setVariantPickerArticle] = useState<Article | null>(null)
+  const [showVariantPicker, setShowVariantPicker] = useState(false)
 
   const { data: currentSession, isLoading: isSessionLoading } = useCurrentSession(user?.id)
   const openSessionMutation = useOpenSession()
@@ -108,6 +119,12 @@ export default function POS() {
   const { data: articles = [], isFetching: articlesFetching } = usePOSProducts(debouncedSearch, activeCategory)
 
   const { data: categories = [] } = useCategoriesList()
+
+  const { data: pickerVariantes = [], isFetching: pickerVariantesFetching } = useQuery({
+    queryKey: ["article_variantes_pos", variantPickerArticle?.id],
+    queryFn: () => invoke<ArticleVariante[]>("get_article_variantes", { article_id: variantPickerArticle?.id }),
+    enabled: showVariantPicker && !!variantPickerArticle,
+  })
 
   const handleSelectTable = (table: TableResto) => {
     setActiveTable(table.id, table.nom)
@@ -155,30 +172,48 @@ export default function POS() {
     return a.designation.toLowerCase().includes(q) || a.code_barre?.includes(debouncedSearch)
   })
 
-  const addToCart = useCallback((article: Article) => {
-    if (article.stock <= 0) {
+  const addToCart = useCallback((article: Article, variante?: ArticleVariante) => {
+    if (!variante && article.a_variantes) {
+      setVariantPickerArticle(article)
+      setShowVariantPicker(true)
+      return
+    }
+    const stockDispo = variante ? variante.stock_dedie : article.stock
+    if (stockDispo <= 0) {
       toast.error("Stock épuisé", { description: `${article.designation} n'est plus disponible` })
       return
     }
-    const existing = cart.find((i) => i.article_id === article.id)
-    if (existing && existing.quantite + 1 > article.stock) {
-      toast.error("Stock maximum atteint", { description: `Stock disponible: ${article.stock}` })
+    const existing = cart.find((i) => i.article_id === article.id && (i.variante_id ?? null) === (variante?.id ?? null))
+    if (existing && existing.quantite + 1 > stockDispo) {
+      toast.error("Stock maximum atteint", { description: `Stock disponible: ${stockDispo}` })
       return
     }
-    addItem({ article_id: article.id, designation: article.designation, quantite: 1, prix_unitaire: article.prix_vente, tva: article.tva, remise_ligne: 0 })
+    const label = variante ? [variante.taille, variante.couleur].filter(Boolean).join(" / ") : undefined
+    addItem({
+      article_id: article.id,
+      variante_id: variante?.id,
+      variante_label: label,
+      designation: label ? `${article.designation} (${label})` : article.designation,
+      quantite: 1,
+      prix_unitaire: article.prix_vente,
+      tva: article.tva,
+      remise_ligne: 0,
+      stock_max: stockDispo,
+    })
+    setShowVariantPicker(false)
     searchRef.current?.focus()
   }, [cart, addItem])
 
-  const updateQuantity = useCallback((articleId: number, quantity: number, maxStock?: number) => {
+  const updateQuantity = useCallback((articleId: number, quantity: number, maxStock?: number, varianteId?: number | null) => {
     if (maxStock && quantity > maxStock) {
       toast.error("Stock maximum atteint", { description: `Stock disponible: ${maxStock}` })
       return
     }
-    updateQuantityStore(articleId, quantity)
+    updateQuantityStore(articleId, quantity, varianteId)
   }, [updateQuantityStore])
 
-  const removeFromCart = useCallback((articleId: number) => {
-    removeItem(articleId)
+  const removeFromCart = useCallback((articleId: number, varianteId?: number | null) => {
+    removeItem(articleId, varianteId)
   }, [removeItem])
 
   const clearCart = useCallback(() => {
@@ -212,9 +247,49 @@ export default function POS() {
   const removeLastItem = useCallback(() => {
     const items = useCartStore.getState().items
     if (items.length > 0) {
-      removeItem(items[items.length - 1].article_id)
+      const last = items[items.length - 1]
+      removeItem(last.article_id, last.variante_id)
     }
   }, [removeItem])
+
+  const resolveAndAddByBarcode = useCallback(async (code: string): Promise<boolean> => {
+    if (!code) return false
+    const exact = articlesRef.current.find((a) => a.code_barre === code)
+    if (exact) {
+      addToCart(exact)
+      return true
+    }
+    try {
+      const found = await invoke<{
+        variante_id: number; article_id: number; taille: string | null; couleur: string | null
+        stock_dedie: number; designation: string; prix_vente: number; tva: number; actif: boolean
+      } | null>("find_variante_by_barcode", { code_barre: code })
+      if (found && found.actif) {
+        const articleShim: Article = {
+          id: found.article_id,
+          code_barre: null,
+          designation: found.designation,
+          prix_vente: found.prix_vente,
+          tva: found.tva,
+          stock: found.stock_dedie,
+          stock_alerte: null,
+          categorie_id: null,
+        }
+        const varianteShim: ArticleVariante = {
+          id: found.variante_id,
+          taille: found.taille,
+          couleur: found.couleur,
+          code_barre: code,
+          stock_dedie: found.stock_dedie,
+        }
+        addToCart(articleShim, varianteShim)
+        return true
+      }
+    } catch {
+      // Pas de variante trouvée non plus : on ne fait rien, comme pour un code-barres article inconnu.
+    }
+    return false
+  }, [addToCart])
 
   const handleValidateSale = () => {
     if (cart.length === 0) return
@@ -255,11 +330,11 @@ export default function POS() {
   }, [])
 
   articlesRef.current = articles
-  const handlerRef = useRef({ handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart })
+  const handlerRef = useRef({ handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode })
 
   useEffect(() => {
-    handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart }
-  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart])
+    handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode }
+  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -314,10 +389,7 @@ export default function POS() {
         case "Enter":
           if (!isInput && currentSearch.current.trim()) {
             e.preventDefault()
-            const exact = articlesRef.current.find((a) => a.code_barre === currentSearch.current.trim())
-            if (exact) {
-              handlerRef.current.addToCart(exact)
-            }
+            handlerRef.current.resolveAndAddByBarcode(currentSearch.current.trim())
           }
           break
       }
@@ -331,6 +403,7 @@ export default function POS() {
     mutationFn: async () => {
       const items = cart.map((i) => ({
         article_id: i.article_id,
+        variante_id: i.variante_id || null,
         quantite: i.quantite,
         prix_unitaire: i.prix_unitaire,
         tva: i.tva,
@@ -414,11 +487,10 @@ export default function POS() {
 
   const handleBarcodeScan = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && search.trim()) {
-      const exact = articles.find((a) => a.code_barre === search.trim())
-      if (exact) {
-        addToCart(exact)
-        setSearch("")
-      }
+      const code = search.trim()
+      resolveAndAddByBarcode(code).then((found) => {
+        if (found) setSearch("")
+      })
     }
   }
 
@@ -662,7 +734,7 @@ export default function POS() {
                       <p className="text-xs text-muted-foreground mb-1.5 font-medium">Articles :</p>
                       <div className="space-y-0.5 max-h-20 overflow-y-auto">
                         {held.state.items.map((item) => (
-                          <div key={item.article_id} className="flex justify-between text-xs text-muted-foreground">
+                          <div key={`${item.article_id}-${item.variante_id ?? "x"}`} className="flex justify-between text-xs text-muted-foreground">
                             <span className="truncate max-w-[140px]">{item.designation}</span>
                             <span className="shrink-0 ml-1">×{item.quantite}</span>
                           </div>
@@ -719,6 +791,50 @@ export default function POS() {
                   </Badge>
                 </button>
               ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sélecteur de déclinaison (taille/couleur) */}
+      <Dialog open={showVariantPicker} onOpenChange={setShowVariantPicker}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{variantPickerArticle?.designation} — choisir une déclinaison</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto py-2">
+            {pickerVariantesFetching ? (
+              <div className="col-span-2 flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : pickerVariantes.length === 0 ? (
+              <p className="col-span-2 text-center text-sm text-muted-foreground py-8">
+                Aucune déclinaison définie pour cet article. Ajoutez-en depuis la page Articles.
+              </p>
+            ) : (
+              pickerVariantes.map((v) => {
+                const label = [v.taille, v.couleur].filter(Boolean).join(" / ") || `#${v.id}`
+                const epuise = v.stock_dedie <= 0
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    disabled={epuise}
+                    onClick={() => variantPickerArticle && addToCart(variantPickerArticle, v)}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 rounded-xl border p-4 transition-colors",
+                      epuise
+                        ? "opacity-50 cursor-not-allowed border-muted"
+                        : "border-border hover:border-primary hover:bg-primary/5"
+                    )}
+                  >
+                    <span className="font-semibold">{label}</span>
+                    <span className={cn("text-xs", epuise ? "text-destructive" : "text-muted-foreground")}>
+                      {epuise ? "Rupture" : `Stock: ${v.stock_dedie}`}
+                    </span>
+                  </button>
+                )
+              })
             )}
           </div>
         </DialogContent>

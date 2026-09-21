@@ -8,6 +8,8 @@ interface PaymentSplit {
 
 interface CartItem {
   article_id: number
+  variante_id?: number | null
+  variante_label?: string
   designation: string
   quantite: number
   prix_unitaire: number
@@ -15,6 +17,11 @@ interface CartItem {
   remise_ligne: number
   note: string
   prix_type?: "public" | "grossiste"
+  stock_max?: number
+}
+
+function sameLigne(item: CartItem, articleId: number, varianteId?: number | null): boolean {
+  return item.article_id === articleId && (item.variante_id ?? null) === (varianteId ?? null)
 }
 
 interface HeldCart {
@@ -36,16 +43,16 @@ interface CartState {
   activeTableId: number | null
   activeTableNom: string | null
   addItem: (item: CartItem) => void
-  updateQuantity: (articleId: number, quantity: number) => void
-  removeItem: (articleId: number) => void
+  updateQuantity: (articleId: number, quantity: number, varianteId?: number | null) => void
+  removeItem: (articleId: number, varianteId?: number | null) => void
   clearCart: () => void
   setSelectedClient: (clientId: number | null) => void
   setPaymentMode: (mode: string) => void
   setDiscountPercent: (percent: string) => void
   setCashGiven: (cash: string) => void
-  setLineDiscount: (articleId: number, percent: number) => void
-  setLineNote: (articleId: number, note: string) => void
-  setLinePrice: (articleId: number, prixUnitaire: number, prixType: "public" | "grossiste") => void
+  setLineDiscount: (articleId: number, percent: number, varianteId?: number | null) => void
+  setLineNote: (articleId: number, note: string, varianteId?: number | null) => void
+  setLinePrice: (articleId: number, prixUnitaire: number, prixType: "public" | "grossiste", varianteId?: number | null) => void
   addSplit: (mode: string) => void
   removeSplit: (index: number) => void
   updateSplitAmount: (index: number, amount: number) => void
@@ -75,47 +82,47 @@ export const useCartStore = create<CartState>()(
       setActiveTable: (id, nom) => set({ activeTableId: id, activeTableNom: nom }),
       addItem: (item) =>
         set((state) => {
-          const existing = state.items.find((i) => i.article_id === item.article_id)
+          const existing = state.items.find((i) => sameLigne(i, item.article_id, item.variante_id))
           if (existing) {
             return {
               items: state.items.map((i) =>
-                i.article_id === item.article_id ? { ...i, quantite: i.quantite + item.quantite } : i
+                sameLigne(i, item.article_id, item.variante_id) ? { ...i, quantite: i.quantite + item.quantite } : i
               ),
             }
           }
           return { items: [...state.items, { ...item, remise_ligne: item.remise_ligne ?? 0, note: item.note ?? "" }] }
         }),
-      updateQuantity: (articleId, quantity) =>
+      updateQuantity: (articleId, quantity, varianteId) =>
         set((state) => {
           if (quantity <= 0) {
-            return { items: state.items.filter((i) => i.article_id !== articleId) }
+            return { items: state.items.filter((i) => !sameLigne(i, articleId, varianteId)) }
           }
-          return { items: state.items.map((i) => (i.article_id === articleId ? { ...i, quantite: quantity } : i)) }
+          return { items: state.items.map((i) => (sameLigne(i, articleId, varianteId) ? { ...i, quantite: quantity } : i)) }
         }),
-      removeItem: (articleId) =>
-        set((state) => ({ items: state.items.filter((i) => i.article_id !== articleId) })),
+      removeItem: (articleId, varianteId) =>
+        set((state) => ({ items: state.items.filter((i) => !sameLigne(i, articleId, varianteId)) })),
       clearCart: () =>
         set({ items: [], selectedClient: null, discountPercent: "0", cashGiven: "", paymentMode: "especes", paymentSplits: [], useLoyaltyPoints: false, activeTableId: null, activeTableNom: null }),
       setSelectedClient: (clientId) => set({ selectedClient: clientId }),
       setPaymentMode: (mode) => set({ paymentMode: mode }),
       setDiscountPercent: (percent) => set({ discountPercent: percent }),
       setCashGiven: (cash) => set({ cashGiven: cash }),
-      setLineDiscount: (articleId, percent) =>
+      setLineDiscount: (articleId, percent, varianteId) =>
         set((state) => ({
           items: state.items.map((i) =>
-            i.article_id === articleId ? { ...i, remise_ligne: Math.max(0, Math.min(100, percent)) } : i
+            sameLigne(i, articleId, varianteId) ? { ...i, remise_ligne: Math.max(0, Math.min(100, percent)) } : i
           ),
         })),
-      setLineNote: (articleId, note) =>
+      setLineNote: (articleId, note, varianteId) =>
         set((state) => ({
           items: state.items.map((i) =>
-            i.article_id === articleId ? { ...i, note } : i
+            sameLigne(i, articleId, varianteId) ? { ...i, note } : i
           ),
         })),
-      setLinePrice: (articleId, prixUnitaire, prixType) =>
+      setLinePrice: (articleId, prixUnitaire, prixType, varianteId) =>
         set((state) => ({
           items: state.items.map((i) =>
-            i.article_id === articleId ? { ...i, prix_unitaire: prixUnitaire, prix_type: prixType } : i
+            sameLigne(i, articleId, varianteId) ? { ...i, prix_unitaire: prixUnitaire, prix_type: prixType } : i
           ),
         })),
       addSplit: (mode) =>
