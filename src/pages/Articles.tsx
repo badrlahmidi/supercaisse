@@ -17,7 +17,8 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes, Printer } from "lucide-react"
+import { jsPDF } from "jspdf"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
@@ -112,6 +113,7 @@ export default function Articles() {
   const [showVariantes, setShowVariantes] = useState(false)
   const [composantsArticle, setComposantsArticle] = useState<Article | null>(null)
   const [showComposants, setShowComposants] = useState(false)
+  const [selectedForLabels, setSelectedForLabels] = useState<Set<number>>(new Set())
 
   const { data: articles, isLoading, refetch } = useProductsList(debouncedSearch)
   const { data: categories } = useCategoriesList()
@@ -280,6 +282,47 @@ export default function Articles() {
     setShowForm(true)
   }
 
+  const printBarcodeLabels = (items: Article[]) => {
+    if (!items.length) return
+    const doc = new jsPDF({ unit: "mm", format: "a4" })
+    const pageW = doc.internal.pageSize.getWidth()
+    const cols = 3
+    const rows = 10
+    const labelW = (pageW - 20) / cols
+    const labelH = 27
+    const marginX = 10
+    const marginY = 10
+
+    items.forEach((article, idx) => {
+      if (idx > 0 && idx % (cols * rows) === 0) doc.addPage()
+      const posInPage = idx % (cols * rows)
+      const col = posInPage % cols
+      const row = Math.floor(posInPage / cols)
+      const x = marginX + col * labelW
+      const y = marginY + row * labelH
+
+      doc.setDrawColor(200)
+      doc.rect(x, y, labelW, labelH)
+
+      doc.setFontSize(8)
+      const designation = article.designation.length > 28
+        ? article.designation.slice(0, 28) + "..."
+        : article.designation
+      doc.text(designation, x + labelW / 2, y + 6, { align: "center" })
+
+      const barcode = article.code_barre || `INT-${String(article.id).padStart(6, "0")}`
+      doc.setFontSize(14)
+      doc.text(barcode, x + labelW / 2, y + 14, { align: "center" })
+
+      doc.setFontSize(9)
+      doc.text(formatCurrency(article.prix_vente), x + labelW / 2, y + 22, { align: "center" })
+    })
+
+    doc.save("etiquettes_codes_barres.pdf")
+    toast.success(`${items.length} étiquette(s) générée(s)`)
+    setSelectedForLabels(new Set())
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -325,6 +368,12 @@ export default function Articles() {
               }
             }}
           />
+          {selectedForLabels.size > 0 && (
+            <Button variant="outline" onClick={() => printBarcodeLabels(articles?.filter((a) => selectedForLabels.has(a.id)) || [])}>
+              <Printer className="h-4 w-4 mr-2" />
+              Étiquettes ({selectedForLabels.size})
+            </Button>
+          )}
           <Button variant="outline" disabled={importing} onClick={() => document.getElementById("csv-import")?.click()}>
             {importing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
             Importer CSV
@@ -371,6 +420,20 @@ export default function Articles() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={articles?.length ? selectedForLabels.size === articles.length : false}
+                      onChange={(e) => {
+                        if (e.target.checked && articles) {
+                          setSelectedForLabels(new Set(articles.map((a) => a.id)))
+                        } else {
+                          setSelectedForLabels(new Set())
+                        }
+                      }}
+                    />
+                  </TableHead>
                   <TableHead>Code-barres</TableHead>
                   <TableHead>Désignation</TableHead>
                   <TableHead className="text-right">Prix achat</TableHead>
@@ -385,6 +448,19 @@ export default function Articles() {
               <TableBody>
                 {articles?.map((article) => (
                   <TableRow key={article.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={selectedForLabels.has(article.id)}
+                        onChange={(e) => {
+                          const next = new Set(selectedForLabels)
+                          if (e.target.checked) next.add(article.id)
+                          else next.delete(article.id)
+                          setSelectedForLabels(next)
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="font-mono text-sm">{article.code_barre || "—"}</TableCell>
                     <TableCell className="font-medium">{article.designation}</TableCell>
                     <TableCell className="text-right">{formatCurrency(article.prix_achat)}</TableCell>
@@ -434,7 +510,7 @@ export default function Articles() {
                 ))}
                 {!articles?.length && (
                   <TableRow>
-                    <TableCell colSpan={9}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={<SearchX className="h-12 w-12" />}
                         title="Aucun article trouvé"

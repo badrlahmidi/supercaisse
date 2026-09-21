@@ -12,6 +12,7 @@ export interface User {
 interface AuthContextType {
   user: User | null
   login: (login: string, password: string) => Promise<void>
+  loginAs: (userData: User) => void
   logout: () => void
   isLoading: boolean
   hasPermission: (roles: string[]) => boolean
@@ -81,6 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate("/pos")
   }, [navigate])
 
+  const loginAs = useCallback((userData: User) => {
+    setUser(userData)
+    localStorage.setItem("supercaisse_user", JSON.stringify(userData))
+  }, [])
+
   const logout = useCallback(() => {
     logout_()
   }, [logout_])
@@ -99,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading, hasPermission }}>
+    <AuthContext.Provider value={{ user, login, loginAs, logout, isLoading, hasPermission }}>
       {children}
     </AuthContext.Provider>
   )

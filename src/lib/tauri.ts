@@ -344,6 +344,14 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_rapport_x: () => ({ session_id: 1, date_ouverture: new Date().toISOString(), fond_initial: 0, nb_ventes: 0, ca_total: 0, total_remises: 0, nb_annulations: 0, nb_articles_vendus: 0, par_mode: [] }),
   get_releve_client: () => ({ client_id: 1, nom: "Client", credit_actuel: 0, credit_plafond: 0, ventes: [], paiements: [] }),
   get_audit_log: () => [],
+  login_pin: () => null,
+  set_user_pin: () => {},
+  get_rapport_detaille: () => ({ ca_total: 0, total_remises: 0, nb_ventes: 0, marge_brute: 0, tva_collectee: 0, top_articles: [], rotation_stock: [], ventes_par_jour: [], par_mode: [] }),
+  create_inventaire: () => ({ id: 1, nb_articles: 0 }),
+  get_inventaire: () => ({ id: 1, date_debut: new Date().toISOString(), statut: "en_cours", magasin_id: 1, lignes: [] }),
+  get_inventaires: () => [],
+  update_inventaire_ligne: () => {},
+  valider_inventaire: () => {},
 
   // Stock movements
   get_mouvements_stock: () => [],

@@ -408,6 +408,28 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             reference_id INTEGER,
             FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id)
         );
+
+        CREATE TABLE IF NOT EXISTS inventaires (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date_debut TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            date_fin TEXT,
+            statut TEXT DEFAULT 'en_cours',
+            magasin_id INTEGER NOT NULL,
+            utilisateur_id INTEGER,
+            FOREIGN KEY (magasin_id) REFERENCES magasins(id),
+            FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventaire_lignes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inventaire_id INTEGER NOT NULL,
+            article_id INTEGER NOT NULL,
+            stock_theorique REAL NOT NULL DEFAULT 0,
+            stock_compte REAL,
+            ecart REAL,
+            FOREIGN KEY (inventaire_id) REFERENCES inventaires(id),
+            FOREIGN KEY (article_id) REFERENCES articles(id)
+        );
     ")?;
 
     // Ajout des colonnes pour la migration des bases existantes
@@ -435,6 +457,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN suivi_lot INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE article_variantes ADD COLUMN code_barre TEXT", []);
+    let _ = conn.execute("ALTER TABLE utilisateurs ADD COLUMN pin_hash TEXT", []);
     let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN variante_id INTEGER", []);
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_variantes_code_barre_unique ON article_variantes(code_barre) WHERE code_barre IS NOT NULL AND code_barre != ''",
@@ -503,6 +526,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_code_barre_unique ON articles(code_barre) WHERE code_barre IS NOT NULL AND code_barre != '';
         CREATE INDEX IF NOT EXISTS idx_audit_log_date ON audit_log(date);
         CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+        CREATE INDEX IF NOT EXISTS idx_inventaire_lignes_inventaire ON inventaire_lignes(inventaire_id);
     ")?;
 
     // Migration du stock existant vers le "Magasin Principal"

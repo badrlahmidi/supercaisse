@@ -76,6 +76,8 @@ export default function Settings() {
   const [editingUser, setEditingUser] = useState<Utilisateur | null>(null)
   const [showUserForm, setShowUserForm] = useState(false)
   const [deleteUserConfirm, setDeleteUserConfirm] = useState<Utilisateur | null>(null)
+  const [pinValue, setPinValue] = useState("")
+  const [savingPin, setSavingPin] = useState(false)
 
   const { data: users } = useQuery({
     queryKey: ["utilisateurs"],
@@ -165,12 +167,14 @@ export default function Settings() {
   const openEditUser = (u: Utilisateur) => {
     setEditingUser(u)
     userForm.reset({ login: u.login, nom: u.nom, role: u.role as "admin" | "manager" | "caissier", password: "", confirmPassword: "" })
+    setPinValue("")
     setShowUserForm(true)
   }
 
   const openCreateUser = () => {
     setEditingUser(null)
     userForm.reset({ login: "", nom: "", role: "caissier", password: "", confirmPassword: "" })
+    setPinValue("")
     setShowUserForm(true)
   }
 
@@ -441,6 +445,46 @@ export default function Settings() {
                   <Button type="button" variant="ghost" size="sm" onClick={() => setShowPassword(!showPassword)}>
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pin">PIN rapide (4 chiffres, optionnel)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      pattern="[0-9]*"
+                      placeholder="ex: 1234"
+                      id="pin"
+                      value={pinValue}
+                      onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      className="max-w-[120px]"
+                    />
+                    {editingUser && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={pinValue.length !== 4 || savingPin}
+                        onClick={async () => {
+                          if (!editingUser || pinValue.length !== 4) return
+                          setSavingPin(true)
+                          try {
+                            await invoke("set_user_pin", { userId: editingUser.id, pin: pinValue })
+                            toast.success("PIN enregistré")
+                            setPinValue("")
+                          } catch (err) {
+                            toast.error(String(err))
+                          } finally {
+                            setSavingPin(false)
+                          }
+                        }}
+                      >
+                        {savingPin ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enregistrer le PIN"}
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Permet le changement rapide de caissier sans saisir le mot de passe complet</p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setShowUserForm(false)}>

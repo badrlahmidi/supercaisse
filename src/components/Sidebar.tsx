@@ -24,6 +24,8 @@ import {
   BarChart3,
   Store,
   Shield,
+  ClipboardCheck,
+  FileBarChart,
   type LucideIcon,
 } from "lucide-react"
 
@@ -63,6 +65,7 @@ const navGroups: NavGroup[] = [
       { path: "/ventes", label: "Ventes", icon: ReceiptText, roles: ["admin", "manager"] },
       { path: "/achats", label: "Achats", icon: ShoppingBag, roles: ["admin", "manager"] },
       { path: "/stock", label: "Stock", icon: Package, roles: ["admin", "manager"] },
+      { path: "/inventaire", label: "Inventaire", icon: ClipboardCheck, roles: ["admin", "manager"] },
     ],
   },
   {
@@ -70,6 +73,7 @@ const navGroups: NavGroup[] = [
     items: [
       { path: "/journal", label: "Journal de caisse", icon: BarChart3, roles: ["admin", "manager"] },
       { path: "/cheques", label: "Suivi des chèques", icon: Banknote, roles: ["admin", "manager"] },
+      { path: "/rapports", label: "Rapports", icon: FileBarChart, roles: ["admin", "manager"] },
     ],
   },
   {

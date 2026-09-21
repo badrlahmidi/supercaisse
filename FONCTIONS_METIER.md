@@ -16,6 +16,15 @@
 > Programme de fidélité (→ ✅ : colonne + historique dans Clients, config dans Paramètres).
 > Sélecteur secteur d'activité (→ ✅ : options "Mode"/"Vrac" retirées). Bug persistance
 > settings corrigé. Score final Phase 1 : **56 ✅ / 2 🔶 / 27 ⬜**.
+>
+> **Mise à jour du 2026-09-21 (Phase 3)** : Étiquettes code-barres imprimables (→ ✅ : sélection
+> d'articles + planches PDF jsPDF 3×10 par page). Rapports détaillés marge/TVA/rotation
+> (→ ✅ : page Rapports avec 5 KPIs, graphique CA/jour, top articles, rotation stock, ventilation
+> paiements). Export PDF des rapports (→ ✅ : jsPDF A4 avec KPIs + top articles + ventilation).
+> PIN rapide de changement de caissier (→ ✅ : numpad dans l'écran de verrouillage, set_user_pin
+> dans Settings, login_pin en backend). Inventaire physique comptage vs théorique
+> (→ ✅ : page Inventaire avec création par magasin, comptage article par article, validation
+> avec application des écarts au stock). Score Phase 3 : **66 ✅ / 2 🔶 / 17 ⬜**.
 
 ---
 
@@ -53,7 +62,7 @@
 | Désactivation d'article sans le supprimer | ✅ | |
 | Détection doublon code-barres | ✅ | Contrainte unique en base (corrige une erreur de l'audit initial, qui l'avait déclarée absente) |
 | Génération automatique de code-barres interne | ✅ | Format INT-{id:06} auto-généré si vide à la création |
-| Étiquettes code-barres imprimables (planches PDF) | ⬜ | |
+| Étiquettes code-barres imprimables (planches PDF) | ✅ | Sélection dans la liste Articles, génération planches PDF jsPDF (3×10 étiquettes/page, désignation + code + prix) |
 | Prix multiple (public / grossiste) | ✅ | Prix grossiste optionnel par article, bascule d'un clic sur la ligne du panier caisse |
 | Produits composés / kits | ✅ | Un kit vend normalement au scan ; le stock de chaque composant est décrémenté automatiquement au prorata |
 | Variantes taille/couleur avec stock dédié | ✅ | Création/gestion et vente à la caisse toutes les deux opérationnelles |
@@ -68,7 +77,7 @@
 | Alertes seuil bas / rupture | ✅ | |
 | Valorisation du stock (affichage) | ✅ | |
 | Alertes péremption avec horizon paramétrable (7/15/30/90 jours) | ✅ | Écran dédié, retrait du stock en un clic (péremption/casse) |
-| Inventaire physique (comptage vs théorique) | ⬜ | |
+| Inventaire physique (comptage vs théorique) | ✅ | Page Inventaire : création par magasin, comptage article par article, progression, validation avec application écarts au stock réel + mouvements_stock |
 | Suggestion de réapprovisionnement automatique | ⬜ | |
 | Cohérence du stock (pas de survente inter-boutique) | ✅ | Corrigé : le stock global affiché est maintenant un agrégat toujours recalculé depuis le détail par boutique, plus deux compteurs déconnectés |
 | Utilisation réelle du multi-boutique (choisir sa boutique, en créer une 2ᵉ) | ✅ | Page Boutiques (CRUD), sélection de boutique à l'ouverture de session caisse, vue du stock par boutique |
@@ -128,15 +137,15 @@
 | Permissions fines par module (voir/créer/modifier/exporter) | ⬜ | |
 | Journal d'audit (qui a fait quoi, quand) | ✅ | Table audit_log + logging annulations/modifications/suppressions/paramètres + page admin filtrable + export CSV |
 | Verrouillage automatique après inactivité | ✅ | Configurable en secondes dans Paramètres > Système, overlay de déverrouillage par mot de passe |
-| PIN rapide de changement de caissier | ⬜ | |
+| PIN rapide de changement de caissier | ✅ | Numpad dans l'écran de verrouillage (PIN 4 chiffres), configuration dans Paramètres > Utilisateurs, login_pin backend |
 
 ## 9. Rapports & pilotage
 
 | Fonction | Statut | Note |
 |---|---|---|
 | Tableau de bord (CA, articles, alertes stock, crédit clients) | ✅ | 5 indicateurs + graphique 7 jours |
-| Rapports détaillés (marge, TVA collectée, rotation stock) | ⬜ | |
-| Export PDF/Excel des rapports | ⬜ | Export CSV seulement, et pas sur tous les écrans |
+| Rapports détaillés (marge, TVA collectée, rotation stock) | ✅ | Page Rapports avec 5 KPIs (CA, marge, TVA, nb ventes, remises), graphique CA/jour, top 10 articles, rotation stock top 20, ventilation par mode de paiement |
+| Export PDF/Excel des rapports | ✅ | Export PDF (jsPDF A4, KPIs + top articles + ventilation) et CSV depuis la page Rapports |
 | Comparateur multi-boutiques | ⬜ | |
 
 ## 10. Matériel & intégrations physiques
@@ -165,9 +174,9 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 56 |
+| ✅ Inclus et utilisable | 66 |
 | 🔶 Inclus mais à corriger/compléter | 2 |
-| ⬜ Manquant | 27 |
+| ⬜ Manquant | 17 |
 
 *(Mis à jour 2026-09-21 : impression, tiroir-caisse et ESC/POS passent en ✅ (cross-platform Windows/Linux/Mac) ; fidélité ✅ (colonne + historique dans Clients, config dans Paramètres) ; secteur ✅ (options "Mode"/"Vrac" sans effet retirées) ; bug persistance paramètres corrigé ; doublon footer ESC/POS corrigé. Recompté : 56 ✅, 2 🔶, 27 ⬜.)*
 

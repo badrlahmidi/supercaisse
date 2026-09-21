@@ -2207,3 +2207,346 @@ pub fn get_audit_log(db: State<DbState>, debut: Option<String>, fin: Option<Stri
     }).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
+
+// ─── PIN rapide (changement caissier) ───
+
+#[tauri::command]
+pub fn login_pin(db: State<DbState>, pin: String) -> Result<Option<Utilisateur>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, login, nom, role, pin_hash FROM utilisateurs WHERE pin_hash IS NOT NULL AND pin_hash != ''"
+    ).map_err(|e| e.to_string())?;
+    let users: Vec<(i64, String, String, String, String)> = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect();
+    for (id, ulogin, nom, role, hash) in users {
+        if verify_password(&pin, &hash) {
+            return Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role }));
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+pub fn set_user_pin(db: State<DbState>, user_id: i64, pin: String) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let hash = if pin.is_empty() {
+        String::new()
+    } else {
+        hash_password(&pin)
+    };
+    conn.execute(
+        "UPDATE utilisateurs SET pin_hash = ?1 WHERE id = ?2",
+        params![hash, user_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ─── Rapports détaillés ───
+
+#[tauri::command]
+pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Option<String>) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let date_filter = |col: &str| -> (String, Vec<String>) {
+        let mut clause = String::new();
+        let mut params = Vec::new();
+        if let Some(d) = &debut { if !d.is_empty() { clause.push_str(&format!(" AND {} >= ?", col)); params.push(d.clone()); } }
+        if let Some(f) = &fin { if !f.is_empty() { clause.push_str(&format!(" AND {} <= ?", col)); params.push(format!("{} 23:59:59", f)); } }
+        (clause, params)
+    };
+
+    let (wc, wp) = date_filter("v.date");
+    let base_sql = format!(
+        "SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0),
+                COALESCE(SUM(v.montant_remise), 0),
+                COUNT(*)
+         FROM ventes v WHERE v.statut != 'annulee' {}", wc
+    );
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = wp.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let (ca_total, total_remises, nb_ventes): (f64, f64, i64) = conn.query_row(
+        &base_sql, params_ref.as_slice(),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).unwrap_or((0.0, 0.0, 0));
+
+    let (wc2, wp2) = date_filter("v.date");
+    let marge_sql = format!(
+        "SELECT COALESCE(SUM(va.quantite * (va.prix_unitaire - a.prix_achat)), 0)
+         FROM vente_articles va
+         JOIN ventes v ON v.id = va.vente_id
+         JOIN articles a ON a.id = va.article_id
+         WHERE v.statut != 'annulee' {}", wc2
+    );
+    let params_ref2: Vec<&dyn rusqlite::types::ToSql> = wp2.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let marge_brute: f64 = conn.query_row(&marge_sql, params_ref2.as_slice(), |r| r.get(0)).unwrap_or(0.0);
+
+    let (wc3, wp3) = date_filter("v.date");
+    let tva_sql = format!(
+        "SELECT COALESCE(SUM(va.quantite * va.prix_unitaire * va.tva / 100.0), 0)
+         FROM vente_articles va
+         JOIN ventes v ON v.id = va.vente_id
+         WHERE v.statut != 'annulee' {}", wc3
+    );
+    let params_ref3: Vec<&dyn rusqlite::types::ToSql> = wp3.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let tva_collectee: f64 = conn.query_row(&tva_sql, params_ref3.as_slice(), |r| r.get(0)).unwrap_or(0.0);
+
+    let (wc4, wp4) = date_filter("v.date");
+    let top_sql = format!(
+        "SELECT a.designation, SUM(va.quantite) as qty, SUM(va.total_ligne) as total
+         FROM vente_articles va
+         JOIN ventes v ON v.id = va.vente_id
+         JOIN articles a ON a.id = va.article_id
+         WHERE v.statut != 'annulee' {}
+         GROUP BY va.article_id ORDER BY qty DESC LIMIT 10", wc4
+    );
+    let params_ref4: Vec<&dyn rusqlite::types::ToSql> = wp4.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt = conn.prepare(&top_sql).map_err(|e| e.to_string())?;
+    let top_articles = stmt.query_map(params_ref4.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "designation": r.get::<_, String>(0)?,
+            "quantite": r.get::<_, f64>(1)?,
+            "total": r.get::<_, f64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let (wc5, wp5) = date_filter("v.date");
+    let rotation_sql = format!(
+        "SELECT a.id, a.designation, a.stock, COALESCE(SUM(va.quantite), 0) as vendu
+         FROM articles a
+         LEFT JOIN vente_articles va ON va.article_id = a.id
+         LEFT JOIN ventes v ON v.id = va.vente_id AND v.statut != 'annulee' {}
+         WHERE a.actif = 1
+         GROUP BY a.id ORDER BY vendu DESC LIMIT 20", wc5
+    );
+    let params_ref5: Vec<&dyn rusqlite::types::ToSql> = wp5.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt2 = conn.prepare(&rotation_sql).map_err(|e| e.to_string())?;
+    let rotation_stock = stmt2.query_map(params_ref5.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "designation": r.get::<_, String>(1)?,
+            "stock": r.get::<_, f64>(2)?,
+            "vendu": r.get::<_, f64>(3)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let (wc6, wp6) = date_filter("v.date");
+    let daily_sql = format!(
+        "SELECT date(v.date) as jour, COALESCE(SUM(v.montant_total - v.montant_remise), 0) as ca, COUNT(*) as nb
+         FROM ventes v WHERE v.statut != 'annulee' {}
+         GROUP BY jour ORDER BY jour", wc6
+    );
+    let params_ref6: Vec<&dyn rusqlite::types::ToSql> = wp6.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt3 = conn.prepare(&daily_sql).map_err(|e| e.to_string())?;
+    let ventes_par_jour = stmt3.query_map(params_ref6.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "jour": r.get::<_, String>(0)?,
+            "ca": r.get::<_, f64>(1)?,
+            "nb": r.get::<_, i64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let (wc7, wp7) = date_filter("v.date");
+    let mode_sql = format!(
+        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0) as total, COUNT(*) as nb
+         FROM ventes v WHERE v.statut != 'annulee' {}
+         GROUP BY mode_paiement", wc7
+    );
+    let params_ref7: Vec<&dyn rusqlite::types::ToSql> = wp7.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt4 = conn.prepare(&mode_sql).map_err(|e| e.to_string())?;
+    let par_mode = stmt4.query_map(params_ref7.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "mode": r.get::<_, String>(0)?,
+            "total": r.get::<_, f64>(1)?,
+            "count": r.get::<_, i64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "ca_total": ca_total,
+        "total_remises": total_remises,
+        "nb_ventes": nb_ventes,
+        "marge_brute": marge_brute,
+        "tva_collectee": tva_collectee,
+        "top_articles": top_articles,
+        "rotation_stock": rotation_stock,
+        "ventes_par_jour": ventes_par_jour,
+        "par_mode": par_mode,
+    }))
+}
+
+// ─── Inventaire physique ───
+
+#[tauri::command]
+pub fn create_inventaire(db: State<DbState>, magasin_id: i64, utilisateur_id: i64) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO inventaires (magasin_id, utilisateur_id) VALUES (?1, ?2)",
+        params![magasin_id, utilisateur_id],
+    ).map_err(|e| e.to_string())?;
+    let inv_id = conn.last_insert_rowid();
+
+    let mut stmt = conn.prepare(
+        "SELECT a.id, COALESCE(s.quantite, 0)
+         FROM articles a
+         LEFT JOIN article_stocks s ON s.article_id = a.id AND s.magasin_id = ?1
+         WHERE a.actif = 1
+         ORDER BY a.designation"
+    ).map_err(|e| e.to_string())?;
+    let rows: Vec<(i64, f64)> = stmt.query_map(params![magasin_id], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect();
+
+    for (article_id, stock_theo) in &rows {
+        conn.execute(
+            "INSERT INTO inventaire_lignes (inventaire_id, article_id, stock_theorique) VALUES (?1, ?2, ?3)",
+            params![inv_id, article_id, stock_theo],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    log_audit(&conn, Some(utilisateur_id), "creer_inventaire", &format!("Inventaire #{} créé ({} articles)", inv_id, rows.len()), Some("inventaire"), Some(inv_id));
+
+    Ok(serde_json::json!({ "id": inv_id, "nb_articles": rows.len() }))
+}
+
+#[tauri::command]
+pub fn get_inventaire(db: State<DbState>, inventaire_id: i64) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let (date_debut, statut, magasin_id): (String, String, i64) = conn.query_row(
+        "SELECT date_debut, statut, magasin_id FROM inventaires WHERE id = ?1",
+        params![inventaire_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).map_err(|_| "Inventaire introuvable".to_string())?;
+
+    let mut stmt = conn.prepare(
+        "SELECT il.id, il.article_id, a.designation, a.code_barre, il.stock_theorique, il.stock_compte, il.ecart
+         FROM inventaire_lignes il
+         JOIN articles a ON a.id = il.article_id
+         WHERE il.inventaire_id = ?1
+         ORDER BY a.designation"
+    ).map_err(|e| e.to_string())?;
+    let lignes = stmt.query_map(params![inventaire_id], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "article_id": r.get::<_, i64>(1)?,
+            "designation": r.get::<_, String>(2)?,
+            "code_barre": r.get::<_, Option<String>>(3)?,
+            "stock_theorique": r.get::<_, f64>(4)?,
+            "stock_compte": r.get::<_, Option<f64>>(5)?,
+            "ecart": r.get::<_, Option<f64>>(6)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "id": inventaire_id,
+        "date_debut": date_debut,
+        "statut": statut,
+        "magasin_id": magasin_id,
+        "lignes": lignes,
+    }))
+}
+
+#[tauri::command]
+pub fn get_inventaires(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT i.id, i.date_debut, i.date_fin, i.statut, i.magasin_id, m.nom, u.nom,
+                (SELECT COUNT(*) FROM inventaire_lignes WHERE inventaire_id = i.id),
+                (SELECT COUNT(*) FROM inventaire_lignes WHERE inventaire_id = i.id AND stock_compte IS NOT NULL)
+         FROM inventaires i
+         JOIN magasins m ON m.id = i.magasin_id
+         LEFT JOIN utilisateurs u ON u.id = i.utilisateur_id
+         ORDER BY i.date_debut DESC LIMIT 50"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "date_debut": r.get::<_, String>(1)?,
+            "date_fin": r.get::<_, Option<String>>(2)?,
+            "statut": r.get::<_, String>(3)?,
+            "magasin_id": r.get::<_, i64>(4)?,
+            "magasin_nom": r.get::<_, String>(5)?,
+            "utilisateur_nom": r.get::<_, Option<String>>(6)?,
+            "nb_articles": r.get::<_, i64>(7)?,
+            "nb_comptes": r.get::<_, i64>(8)?
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_inventaire_ligne(db: State<DbState>, ligne_id: i64, stock_compte: f64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let stock_theorique: f64 = conn.query_row(
+        "SELECT stock_theorique FROM inventaire_lignes WHERE id = ?1",
+        params![ligne_id], |r| r.get(0),
+    ).map_err(|_| "Ligne introuvable".to_string())?;
+    let ecart = stock_compte - stock_theorique;
+    conn.execute(
+        "UPDATE inventaire_lignes SET stock_compte = ?1, ecart = ?2 WHERE id = ?3",
+        params![stock_compte, ecart, ligne_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn valider_inventaire(db: State<DbState>, inventaire_id: i64, utilisateur_id: i64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let statut: String = conn.query_row(
+        "SELECT statut FROM inventaires WHERE id = ?1",
+        params![inventaire_id], |r| r.get(0),
+    ).map_err(|_| "Inventaire introuvable".to_string())?;
+    if statut != "en_cours" {
+        return Err("Cet inventaire est déjà validé".to_string());
+    }
+
+    let magasin_id: i64 = conn.query_row(
+        "SELECT magasin_id FROM inventaires WHERE id = ?1",
+        params![inventaire_id], |r| r.get(0),
+    ).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn.prepare(
+        "SELECT article_id, stock_compte, ecart FROM inventaire_lignes WHERE inventaire_id = ?1 AND stock_compte IS NOT NULL AND ecart != 0"
+    ).map_err(|e| e.to_string())?;
+    let adjustments: Vec<(i64, f64, f64)> = stmt.query_map(params![inventaire_id], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect();
+
+    for (article_id, stock_compte, ecart) in &adjustments {
+        conn.execute(
+            "INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES (?1, ?2, ?3)
+             ON CONFLICT(article_id, magasin_id) DO UPDATE SET quantite = ?3",
+            params![article_id, magasin_id, stock_compte],
+        ).map_err(|e| e.to_string())?;
+
+        let total_stock: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(quantite), 0) FROM article_stocks WHERE article_id = ?1",
+            params![article_id], |r| r.get(0),
+        ).unwrap_or(0.0);
+        conn.execute("UPDATE articles SET stock = ?1 WHERE id = ?2", params![total_stock, article_id]).map_err(|e| e.to_string())?;
+
+        conn.execute(
+            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id)
+             VALUES (?1, ?2, 'inventaire', ?3, 'inventaire', ?4)",
+            params![article_id, ecart, inventaire_id, magasin_id],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    conn.execute(
+        "UPDATE inventaires SET statut = 'valide', date_fin = datetime('now','localtime') WHERE id = ?1",
+        params![inventaire_id],
+    ).map_err(|e| e.to_string())?;
+
+    log_audit(&conn, Some(utilisateur_id), "valider_inventaire",
+        &format!("Inventaire #{} validé ({} écarts appliqués)", inventaire_id, adjustments.len()),
+        Some("inventaire"), Some(inventaire_id));
+
+    Ok(())
+}

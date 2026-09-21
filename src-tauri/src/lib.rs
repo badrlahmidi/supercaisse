@@ -103,6 +103,14 @@ pub fn run() {
             commands::get_rapport_x,
             commands::get_releve_client,
             commands::get_audit_log,
+            commands::login_pin,
+            commands::set_user_pin,
+            commands::get_rapport_detaille,
+            commands::create_inventaire,
+            commands::get_inventaire,
+            commands::get_inventaires,
+            commands::update_inventaire_ligne,
+            commands::valider_inventaire,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

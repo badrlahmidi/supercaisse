@@ -4,15 +4,16 @@ import { useAppSettings } from "@/hooks/useSettings"
 import { invoke } from "@/lib/tauri"
 import { Input } from "@/ui/Input"
 import { Button } from "@/ui/Button"
-import { Lock } from "lucide-react"
-import { toast } from "sonner"
+import { Lock, Delete } from "lucide-react"
 
 export default function IdleLock({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth()
+  const { user, loginAs } = useAuth()
   const { data: settings } = useAppSettings()
   const [locked, setLocked] = useState(false)
   const [password, setPassword] = useState("")
+  const [pin, setPin] = useState("")
   const [error, setError] = useState("")
+  const [mode, setMode] = useState<"password" | "pin">("pin")
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const timeout = parseInt(settings?.idle_timeout || "300", 10) * 1000
@@ -34,13 +35,14 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
     }
   }, [resetTimer, user, timeout])
 
-  const handleUnlock = async () => {
+  const handleUnlockPassword = async () => {
     if (!user) return
     try {
       const result = await invoke<{ id: number } | null>("login", { login: user.login, password })
       if (result) {
         setLocked(false)
         setPassword("")
+        setPin("")
         setError("")
         resetTimer()
       } else {
@@ -48,6 +50,31 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
       }
     } catch {
       setError("Erreur de connexion")
+    }
+  }
+
+  const handlePinDigit = async (digit: string) => {
+    const next = pin + digit
+    setPin(next)
+    setError("")
+    if (next.length >= 4) {
+      try {
+        const result = await invoke<{ id: number; login: string; nom: string; role: string } | null>("login_pin", { pin: next })
+        if (result) {
+          loginAs(result)
+          setLocked(false)
+          setPin("")
+          setPassword("")
+          setError("")
+          resetTimer()
+        } else {
+          setError("PIN incorrect")
+          setPin("")
+        }
+      } catch {
+        setError("Erreur de connexion")
+        setPin("")
+      }
     }
   }
 
@@ -67,20 +94,82 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
               Connecté en tant que <span className="font-medium">{user.nom}</span>
             </p>
           </div>
-          <form
-            onSubmit={(e) => { e.preventDefault(); handleUnlock() }}
-            className="space-y-4"
-          >
-            <Input
-              type="password"
-              placeholder="Mot de passe"
-              value={password}
-              onChange={(e) => { setPassword(e.target.value); setError("") }}
-              autoFocus
-            />
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full">Déverrouiller</Button>
-          </form>
+
+          <div className="flex gap-2 justify-center">
+            <Button
+              variant={mode === "pin" ? "default" : "outline"}
+              size="sm"
+              onClick={() => { setMode("pin"); setError(""); setPassword(""); setPin("") }}
+            >
+              PIN rapide
+            </Button>
+            <Button
+              variant={mode === "password" ? "default" : "outline"}
+              size="sm"
+              onClick={() => { setMode("password"); setError(""); setPassword(""); setPin("") }}
+            >
+              Mot de passe
+            </Button>
+          </div>
+
+          {mode === "password" ? (
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleUnlockPassword() }}
+              className="space-y-4"
+            >
+              <Input
+                type="password"
+                placeholder="Mot de passe"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError("") }}
+                autoFocus
+              />
+              {error && <p className="text-sm text-destructive text-center">{error}</p>}
+              <Button type="submit" className="w-full">Déverrouiller</Button>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex justify-center gap-2">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={`h-4 w-4 rounded-full border-2 transition-colors ${
+                      i < pin.length ? "bg-primary border-primary" : "border-muted-foreground/30"
+                    }`}
+                  />
+                ))}
+              </div>
+              {error && <p className="text-sm text-destructive text-center">{error}</p>}
+              <p className="text-xs text-muted-foreground text-center">Saisir le PIN à 4 chiffres (tout utilisateur)</p>
+              <div className="grid grid-cols-3 gap-2">
+                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
+                  <Button
+                    key={d}
+                    variant="outline"
+                    className="h-14 text-xl font-bold"
+                    onClick={() => handlePinDigit(d)}
+                  >
+                    {d}
+                  </Button>
+                ))}
+                <div />
+                <Button
+                  variant="outline"
+                  className="h-14 text-xl font-bold"
+                  onClick={() => handlePinDigit("0")}
+                >
+                  0
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-14"
+                  onClick={() => { setPin(""); setError("") }}
+                >
+                  <Delete className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
