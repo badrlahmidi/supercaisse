@@ -1068,10 +1068,9 @@ pub fn get_current_session(db: State<DbState>, caissier_id: i64) -> Result<Optio
 }
 
 #[tauri::command]
-pub fn open_session(db: State<DbState>, caissier_id: i64, fond_initial: f64) -> Result<i64, String> {
+pub fn open_session(db: State<DbState>, caissier_id: i64, fond_initial: f64, magasin_id: Option<i64>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-    // Check if already open
     let count: i64 = conn.query_row(
         "SELECT count(*) FROM sessions_caisse WHERE caissier_id = ?1 AND statut = 'ouverte'",
         params![caissier_id],
@@ -1082,10 +1081,13 @@ pub fn open_session(db: State<DbState>, caissier_id: i64, fond_initial: f64) -> 
         return Err("Une session est déjà ouverte pour ce caissier".to_string());
     }
 
-    let magasin_id = default_magasin_id(&conn)?;
+    let mid = match magasin_id {
+        Some(id) => id,
+        None => default_magasin_id(&conn)?,
+    };
     conn.execute(
         "INSERT INTO sessions_caisse (caissier_id, fond_initial, statut, magasin_id) VALUES (?1, ?2, 'ouverte', ?3)",
-        params![caissier_id, fond_initial, magasin_id]
+        params![caissier_id, fond_initial, mid]
     ).map_err(|e| e.to_string())?;
 
     Ok(conn.last_insert_rowid())
@@ -1099,6 +1101,82 @@ pub fn add_magasin(db: State<DbState>, nom: String, adresse: Option<String>) -> 
         params![nom, adresse],
     ).map_err(|e| e.to_string())?;
     Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn update_magasin(db: State<DbState>, id: i64, nom: String, adresse: Option<String>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE magasins SET nom=?1, adresse=?2 WHERE id=?3",
+        params![nom, adresse, id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_magasin(db: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let count: i64 = conn.query_row(
+        "SELECT count(*) FROM magasins", [], |r| r.get(0)
+    ).unwrap_or(0);
+    if count <= 1 {
+        return Err("Impossible de supprimer le dernier magasin".to_string());
+    }
+    let has_sessions: bool = conn.query_row(
+        "SELECT count(*) > 0 FROM sessions_caisse WHERE magasin_id = ?1", params![id], |r| r.get(0)
+    ).unwrap_or(false);
+    if has_sessions {
+        return Err("Ce magasin a des sessions de caisse associées".to_string());
+    }
+    conn.execute("DELETE FROM article_stocks WHERE magasin_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM magasins WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_transferts(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.date, t.statut, ms.nom AS source_nom, md.nom AS dest_nom, u.nom AS utilisateur_nom
+         FROM transferts_stock t
+         JOIN magasins ms ON ms.id = t.source_id
+         JOIN magasins md ON md.id = t.dest_id
+         LEFT JOIN utilisateurs u ON u.id = t.utilisateur_id
+         ORDER BY t.date DESC"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "date": row.get::<_, String>(1)?,
+            "statut": row.get::<_, String>(2)?,
+            "source_nom": row.get::<_, String>(3)?,
+            "dest_nom": row.get::<_, String>(4)?,
+            "utilisateur_nom": row.get::<_, Option<String>>(5)?
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_stock_par_magasin(db: State<DbState>, magasin_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.designation, a.code_barre, COALESCE(s.quantite, 0) AS stock, a.stock_alerte
+         FROM articles a
+         LEFT JOIN article_stocks s ON s.article_id = a.id AND s.magasin_id = ?1
+         WHERE a.actif = 1
+         ORDER BY a.designation"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![magasin_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "designation": row.get::<_, String>(1)?,
+            "code_barre": row.get::<_, Option<String>>(2)?,
+            "stock": row.get::<_, f64>(3)?,
+            "stock_alerte": row.get::<_, Option<f64>>(4)?
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -134,6 +134,16 @@ const mockFournisseurs: Fournisseur[] = [
   { id: 1, nom: "Fournisseur Test", adresse: null, telephone: null, ice: null, email: null },
 ]
 
+interface Magasin {
+  id: number
+  nom: string
+  adresse: string | null
+}
+
+const mockMagasins: Magasin[] = [
+  { id: 1, nom: "Magasin Principal", adresse: "123 Rue Mohammed V, Casablanca" },
+]
+
 const mockTables: TableResto[] = [
   { id: 1, nom: "Table 1", statut: "libre", ticket_id: null },
   { id: 2, nom: "Table 2", statut: "libre", ticket_id: null },
@@ -319,6 +329,14 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
 
   // Stock movements
   get_mouvements_stock: () => [],
+
+  // Magasins
+  get_magasins: () => mockMagasins,
+  add_magasin: ({ nom, adresse }) => { nextId++; mockMagasins.push({ id: nextId, nom: nom as string, adresse: (adresse as string) || null }); return nextId },
+  update_magasin: ({ id, nom, adresse }) => { const m = mockMagasins.find(m => m.id === id); if (m) { m.nom = nom as string; m.adresse = (adresse as string) || null } },
+  delete_magasin: ({ id }) => { if (mockMagasins.length <= 1) throw new Error("Impossible de supprimer le dernier magasin"); const idx = mockMagasins.findIndex(m => m.id === id); if (idx >= 0) mockMagasins.splice(idx, 1) },
+  get_transferts: () => [],
+  get_stock_par_magasin: () => [],
 
   // Restaurant tables
   get_tables: () => mockTables,

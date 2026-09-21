@@ -10,8 +10,9 @@
 >
 > **Mise à jour du 2026-09-21** : stock multi-magasin, en-tête légal DGI (ICE/IF/RC/Patente), PDF
 > facture archivable, traçabilité lot/péremption, détection doublon code-barres, déclinaisons
-> taille/couleur, multi-prix et produits composés/kits sont passés en ✅ — détail dans
-> `ROADMAP_STATUS.md`.
+> taille/couleur, multi-prix et produits composés/kits sont passés en ✅. UI multi-boutique
+> (page Boutiques CRUD, sélection magasin à l'ouverture, transfert inter-boutiques, vue stock
+> par magasin) également passée en ✅ — détail dans `ROADMAP_STATUS.md`.
 
 ---
 
@@ -67,8 +68,8 @@
 | Inventaire physique (comptage vs théorique) | ⬜ | |
 | Suggestion de réapprovisionnement automatique | ⬜ | |
 | Cohérence du stock (pas de survente inter-boutique) | ✅ | Corrigé : le stock global affiché est maintenant un agrégat toujours recalculé depuis le détail par boutique, plus deux compteurs déconnectés |
-| Utilisation réelle du multi-boutique (choisir sa boutique, en créer une 2ᵉ) | ⬜ | La donnée est fiable mais il manque encore l'écran pour créer une boutique et choisir sur quel poste on travaille |
-| Transfert de stock entre boutiques | 🔶 | La fonction est fiable côté données, mais reste inutilisable sans écran pour créer une 2ᵉ boutique |
+| Utilisation réelle du multi-boutique (choisir sa boutique, en créer une 2ᵉ) | ✅ | Page Boutiques (CRUD), sélection de boutique à l'ouverture de session caisse, vue du stock par boutique |
+| Transfert de stock entre boutiques | ✅ | Interface de transfert inter-boutiques avec validation, depuis la page Boutiques |
 
 ## 4. Achats & Fournisseurs
 
@@ -161,9 +162,9 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 40 |
-| 🔶 Inclus mais à corriger/compléter | 13 |
-| ⬜ Manquant | 25 |
+| ✅ Inclus et utilisable | 42 |
+| 🔶 Inclus mais à corriger/compléter | 12 |
+| ⬜ Manquant | 24 |
 
 *(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
 
@@ -174,7 +175,7 @@
 3. **Impression Windows-only** — décide si on assume "Windows uniquement" comme contrainte produit ou si on corrige pour élargir le marché adressable.
 4. **Sélecteur de secteur d'activité cosmétique** — soit on retire "Mode"/"Vrac" de la liste tant qu'ils ne font rien (évite de tromper le client au moment de la configuration), soit on les câble.
 5. **Fidélité invisible côté gérant** — la donnée existe et s'accumule déjà en base ; l'écran de consultation/config est un développement relativement court par rapport à sa valeur perçue commerciale.
-6. **Utilisation réelle du multi-boutique** — la donnée est maintenant fiable (point 1), mais il manque l'écran pour créer une 2ᵉ boutique et choisir son poste de caisse.
+6. ~~Utilisation réelle du multi-boutique~~ ✅ corrigé le 2026-09-21 — page Boutiques (CRUD + transferts + vue stock par magasin), sélection de boutique à l'ouverture de session caisse.
 
 ## Les fonctions manquantes qui structurent le plus la suite
 

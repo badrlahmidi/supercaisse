@@ -18,6 +18,7 @@ const Stock = lazy(() => import("@/pages/Stock"))
 const MouvementsStock = lazy(() => import("@/pages/MouvementsStock"))
 const PeremptionsStock = lazy(() => import("@/pages/PeremptionsStock"))
 const JournalCaisse = lazy(() => import("@/pages/JournalCaisse"))
+const Magasins = lazy(() => import("@/pages/Magasins"))
 const Settings = lazy(() => import("@/pages/Settings"))
 const Cheques = lazy(() => import("@/pages/Cheques"))
 
@@ -55,6 +56,7 @@ export const router = createBrowserRouter([
           { path: "stock/peremptions", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><PeremptionsStock /></ProtectedRoute></SuspensePage> },
           { path: "journal", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><JournalCaisse /></ProtectedRoute></SuspensePage> },
           { path: "cheques", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Cheques /></ProtectedRoute></SuspensePage> },
+          { path: "magasins", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Magasins /></ProtectedRoute></SuspensePage> },
           { path: "settings", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Settings /></ProtectedRoute></SuspensePage> },
         ],
       },

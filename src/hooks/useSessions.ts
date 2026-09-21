@@ -24,8 +24,8 @@ export function useCurrentSession(caissierId?: number) {
 export function useOpenSession() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ caissierId, fondInitial }: { caissierId: number, fondInitial: number }) =>
-      invoke<number>("open_session", { caissierId, fondInitial }),
+    mutationFn: ({ caissierId, fondInitial, magasinId }: { caissierId: number, fondInitial: number, magasinId?: number }) =>
+      invoke<number>("open_session", { caissierId, fondInitial, magasinId }),
     onSuccess: (_, variables) => {
       toast.success("Session de caisse ouverte")
       qc.invalidateQueries({ queryKey: ["session", variables.caissierId] })

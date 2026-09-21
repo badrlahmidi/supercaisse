@@ -12,7 +12,8 @@ import { Badge } from "@/ui/Badge"
 import { Button } from "@/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
-import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
+import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee, Store } from "lucide-react"
 import { formatCurrency, cn } from "@/lib/utils"
 import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -94,6 +95,12 @@ export default function POS() {
   const { data: currentSession, isLoading: isSessionLoading } = useCurrentSession(user?.id)
   const openSessionMutation = useOpenSession()
   const [fondInitial, setFondInitial] = useState("0")
+  const [selectedMagasinId, setSelectedMagasinId] = useState<string>("")
+
+  const { data: magasins = [] } = useQuery({
+    queryKey: ["magasins"],
+    queryFn: () => invoke<{ id: number; nom: string; adresse: string | null }[]>("get_magasins"),
+  })
 
   const cart = useCartStore((s) => s.items)
   const selectedClient = useCartStore((s) => s.selectedClient)
@@ -504,26 +511,45 @@ export default function POS() {
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Ouvrir la caisse</h2>
           <p className="text-muted-foreground text-sm">
-            Vous devez déclarer votre fond de caisse initial pour commencer à encaisser.
+            Déclarez votre fond de caisse et choisissez votre boutique pour commencer.
           </p>
+          {magasins.length > 1 && (
+            <div className="space-y-2 text-left">
+              <label className="text-sm font-medium flex items-center gap-2">
+                <Store className="h-4 w-4" />
+                Boutique
+              </label>
+              <Select value={selectedMagasinId} onValueChange={setSelectedMagasinId}>
+                <SelectTrigger className="h-12">
+                  <SelectValue placeholder="Sélectionner une boutique" />
+                </SelectTrigger>
+                <SelectContent>
+                  {magasins.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>{m.nom}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2 text-left">
             <label className="text-sm font-medium">Fond de caisse initial (DH)</label>
-            <Input 
-              type="number" 
-              value={fondInitial} 
-              onChange={(e) => setFondInitial(e.target.value)} 
+            <Input
+              type="number"
+              value={fondInitial}
+              onChange={(e) => setFondInitial(e.target.value)}
               className="h-12 text-lg text-center"
               min="0"
               step="0.01"
               autoFocus
             />
           </div>
-          <Button 
-            className="w-full h-12 text-lg" 
-            disabled={openSessionMutation.isPending}
+          <Button
+            className="w-full h-12 text-lg"
+            disabled={openSessionMutation.isPending || (magasins.length > 1 && !selectedMagasinId)}
             onClick={() => {
               if (user?.id) {
-                openSessionMutation.mutate({ caissierId: user.id, fondInitial: parseFloat(fondInitial) || 0 })
+                const magasinId = selectedMagasinId ? parseInt(selectedMagasinId) : undefined
+                openSessionMutation.mutate({ caissierId: user.id, fondInitial: parseFloat(fondInitial) || 0, magasinId })
               }
             }}
           >

@@ -22,6 +22,7 @@ import {
   Sun,
   Moon,
   BarChart3,
+  Store,
   type LucideIcon,
 } from "lucide-react"
 
@@ -73,6 +74,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Système",
     items: [
+      { path: "/magasins", label: "Boutiques", icon: Store, roles: ["admin"] },
       { path: "/settings", label: "Paramètres", icon: Settings, roles: ["admin"] },
     ],
   },
