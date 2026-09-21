@@ -1838,7 +1838,10 @@ pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
 pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Option<String>, shop_phone: Option<String>,
     shop_email: Option<String>, ice: Option<String>, if_number: Option<String>, rc_number: Option<String>,
     patente: Option<String>, default_tva: f64,
-    receipt_footer: Option<String>, currency: String) -> Result<(), String> {
+    receipt_footer: Option<String>, currency: String,
+    printer_name: Option<String>, business_type: Option<String>,
+    fidelite_actif: Option<String>, fidelite_dh_pour_1_point: Option<String>,
+    fidelite_valeur_1_point: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let pairs: Vec<(&str, String)> = vec![
         ("shop_name", shop_name),
@@ -1852,6 +1855,11 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
         ("default_tva", default_tva.to_string()),
         ("receipt_footer", receipt_footer.unwrap_or_default()),
         ("currency", currency),
+        ("printer_name", printer_name.unwrap_or_else(|| "POS-80".to_string())),
+        ("business_type", business_type.unwrap_or_else(|| "standard".to_string())),
+        ("fidelite_actif", fidelite_actif.unwrap_or_else(|| "true".to_string())),
+        ("fidelite_dh_pour_1_point", fidelite_dh_pour_1_point.unwrap_or_else(|| "100".to_string())),
+        ("fidelite_valeur_1_point", fidelite_valeur_1_point.unwrap_or_else(|| "1".to_string())),
     ];
     for (key, value) in pairs {
         conn.execute(
@@ -1940,4 +1948,31 @@ pub fn import_database(db: State<DbState>, path: String) -> Result<(), String> {
     let backup = Backup::new(&src, &mut *conn).map_err(|e| e.to_string())?;
     backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ─── Fidélité ───
+
+#[tauri::command]
+pub fn get_mouvements_fidelite(db: State<DbState>, client_id: i64) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT mf.id, mf.client_id, mf.vente_id, mf.points, mf.mtype, mf.date, v.numero_facture
+         FROM mouvements_fidelite mf
+         LEFT JOIN ventes v ON v.id = mf.vente_id
+         WHERE mf.client_id = ?1
+         ORDER BY mf.date DESC
+         LIMIT 100"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![client_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "client_id": row.get::<_, i64>(1)?,
+            "vente_id": row.get::<_, Option<i64>>(2)?,
+            "points": row.get::<_, f64>(3)?,
+            "mtype": row.get::<_, String>(4)?,
+            "date": row.get::<_, String>(5)?,
+            "numero_facture": row.get::<_, Option<String>>(6)?
+        }))
+    }).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }

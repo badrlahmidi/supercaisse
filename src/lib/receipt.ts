@@ -229,7 +229,6 @@ export function generateReceiptEscPos(data: ReceiptData): string {
   builder.line("--------------------------------")
     .align("center")
     .line(data.receiptFooter)
-    .line("Merci de votre visite")
     .cut()
     .openDrawer()
     

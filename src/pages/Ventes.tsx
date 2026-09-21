@@ -126,7 +126,8 @@ export default function Ventes() {
     const docType = vente.dtype.toUpperCase()
     const amount = formatCurrency(vente.montant_total - vente.montant_remise)
     const ref = vente.numero_facture || `#${vente.id}`
-    const text = encodeURIComponent(`Bonjour ${vente.client_nom || ""},\n\nVoici le récapitulatif de votre ${docType} ${ref}.\n\nMontant Total : ${amount}\n\nMerci de votre confiance et à bientôt !`)
+    const date = new Date(vente.date).toLocaleDateString("fr-MA")
+    const text = encodeURIComponent(`Bonjour ${vente.client_nom || ""},\n\nVoici le récapitulatif de votre ${docType} ${ref} du ${date}.\n\nMontant Total : ${amount}\n\nLe document PDF est disponible en magasin sur demande.\n\nMerci de votre confiance et à bientôt !`)
     window.open(`https://wa.me/${phone}?text=${text}`, "_blank")
   }
 

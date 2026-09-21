@@ -12,7 +12,9 @@
 > facture archivable, traçabilité lot/péremption, détection doublon code-barres, déclinaisons
 > taille/couleur, multi-prix et produits composés/kits sont passés en ✅. UI multi-boutique
 > (page Boutiques CRUD, sélection magasin à l'ouverture, transfert inter-boutiques, vue stock
-> par magasin) également passée en ✅ — détail dans `ROADMAP_STATUS.md`.
+> par magasin) également passée en ✅. Programme de fidélité passe en ✅ (colonne + historique
+> dans Clients, configuration dans Paramètres). Sélecteur secteur d'activité passe en ✅
+> (options "Mode"/"Vrac" sans effet retirées). Bug persistance settings corrigé. Score : 44/6/24.
 
 ---
 
@@ -89,9 +91,9 @@
 | Fiche client (coordonnées, ICE, plafond crédit) | ✅ | |
 | Historique et enregistrement des paiements client | ✅ | |
 | Relevé de compte client exportable | ⬜ | |
-| Programme de fidélité (points) | 🔶 | Les points se calculent en arrière-plan à chaque vente, mais rien ne permet de les consulter, configurer des paliers/récompenses, ou les afficher au client — fonctionnalité invisible pour le gérant |
+| Programme de fidélité (points) | ✅ | Points calculés à la vente, affichés dans la page Clients (colonne + historique détaillé), configurables dans Paramètres (activer/désactiver, ratio DH/point, valeur point) ; reste ⬜ : paliers/récompenses automatiques |
 | Segmentation client / campagnes marketing | ⬜ | |
-| Relance / envoi facture par WhatsApp | 🔶 | Ouvre un lien WhatsApp pré-rempli manuellement — pas d'envoi automatique, pas de pièce jointe |
+| Relance / envoi facture par WhatsApp | 🔶 | Ouvre un lien WhatsApp pré-rempli avec détails facture — pas d'envoi automatique, pas de pièce jointe PDF (limitation WhatsApp Web) |
 
 ## 6. Paiements & Trésorerie
 
@@ -151,9 +153,9 @@
 | Fonction | Statut | Note |
 |---|---|---|
 | Réglages boutique (nom, adresse, téléphone, TVA défaut) | ✅ | |
-| Sélecteur de secteur d'activité | 🔶 | Existe dans l'écran mais **un seul secteur sur quatre proposés a un effet réel** (Restaurant) — "Mode" et "Vrac/Boucherie" sont des libellés sans comportement associé, "Pharmacie" n'est même pas proposé |
+| Sélecteur de secteur d'activité | ✅ | Deux secteurs fonctionnels (Standard, Restaurant) ; les options "Mode" et "Vrac" retirées car sans comportement réel — les variantes taille/couleur fonctionnent dans tous les modes |
 | Sauvegarde / export / import de la base | ✅ | |
-| Personnalisation modèles de documents imprimés | 🔶 | Aperçu ticket configurable, mais pas de vraie mise en page facture A4/étiquette |
+| Personnalisation modèles de documents imprimés | 🔶 | Pied de page ticket configurable ; pas de logo, pas de couleurs/polices personnalisables, pas d'éditeur de mise en page A4/étiquette |
 | Interface bilingue FR/AR | ⬜ | |
 
 ---
@@ -162,19 +164,19 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 42 |
-| 🔶 Inclus mais à corriger/compléter | 12 |
+| ✅ Inclus et utilisable | 44 |
+| 🔶 Inclus mais à corriger/compléter | 6 |
 | ⬜ Manquant | 24 |
 
-*(Mis à jour après les correctifs du 2026-09-20 : doublon code-barres, en-tête légal DGI et cohérence stock passés en ✅ ; ce dernier point a fait apparaître une nouvelle ligne ⬜ distincte — "utilisation réelle du multi-boutique" — puisque la donnée est maintenant fiable mais l'écran pour l'exploiter n'existe toujours pas.)*
+*(Mis à jour 2026-09-21 : fidélité passe en ✅ (colonne + historique dans Clients, config dans Paramètres) ; secteur d'activité passe en ✅ (options "Mode"/"Vrac" sans effet retirées) ; bug persistance paramètres corrigé (printer_name, business_type, fidelite_* désormais sauvegardés) ; doublon footer ESC/POS corrigé. Ancienne note 🔶 comptait 12 ; recompté à 6 lignes 🔶 réelles dans les tableaux.)*
 
 ## Les "🔶 à améliorer" les plus prioritaires (risque business le plus élevé)
 
 1. ~~Stock isolé par boutique~~ ✅ corrigé le 2026-09-20 — reste une action UI (item 3 ci-dessous), plus un risque de survente.
 2. ~~ICE/IF/RC/Patente de l'entreprise~~ ✅ corrigé le 2026-09-20.
 3. **Impression Windows-only** — décide si on assume "Windows uniquement" comme contrainte produit ou si on corrige pour élargir le marché adressable.
-4. **Sélecteur de secteur d'activité cosmétique** — soit on retire "Mode"/"Vrac" de la liste tant qu'ils ne font rien (évite de tromper le client au moment de la configuration), soit on les câble.
-5. **Fidélité invisible côté gérant** — la donnée existe et s'accumule déjà en base ; l'écran de consultation/config est un développement relativement court par rapport à sa valeur perçue commerciale.
+4. ~~Sélecteur de secteur d'activité cosmétique~~ ✅ corrigé le 2026-09-21 — options "Mode"/"Vrac" sans comportement retirées.
+5. ~~Fidélité invisible côté gérant~~ ✅ corrigé le 2026-09-21 — colonne Points + historique par client + configuration complète dans Paramètres.
 6. ~~Utilisation réelle du multi-boutique~~ ✅ corrigé le 2026-09-21 — page Boutiques (CRUD + transferts + vue stock par magasin), sélection de boutique à l'ouverture de session caisse.
 
 ## Les fonctions manquantes qui structurent le plus la suite
@@ -192,6 +194,6 @@
 Deux familles de décisions différentes, à ne pas mélanger :
 
 - **Les ⬜ manquants** : rien à détecter, c'est un pur exercice de priorisation/backlog — pas besoin de QA, juste une décision "on le fait maintenant ou plus tard".
-- **Les 🔶 à améliorer** : c'est là qu'un plan de Q/A cible vraiment quelque chose d'utile, parce que le mot "à améliorer" cache des réalités très différentes selon la ligne (limite d'environnement type impression Windows, écran manquant type fidélité). Un scénario par ligne 🔶 restante (13 scénarios) transforme chaque "à améliorer" en spécification précise de correction avant de chiffrer le développement — plutôt qu'un audit généraliste qui re-testerait aussi les ✅ déjà confirmés.
+- **Les 🔶 à améliorer** : il reste 6 lignes 🔶, dont 4 sont l'impression Windows-only (même cause racine : dépendance PowerShell/cmd.exe), 1 WhatsApp (limitation wa.me sans API Business), 1 personnalisation documents (pied de page configurable mais pas de vrai éditeur de template).
 
-Le stock multi-boutique et l'en-tête légal DGI (les deux points qui bloquaient le plus la suite) sont traités. Prochaines cibles naturelles : génération PDF facture, écran multi-boutique (créer une 2ᵉ boutique, choisir son poste), traçabilité lot/péremption (sert supermarché ET pharmacie), ou le plan de Q/A sur les 13 lignes 🔶 restantes.
+Les 🔶 corrigées dans ce cycle : fidélité (→ ✅, historique + config visible), secteur d'activité (→ ✅, labels cosmétiques retirés), bug persistance paramètres (printer/business_type/fidélité désormais sauvegardés), footer ESC/POS dédoublonné.

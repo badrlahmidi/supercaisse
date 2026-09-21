@@ -80,6 +80,11 @@ interface Settings {
   default_tva: number
   receipt_footer: string | null
   currency: string
+  printer_name: string | null
+  business_type: string
+  fidelite_actif: string
+  fidelite_dh_pour_1_point: string
+  fidelite_valeur_1_point: string
 }
 
 interface SessionCaisse {
@@ -161,6 +166,11 @@ const mockSettings: Settings = {
   default_tva: 20,
   receipt_footer: "Merci de votre visite",
   currency: "MAD",
+  printer_name: "POS-80",
+  business_type: "standard",
+  fidelite_actif: "true",
+  fidelite_dh_pour_1_point: "100",
+  fidelite_valeur_1_point: "1",
 }
 
 let nextId = 100
@@ -326,6 +336,9 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   // Settings
   get_settings: () => ({ ...mockSettings }),
   update_settings: (args) => { Object.assign(mockSettings, args) },
+
+  // Fidélité
+  get_mouvements_fidelite: () => [],
 
   // Stock movements
   get_mouvements_stock: () => [],

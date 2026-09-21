@@ -62,7 +62,7 @@ const settingsSchema = z.object({
   fidelite_actif: z.string().optional().default("true"),
   fidelite_dh_pour_1_point: z.string().optional().default("100"),
   fidelite_valeur_1_point: z.string().optional().default("1"),
-  business_type: z.enum(["standard", "restaurant", "mode", "vrac"]).default("standard"),
+  business_type: z.enum(["standard", "restaurant"]).default("standard"),
 })
 
 type SettingsForm = z.infer<typeof settingsSchema>
@@ -274,8 +274,6 @@ export default function Settings() {
                     <SelectContent>
                       <SelectItem value="standard">Supermarché / Épicerie (Standard)</SelectItem>
                       <SelectItem value="restaurant">Restaurant / Café (Tables & Cuisine)</SelectItem>
-                      <SelectItem value="mode">Boutique Mode / Prêt-à-porter (Tailles/Couleurs)</SelectItem>
-                      <SelectItem value="vrac">Vrac / Boucherie (Balances connectées)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

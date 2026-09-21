@@ -99,6 +99,7 @@ pub fn run() {
             commands::validate_transfert,
             commands::get_tables,
             commands::update_table_status,
+            commands::get_mouvements_fidelite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

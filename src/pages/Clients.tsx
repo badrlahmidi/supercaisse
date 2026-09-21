@@ -11,10 +11,12 @@ import { Textarea } from "@/ui/Textarea"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, Download, SearchX, DollarSign, MessageCircle } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, Download, SearchX, DollarSign, MessageCircle, Star, History } from "lucide-react"
+import { Badge } from "@/ui/Badge"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
+import { invoke } from "@/lib/tauri"
 
 interface Client {
   id: number
@@ -26,6 +28,17 @@ interface Client {
   ice: string | null
   credit_plafond: number | null
   credit_actuel: number | null
+  points_fidelite: number | null
+}
+
+interface MouvementFidelite {
+  id: number
+  client_id: number
+  vente_id: number | null
+  points: number
+  mtype: "gain" | "depense"
+  date: string
+  numero_facture: string | null
 }
 
 const clientSchema = z.object({
@@ -60,11 +73,27 @@ export default function Clients() {
     if (!client.telephone) return
     const phone = client.telephone.replace(/\s+/g, "").replace(/^0/, "212")
     const amount = formatCurrency(client.credit_actuel || 0)
-    const text = encodeURIComponent(`Bonjour ${client.nom},\n\nSauf erreur de notre part, votre compte présente un solde débiteur de ${amount}.\n\nMerci de bien vouloir régulariser cette situation dès que possible.\n\nCordialement.`)
+    const text = encodeURIComponent(`Bonjour ${client.nom},\n\nSauf erreur de notre part, votre compte chez nous présente un solde débiteur de ${amount}.\n\nMerci de bien vouloir régulariser cette situation à votre prochaine visite.\n\nCordialement.`)
     window.open(`https://wa.me/${phone}?text=${text}`, "_blank")
   }
 
   const [deleteConfirm, setDeleteConfirm] = useState<Client | null>(null)
+  const [loyaltyClient, setLoyaltyClient] = useState<Client | null>(null)
+  const [loyaltyHistory, setLoyaltyHistory] = useState<MouvementFidelite[]>([])
+  const [loyaltyLoading, setLoyaltyLoading] = useState(false)
+
+  const openLoyaltyHistory = async (client: Client) => {
+    setLoyaltyClient(client)
+    setLoyaltyLoading(true)
+    try {
+      const data = await invoke<MouvementFidelite[]>("get_mouvements_fidelite", { clientId: client.id })
+      setLoyaltyHistory(data)
+    } catch {
+      setLoyaltyHistory([])
+    } finally {
+      setLoyaltyLoading(false)
+    }
+  }
 
   const form = useForm<ClientForm>({
     resolver: zodResolver(clientSchema),
@@ -122,10 +151,11 @@ export default function Clients() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => {
             if (!clients) return
-            const headers = ["Code", "Nom", "Téléphone", "Email", "ICE", "Adresse", "Plafond crédit", "Crédit actuel"]
+            const headers = ["Code", "Nom", "Téléphone", "Email", "ICE", "Adresse", "Points fidélité", "Plafond crédit", "Crédit actuel"]
             const rows = clients.map((c) => [
               c.code || "", c.nom, c.telephone || "", c.email || "", c.ice || "",
-              c.adresse || "", c.credit_plafond ? formatCurrency(c.credit_plafond) : "",
+              c.adresse || "", String(c.points_fidelite ?? 0),
+              c.credit_plafond ? formatCurrency(c.credit_plafond) : "",
               c.credit_actuel ? formatCurrency(c.credit_actuel) : "",
             ])
             exportCSV(headers, rows, "clients.csv")
@@ -163,9 +193,10 @@ export default function Clients() {
                   <TableHead>Téléphone</TableHead>
                   <TableHead>ICE</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead className="text-right">Points fidélité</TableHead>
                   <TableHead className="text-right">Plafond crédit</TableHead>
                   <TableHead className="text-right">Crédit actuel</TableHead>
-                  <TableHead className="w-[100px]">Actions</TableHead>
+                  <TableHead className="w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -180,6 +211,14 @@ export default function Clients() {
                     <TableCell>{client.telephone || "—"}</TableCell>
                     <TableCell className="font-mono text-xs">{client.ice || "—"}</TableCell>
                     <TableCell>{client.email || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      {client.points_fidelite && client.points_fidelite > 0 ? (
+                        <Badge variant="secondary" className="gap-1 cursor-pointer" onClick={() => openLoyaltyHistory(client)}>
+                          <Star className="h-3 w-3" />
+                          {client.points_fidelite}
+                        </Badge>
+                      ) : "—"}
+                    </TableCell>
                     <TableCell className="text-right">{client.credit_plafond ? formatCurrency(client.credit_plafond) : "—"}</TableCell>
                     <TableCell className="text-right">
                       <span className={client.credit_actuel && client.credit_actuel > 0 ? "text-destructive font-medium" : ""}>
@@ -191,6 +230,11 @@ export default function Clients() {
                         <Button variant="ghost" size="icon" onClick={() => openEdit(client)}>
                           <Edit className="h-4 w-4" />
                         </Button>
+                        {client.points_fidelite != null && client.points_fidelite > 0 && (
+                          <Button variant="ghost" size="icon" onClick={() => openLoyaltyHistory(client)} title="Historique fidélité">
+                            <History className="h-4 w-4 text-amber-500" />
+                          </Button>
+                        )}
                         {client.credit_actuel && client.credit_actuel > 0 && (
                           <>
                             <Button variant="ghost" size="icon" onClick={() => { setPaymentClient(client); setPaymentAmount(""); setPaymentType("especes"); setPaymentRef("") }} title="Encaisser">
@@ -212,7 +256,7 @@ export default function Clients() {
                 ))}
                 {!clients?.length && (
                   <TableRow>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={9}>
                       <EmptyState
                         icon={<SearchX className="h-12 w-12" />}
                         title="Aucun client trouvé"
@@ -395,6 +439,58 @@ export default function Clients() {
               Supprimer
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!loyaltyClient} onOpenChange={() => setLoyaltyClient(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Star className="h-5 w-5 text-amber-500" />
+              Historique fidélité — {loyaltyClient?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Solde actuel : <strong className="text-foreground">{loyaltyClient?.points_fidelite ?? 0} points</strong>
+            </p>
+            {loyaltyLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : loyaltyHistory.length === 0 ? (
+              <p className="text-center py-8 text-sm text-muted-foreground">Aucun mouvement enregistré</p>
+            ) : (
+              <div className="max-h-80 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Facture</TableHead>
+                      <TableHead className="text-right">Points</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loyaltyHistory.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="text-xs">{new Date(m.date).toLocaleDateString("fr-MA")}</TableCell>
+                        <TableCell>
+                          <Badge variant={m.mtype === "gain" ? "success" : "destructive"} className="text-xs">
+                            {m.mtype === "gain" ? "Gain" : "Utilisé"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{m.numero_facture || "—"}</TableCell>
+                        <TableCell className={`text-right font-medium ${m.mtype === "gain" ? "text-green-600" : "text-destructive"}`}>
+                          {m.mtype === "gain" ? "+" : "−"}{m.points}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
