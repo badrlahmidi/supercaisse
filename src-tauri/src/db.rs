@@ -157,6 +157,9 @@ pub struct Settings {
     pub fidelite_valeur_1_point: Option<String>,
     pub business_type: Option<String>,
     pub idle_timeout: Option<String>,
+    pub logo_base64: Option<String>,
+    pub receipt_header: Option<String>,
+    pub doc_primary_color: Option<String>,
 }
 
 pub struct DbState {

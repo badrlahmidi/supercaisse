@@ -90,6 +90,9 @@ export default function Ventes() {
         shopRc: settings?.rc_number || null,
         shopPatente: settings?.patente || null,
         receiptFooter: settings?.receipt_footer || "Merci de votre visite",
+        logoBase64: settings?.logo_base64 || null,
+        docPrimaryColor: settings?.doc_primary_color || null,
+        receiptHeader: settings?.receipt_header || null,
         venteId: detail.vente.id,
         docType: detail.vente.dtype,
         docNumero: detail.vente.numero_facture,
@@ -120,14 +123,17 @@ export default function Ventes() {
     }
   }
 
-  const sendWhatsAppInvoice = (vente: Vente) => {
+  const sendWhatsAppInvoice = async (vente: Vente) => {
     if (!vente.client_telephone) return
     const phone = vente.client_telephone.replace(/\s+/g, "").replace(/^0/, "212")
     const docType = vente.dtype.toUpperCase()
     const amount = formatCurrency(vente.montant_total - vente.montant_remise)
     const ref = vente.numero_facture || `#${vente.id}`
     const date = new Date(vente.date).toLocaleDateString("fr-MA")
-    const text = encodeURIComponent(`Bonjour ${vente.client_nom || ""},\n\nVoici le récapitulatif de votre ${docType} ${ref} du ${date}.\n\nMontant Total : ${amount}\n\nLe document PDF est disponible en magasin sur demande.\n\nMerci de votre confiance et à bientôt !`)
+    try {
+      await generatePdf(vente.id)
+    } catch { /* PDF generation failure is non-blocking */ }
+    const text = encodeURIComponent(`Bonjour ${vente.client_nom || ""},\n\nVoici le récapitulatif de votre ${docType} ${ref} du ${date}.\n\nMontant Total : ${amount}\n\nVotre document PDF a été préparé et est disponible en magasin.\n\nMerci de votre confiance et à bientôt !`)
     window.open(`https://wa.me/${phone}?text=${text}`, "_blank")
   }
 

@@ -16,7 +16,7 @@ import { z } from "zod"
 import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import { useAuth } from "@/context/AuthContext"
-import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle } from "lucide-react"
+import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X } from "lucide-react"
 
 
 interface User {
@@ -64,6 +64,9 @@ const settingsSchema = z.object({
   fidelite_valeur_1_point: z.string().optional().default("1"),
   business_type: z.enum(["standard", "restaurant"]).default("standard"),
   idle_timeout: z.string().optional().default("300"),
+  logo_base64: z.string().nullable().optional(),
+  receipt_header: z.string().nullable().optional(),
+  doc_primary_color: z.string().nullable().optional(),
 })
 
 type SettingsForm = z.infer<typeof settingsSchema>
@@ -507,13 +510,14 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="receipt" className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Printer className="h-5 w-5" />
                 Configuration du ticket
               </CardTitle>
-              <CardDescription>Personnalisez l'apparence de vos tickets de caisse</CardDescription>
+              <CardDescription>Personnalisez l'apparence de vos tickets de caisse et documents PDF</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -522,21 +526,175 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">Exemples : POS-80, \\localhost\Tickets, COM1</p>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="receipt_header">En-tête du ticket</Label>
+                <Input {...settingsForm.register("receipt_header")} id="receipt_header" placeholder="Bienvenue chez nous !" />
+                <p className="text-xs text-muted-foreground">Texte affiché sous le logo et le nom du magasin</p>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="receipt_footer">Pied de page du ticket</Label>
                 <Input {...settingsForm.register("receipt_footer")} id="receipt_footer" placeholder="Merci de votre visite" />
               </div>
-              <div className="p-4 bg-muted rounded-lg border border-dashed">
-                <p className="text-sm font-medium mb-2">Aperçu du ticket</p>
-                <div className="font-mono text-sm text-muted-foreground">
-                  <div className="text-center font-bold">{settingsForm.watch("shop_name") || "SuperCaisse"}</div>
-                  <div className="text-center text-xs">{settingsForm.watch("shop_address") || "Adresse du magasin"}</div>
-                  <div className="text-center text-xs">{settingsForm.watch("shop_phone") || "Téléphone"}</div>
-                  <div className="my-2 border-t" />
-                  <div className="text-center text-xs mt-2">{settingsForm.watch("receipt_footer") || "Merci de votre visite"}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Palette className="h-5 w-5" />
+                Personnalisation des documents
+              </CardTitle>
+              <CardDescription>Logo et couleurs des factures, devis et bons de livraison PDF</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Logo du magasin</Label>
+                <div className="flex items-center gap-4">
+                  {settingsForm.watch("logo_base64") ? (
+                    <div className="relative">
+                      <img
+                        src={`data:image/png;base64,${settingsForm.watch("logo_base64")}`}
+                        alt="Logo"
+                        className="h-16 w-16 object-contain border rounded-lg bg-white p-1"
+                      />
+                      <button
+                        type="button"
+                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-0.5"
+                        onClick={() => settingsForm.setValue("logo_base64", null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="h-16 w-16 border-2 border-dashed rounded-lg flex items-center justify-center text-muted-foreground">
+                      <Upload className="h-6 w-6" />
+                    </div>
+                  )}
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const input = document.createElement("input")
+                        input.type = "file"
+                        input.accept = "image/png,image/jpeg,image/webp"
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (!file) return
+                          if (file.size > 500 * 1024) {
+                            toast.error("Le logo ne doit pas dépasser 500 Ko")
+                            return
+                          }
+                          const reader = new FileReader()
+                          reader.onload = () => {
+                            const base64 = (reader.result as string).split(",")[1]
+                            settingsForm.setValue("logo_base64", base64)
+                          }
+                          reader.readAsDataURL(file)
+                        }
+                        input.click()
+                      }}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Choisir un logo
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-1">PNG, JPEG ou WebP, max 500 Ko</p>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="doc_primary_color">Couleur principale des documents</Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    id="doc_primary_color"
+                    value={settingsForm.watch("doc_primary_color") || "#2563eb"}
+                    onChange={(e) => settingsForm.setValue("doc_primary_color", e.target.value)}
+                    className="h-10 w-14 cursor-pointer rounded border p-1"
+                  />
+                  <Input
+                    value={settingsForm.watch("doc_primary_color") || "#2563eb"}
+                    onChange={(e) => settingsForm.setValue("doc_primary_color", e.target.value)}
+                    placeholder="#2563eb"
+                    className="max-w-[140px]"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => settingsForm.setValue("doc_primary_color", null)}
+                  >
+                    Réinitialiser
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Utilisée pour les en-têtes et titres des factures PDF</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Aperçu</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-sm font-medium mb-2">Ticket de caisse (thermique)</p>
+                  <div className="p-4 bg-white dark:bg-zinc-950 rounded-lg border border-dashed">
+                    <div className="font-mono text-sm text-black dark:text-zinc-200">
+                      {settingsForm.watch("logo_base64") && (
+                        <div className="flex justify-center mb-2">
+                          <img src={`data:image/png;base64,${settingsForm.watch("logo_base64")}`} alt="" className="h-10 object-contain" />
+                        </div>
+                      )}
+                      <div className="text-center font-bold">{settingsForm.watch("shop_name") || "SuperCaisse"}</div>
+                      <div className="text-center text-xs">{settingsForm.watch("shop_address") || "Adresse du magasin"}</div>
+                      <div className="text-center text-xs">{settingsForm.watch("shop_phone") || "Téléphone"}</div>
+                      {settingsForm.watch("receipt_header") && (
+                        <div className="text-center text-xs mt-1 italic">{settingsForm.watch("receipt_header")}</div>
+                      )}
+                      <div className="my-2 border-t border-dashed border-gray-400" />
+                      <div className="text-xs">Article exemple × 2 ........ 20.00 MAD</div>
+                      <div className="my-2 border-t border-dashed border-gray-400" />
+                      <div className="text-center font-bold">Total: 20.00 MAD</div>
+                      <div className="my-2 border-t border-dashed border-gray-400" />
+                      <div className="text-center text-xs mt-2">{settingsForm.watch("receipt_footer") || "Merci de votre visite"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Document PDF (A4)</p>
+                  <div className="p-4 bg-white dark:bg-zinc-950 rounded-lg border border-dashed text-sm text-black dark:text-zinc-200">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex items-center gap-2">
+                        {settingsForm.watch("logo_base64") && (
+                          <img src={`data:image/png;base64,${settingsForm.watch("logo_base64")}`} alt="" className="h-8 object-contain" />
+                        )}
+                        <span className="font-bold">{settingsForm.watch("shop_name") || "SuperCaisse"}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold" style={{ color: settingsForm.watch("doc_primary_color") || "#2563eb" }}>FACTURE</div>
+                        <div className="text-xs text-muted-foreground">N° FA-2024-001</div>
+                      </div>
+                    </div>
+                    <div className="h-px mb-2" style={{ backgroundColor: settingsForm.watch("doc_primary_color") || "#2563eb" }} />
+                    <div className="text-xs text-muted-foreground">Aperçu simplifié du document A4</div>
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={updateSettingsMutation.isPending}>
+              {updateSettingsMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enregistrement...</>
+              ) : (
+                "Enregistrer les paramètres"
+              )}
+            </Button>
+          </div>
+          </form>
         </TabsContent>
 
         <TabsContent value="system" className="space-y-6">

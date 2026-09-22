@@ -1901,6 +1901,9 @@ pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
         fidelite_valeur_1_point: map.get("fidelite_valeur_1_point").cloned(),
         business_type: map.get("business_type").cloned(),
         idle_timeout: map.get("idle_timeout").cloned(),
+        logo_base64: map.get("logo_base64").filter(|s| !s.is_empty()).cloned(),
+        receipt_header: map.get("receipt_header").filter(|s| !s.is_empty()).cloned(),
+        doc_primary_color: map.get("doc_primary_color").filter(|s| !s.is_empty()).cloned(),
     })
 }
 
@@ -1912,7 +1915,10 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
     printer_name: Option<String>, business_type: Option<String>,
     fidelite_actif: Option<String>, fidelite_dh_pour_1_point: Option<String>,
     fidelite_valeur_1_point: Option<String>,
-    idle_timeout: Option<String>) -> Result<(), String> {
+    idle_timeout: Option<String>,
+    logo_base64: Option<String>,
+    receipt_header: Option<String>,
+    doc_primary_color: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let pairs: Vec<(&str, String)> = vec![
         ("shop_name", shop_name),
@@ -1932,6 +1938,9 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
         ("fidelite_dh_pour_1_point", fidelite_dh_pour_1_point.unwrap_or_else(|| "100".to_string())),
         ("fidelite_valeur_1_point", fidelite_valeur_1_point.unwrap_or_else(|| "1".to_string())),
         ("idle_timeout", idle_timeout.unwrap_or_else(|| "300".to_string())),
+        ("logo_base64", logo_base64.unwrap_or_default()),
+        ("receipt_header", receipt_header.unwrap_or_default()),
+        ("doc_primary_color", doc_primary_color.unwrap_or_default()),
     ];
     for (key, value) in pairs {
         conn.execute(

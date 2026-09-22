@@ -16,6 +16,9 @@ export interface ReceiptData {
   shopIf?: string | null
   shopRc?: string | null
   shopPatente?: string | null
+  logoBase64?: string | null
+  docPrimaryColor?: string | null
+  receiptHeader?: string | null
   docType?: string
   docNumero?: string | null
   items: Array<{
@@ -97,6 +100,7 @@ export function generateReceiptHTML(data: ReceiptData): string {
   </style>
 </head>
 <body>
+  ${data.logoBase64 ? `<div class="center" style="margin-bottom:4px"><img src="data:image/png;base64,${data.logoBase64}" style="max-height:40px;max-width:60mm" alt="" /></div>` : ""}
   <div class="center header">${data.shopName}</div>
   <div class="center infos">
     ${data.shopAddress}<br>
@@ -106,6 +110,7 @@ export function generateReceiptHTML(data: ReceiptData): string {
     ${data.shopRc ? `<br>RC: ${data.shopRc}` : ""}
     ${data.shopPatente ? `<br>Patente: ${data.shopPatente}` : ""}
   </div>
+  ${data.receiptHeader ? `<div class="center infos" style="font-style:italic;margin-top:2px">${data.receiptHeader}</div>` : ""}
   <div class="divider"></div>
   <div class="infos">
     Facture #${data.venteId}<br>
@@ -241,15 +246,27 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   const marginX = 15
   let y = 18
 
+  const primaryColor = data.docPrimaryColor || "#2563eb"
+  const r = parseInt(primaryColor.slice(1, 3), 16)
+  const g = parseInt(primaryColor.slice(3, 5), 16)
+  const b = parseInt(primaryColor.slice(5, 7), 16)
+
+  if (data.logoBase64) {
+    try {
+      doc.addImage(`data:image/png;base64,${data.logoBase64}`, "PNG", marginX, y - 4, 18, 18)
+    } catch { /* skip invalid image */ }
+  }
+  const logoOffset = data.logoBase64 ? 22 : 0
+
   doc.setFont("helvetica", "bold")
   doc.setFontSize(16)
-  doc.text(data.shopName, marginX, y)
+  doc.text(data.shopName, marginX + logoOffset, y)
   y += 6
 
   doc.setFont("helvetica", "normal")
   doc.setFontSize(9)
-  if (data.shopAddress) { doc.text(data.shopAddress, marginX, y); y += 4.5 }
-  if (data.shopPhone) { doc.text(data.shopPhone, marginX, y); y += 4.5 }
+  if (data.shopAddress) { doc.text(data.shopAddress, marginX + logoOffset, y); y += 4.5 }
+  if (data.shopPhone) { doc.text(data.shopPhone, marginX + logoOffset, y); y += 4.5 }
 
   const legalMentions = [
     data.shopIce ? `ICE: ${data.shopIce}` : null,
@@ -262,14 +279,16 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   const docTitle = DOC_TITLES[data.docType || "facture"] || "FACTURE"
   doc.setFont("helvetica", "bold")
   doc.setFontSize(14)
+  doc.setTextColor(r, g, b)
   doc.text(docTitle, pageWidth - marginX, 18, { align: "right" })
+  doc.setTextColor(0, 0, 0)
   doc.setFont("helvetica", "normal")
   doc.setFontSize(10)
   doc.text(`N° ${data.docNumero || `#${data.venteId}`}`, pageWidth - marginX, 25, { align: "right" })
   doc.text(formatDateTime(data.date), pageWidth - marginX, 30, { align: "right" })
 
   y = Math.max(y, 32) + 4
-  doc.setDrawColor(180)
+  doc.setDrawColor(r, g, b)
   doc.line(marginX, y, pageWidth - marginX, y)
   y += 7
 
@@ -285,7 +304,7 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   y += 8
 
   const colX = { designation: marginX, qte: 110, pu: 130, tva: 152, total: 170 }
-  doc.setFillColor(240, 240, 240)
+  doc.setFillColor(r + Math.round((255 - r) * 0.85), g + Math.round((255 - g) * 0.85), b + Math.round((255 - b) * 0.85))
   doc.rect(marginX, y - 4.5, pageWidth - marginX * 2, 7, "F")
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
@@ -308,7 +327,7 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   }
 
   y += 2
-  doc.setDrawColor(180)
+  doc.setDrawColor(r, g, b)
   doc.line(marginX, y, pageWidth - marginX, y)
   y += 7
 

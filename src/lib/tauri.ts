@@ -86,6 +86,9 @@ interface Settings {
   fidelite_dh_pour_1_point: string
   fidelite_valeur_1_point: string
   idle_timeout: string
+  logo_base64: string | null
+  receipt_header: string | null
+  doc_primary_color: string | null
 }
 
 interface SessionCaisse {
@@ -173,6 +176,9 @@ const mockSettings: Settings = {
   fidelite_dh_pour_1_point: "100",
   fidelite_valeur_1_point: "1",
   idle_timeout: "300",
+  logo_base64: null,
+  receipt_header: null,
+  doc_primary_color: null,
 }
 
 let nextId = 100

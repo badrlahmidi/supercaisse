@@ -25,6 +25,7 @@
 > dans Settings, login_pin en backend). Inventaire physique comptage vs théorique
 > (→ ✅ : page Inventaire avec création par magasin, comptage article par article, validation
 > avec application des écarts au stock). Score Phase 3 : **66 ✅ / 2 🔶 / 17 ⬜**.
+> **Phase 4** (2026-09-22) : Correction des 2 🔶 restantes — WhatsApp génère automatiquement le PDF avant envoi ; personnalisation documents (logo, couleur principale, en-tête ticket, aperçu temps réel). Score Phase 4 : **68 ✅ / 0 🔶 / 17 ⬜**.
 
 ---
 
@@ -103,7 +104,7 @@
 | Relevé de compte client exportable | ✅ | Dialog avec historique ventes + paiements, export CSV |
 | Programme de fidélité (points) | ✅ | Points calculés à la vente, affichés dans la page Clients (colonne + historique détaillé), configurables dans Paramètres (activer/désactiver, ratio DH/point, valeur point) ; reste ⬜ : paliers/récompenses automatiques |
 | Segmentation client / campagnes marketing | ⬜ | |
-| Relance / envoi facture par WhatsApp | 🔶 | Ouvre un lien WhatsApp pré-rempli avec détails facture — pas d'envoi automatique, pas de pièce jointe PDF (limitation WhatsApp Web) |
+| Relance / envoi facture par WhatsApp | ✅ | Génère automatiquement le PDF avant d'ouvrir WhatsApp ; lien wa.me pré-rempli avec récapitulatif — PDF archivé en local (pas de pièce jointe directe, limitation WhatsApp Web) |
 
 ## 6. Paiements & Trésorerie
 
@@ -165,7 +166,7 @@
 | Réglages boutique (nom, adresse, téléphone, TVA défaut) | ✅ | |
 | Sélecteur de secteur d'activité | ✅ | Deux secteurs fonctionnels (Standard, Restaurant) ; les options "Mode" et "Vrac" retirées car sans comportement réel — les variantes taille/couleur fonctionnent dans tous les modes |
 | Sauvegarde / export / import de la base | ✅ | |
-| Personnalisation modèles de documents imprimés | 🔶 | Pied de page ticket configurable ; pas de logo, pas de couleurs/polices personnalisables, pas d'éditeur de mise en page A4/étiquette |
+| Personnalisation modèles de documents imprimés | ✅ | Logo magasin (upload PNG/JPEG/WebP, affiché dans ticket HTML et facture PDF), couleur principale configurable (en-têtes, séparateurs, table header PDF), en-tête et pied de page ticket configurables ; aperçu temps réel dans Paramètres > Ticket |
 | Interface bilingue FR/AR | ⬜ | |
 
 ---
@@ -174,8 +175,8 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 66 |
-| 🔶 Inclus mais à corriger/compléter | 2 |
+| ✅ Inclus et utilisable | 68 |
+| 🔶 Inclus mais à corriger/compléter | 0 |
 | ⬜ Manquant | 17 |
 
 *(Mis à jour 2026-09-21 : impression, tiroir-caisse et ESC/POS passent en ✅ (cross-platform Windows/Linux/Mac) ; fidélité ✅ (colonne + historique dans Clients, config dans Paramètres) ; secteur ✅ (options "Mode"/"Vrac" sans effet retirées) ; bug persistance paramètres corrigé ; doublon footer ESC/POS corrigé. Recompté : 56 ✅, 2 🔶, 27 ⬜.)*
@@ -204,6 +205,6 @@
 Deux familles de décisions différentes, à ne pas mélanger :
 
 - **Les ⬜ manquants** : rien à détecter, c'est un pur exercice de priorisation/backlog — pas besoin de QA, juste une décision "on le fait maintenant ou plus tard".
-- **Les 🔶 à améliorer** : il reste 2 lignes 🔶 — WhatsApp (limitation wa.me sans API Business, pas de pièce jointe) et personnalisation documents (pied de page configurable, mais pas de logo/couleurs/éditeur de template). Ce sont des limitations acceptables à ce stade.
+- **Les 🔶 à améliorer** : 0 restantes — WhatsApp génère le PDF avant envoi (✅), personnalisation documents avec logo/couleur/en-tête (✅).
 
 🔶 corrigées dans ce cycle : impression cross-platform (→ ✅ Windows + Linux/Mac), tiroir-caisse cross-platform (→ ✅), fidélité (→ ✅, historique + config visible), secteur d'activité (→ ✅, labels cosmétiques retirés), bug persistance paramètres corrigé, footer ESC/POS dédoublonné.
