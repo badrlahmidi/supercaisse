@@ -29,6 +29,7 @@ interface Client {
   credit_plafond: number | null
   credit_actuel: number | null
   points_fidelite: number | null
+  segment: string | null
 }
 
 interface MouvementFidelite {
@@ -50,6 +51,8 @@ interface ReleveClient {
   paiements: { id: number; date: string; montant: number; type_paiement: string; reference: string | null }[]
 }
 
+const SEGMENTS = ["Particulier", "Professionnel", "Grossiste", "VIP", "Revendeur"] as const
+
 const clientSchema = z.object({
   code: z.string().optional().nullable(),
   nom: z.string().min(1, "Nom requis"),
@@ -58,12 +61,14 @@ const clientSchema = z.object({
   email: z.string().email("Email invalide").optional().nullable(),
   ice: z.string().optional().nullable(),
   credit_plafond: z.number().min(0).optional().nullable(),
+  segment: z.string().optional().nullable(),
 })
 
 type ClientForm = z.infer<typeof clientSchema>
 
 export default function Clients() {
   const [search, setSearch] = useState("")
+  const [segmentFilter, setSegmentFilter] = useState<string>("all")
   const [editingClient, setEditingClient] = useState<Client | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [paymentClient, setPaymentClient] = useState<Client | null>(null)
@@ -141,7 +146,7 @@ export default function Clients() {
 
   const form = useForm<ClientForm>({
     resolver: zodResolver(clientSchema),
-    defaultValues: { code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0 },
+    defaultValues: { code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0, segment: null },
   })
 
   const handleSubmit = (data: ClientForm) => {
@@ -159,13 +164,14 @@ export default function Clients() {
       email: client.email,
       ice: client.ice,
       credit_plafond: client.credit_plafond,
+      segment: client.segment,
     })
     setShowForm(true)
   }
 
   const openCreate = () => {
     setEditingClient(null)
-    form.reset({ code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0 })
+    form.reset({ code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0, segment: null })
     setShowForm(true)
   }
 
@@ -195,9 +201,9 @@ export default function Clients() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => {
             if (!clients) return
-            const headers = ["Code", "Nom", "Téléphone", "Email", "ICE", "Adresse", "Points fidélité", "Plafond crédit", "Crédit actuel"]
+            const headers = ["Code", "Nom", "Segment", "Téléphone", "Email", "ICE", "Adresse", "Points fidélité", "Plafond crédit", "Crédit actuel"]
             const rows = clients.map((c) => [
-              c.code || "", c.nom, c.telephone || "", c.email || "", c.ice || "",
+              c.code || "", c.nom, c.segment || "", c.telephone || "", c.email || "", c.ice || "",
               c.adresse || "", String(c.points_fidelite ?? 0),
               c.credit_plafond ? formatCurrency(c.credit_plafond) : "",
               c.credit_actuel ? formatCurrency(c.credit_actuel) : "",
@@ -226,6 +232,18 @@ export default function Clients() {
                 className="pl-10"
               />
             </div>
+            <Select value={segmentFilter} onValueChange={setSegmentFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Tous segments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous segments</SelectItem>
+                {SEGMENTS.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+                <SelectItem value="__none">Non classé</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="overflow-x-auto">
@@ -234,6 +252,7 @@ export default function Clients() {
                 <TableRow>
                   <TableHead>Code</TableHead>
                   <TableHead>Nom</TableHead>
+                  <TableHead>Segment</TableHead>
                   <TableHead>Téléphone</TableHead>
                   <TableHead>ICE</TableHead>
                   <TableHead>Email</TableHead>
@@ -244,14 +263,22 @@ export default function Clients() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {clients?.filter((c) =>
-                  c.nom.toLowerCase().includes(search.toLowerCase()) ||
-                  c.code?.toLowerCase().includes(search.toLowerCase()) ||
-                  c.telephone?.includes(search)
-                ).map((client) => (
+                {clients?.filter((c) => {
+                  const matchSearch = c.nom.toLowerCase().includes(search.toLowerCase()) ||
+                    c.code?.toLowerCase().includes(search.toLowerCase()) ||
+                    c.telephone?.includes(search)
+                  const matchSegment = segmentFilter === "all" ||
+                    (segmentFilter === "__none" ? !c.segment : c.segment === segmentFilter)
+                  return matchSearch && matchSegment
+                }).map((client) => (
                   <TableRow key={client.id}>
                     <TableCell className="font-mono text-sm">{client.code || "—"}</TableCell>
                     <TableCell className="font-medium">{client.nom}</TableCell>
+                    <TableCell>
+                      {client.segment ? (
+                        <Badge variant={client.segment === "VIP" ? "default" : "secondary"}>{client.segment}</Badge>
+                      ) : "—"}
+                    </TableCell>
                     <TableCell>{client.telephone || "—"}</TableCell>
                     <TableCell className="font-mono text-xs">{client.ice || "—"}</TableCell>
                     <TableCell>{client.email || "—"}</TableCell>
@@ -303,7 +330,7 @@ export default function Clients() {
                 ))}
                 {!clients?.length && (
                   <TableRow>
-                    <TableCell colSpan={9}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={<SearchX className="h-12 w-12" />}
                         title="Aucun client trouvé"
@@ -364,6 +391,20 @@ export default function Clients() {
                   {...form.register("credit_plafond", { valueAsNumber: true })}
                   id="credit_plafond"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="segment">Segment</Label>
+                <Select value={form.watch("segment") || ""} onValueChange={(v) => form.setValue("segment", v || null)}>
+                  <SelectTrigger id="segment">
+                    <SelectValue placeholder="Aucun segment" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Aucun</SelectItem>
+                    {SEGMENTS.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>

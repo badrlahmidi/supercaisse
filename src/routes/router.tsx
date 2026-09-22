@@ -24,6 +24,14 @@ const Cheques = lazy(() => import("@/pages/Cheques"))
 const AuditLog = lazy(() => import("@/pages/AuditLog"))
 const Rapports = lazy(() => import("@/pages/Rapports"))
 const Inventaire = lazy(() => import("@/pages/Inventaire"))
+const Reappro = lazy(() => import("@/pages/Reappro"))
+const Caisses = lazy(() => import("@/pages/Caisses"))
+const ComparaisonPrix = lazy(() => import("@/pages/ComparaisonPrix"))
+const Rapprochement = lazy(() => import("@/pages/Rapprochement"))
+const VeilleDGI = lazy(() => import("@/pages/VeilleDGI"))
+const Cuisine = lazy(() => import("@/pages/Cuisine"))
+const Boutiques = lazy(() => import("@/pages/Boutiques"))
+const Peripheriques = lazy(() => import("@/pages/Peripheriques"))
 
 function AuthLayout({ children }: { children?: ReactNode }) {
   return (
@@ -62,6 +70,14 @@ export const router = createBrowserRouter([
           { path: "magasins", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Magasins /></ProtectedRoute></SuspensePage> },
           { path: "rapports", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Rapports /></ProtectedRoute></SuspensePage> },
           { path: "inventaire", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Inventaire /></ProtectedRoute></SuspensePage> },
+          { path: "reappro", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Reappro /></ProtectedRoute></SuspensePage> },
+          { path: "caisses", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Caisses /></ProtectedRoute></SuspensePage> },
+          { path: "comparaison-prix", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><ComparaisonPrix /></ProtectedRoute></SuspensePage> },
+          { path: "rapprochement", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Rapprochement /></ProtectedRoute></SuspensePage> },
+          { path: "veille-dgi", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><VeilleDGI /></ProtectedRoute></SuspensePage> },
+          { path: "cuisine", element: <SuspensePage><ProtectedRoute><Cuisine /></ProtectedRoute></SuspensePage> },
+          { path: "boutiques", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Boutiques /></ProtectedRoute></SuspensePage> },
+          { path: "peripheriques", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Peripheriques /></ProtectedRoute></SuspensePage> },
           { path: "audit", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><AuditLog /></ProtectedRoute></SuspensePage> },
           { path: "settings", element: <SuspensePage><ProtectedRoute allowedRoles={["admin"]}><Settings /></ProtectedRoute></SuspensePage> },
         ],

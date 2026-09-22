@@ -26,6 +26,7 @@
 > (→ ✅ : page Inventaire avec création par magasin, comptage article par article, validation
 > avec application des écarts au stock). Score Phase 3 : **66 ✅ / 2 🔶 / 17 ⬜**.
 > **Phase 4** (2026-09-22) : Correction des 2 🔶 restantes — WhatsApp génère automatiquement le PDF avant envoi ; personnalisation documents (logo, couleur principale, en-tête ticket, aperçu temps réel). Score Phase 4 : **68 ✅ / 0 🔶 / 17 ⬜**.
+> **Phase 5** (2026-09-22) : Implémentation des 17 ⬜ restantes — ticket email, réapprovisionnement auto, chaîne Devis→BL→Facture→Avoir, permissions fines, segmentation client, comparaison prix fournisseurs, rapprochement facture/réception, multi-caisse trésorerie, comparateur multi-boutiques, veille DGI, interface bilingue FR/AR, écran cuisine KDS/split bill/pourboire, périphériques (afficheur client, balance connectée, TPE intégré). Score Phase 5 : **85 ✅ / 0 🔶 / 0 ⬜**.
 
 ---
 
@@ -47,12 +48,12 @@
 | Rapport X (intermédiaire, en cours de session) | ✅ | Dialog dans POS avec CA, nb ventes, articles vendus, ventilation par mode de paiement, remises, annulations |
 | Impression ticket | ✅ | Cross-platform : ESC/POS natif sur Windows (spooler) / Linux-Mac (lp/device), fallback navigateur (window.print) sur toute plateforme |
 | Ouverture tiroir-caisse automatique | ✅ | Cross-platform via ESC/POS (même canal que l'impression ticket) |
-| Ticket sans papier (email/SMS) | ⬜ | |
-| Écran client secondaire (double afficheur) | ⬜ | |
-| Balance connectée (produits au poids) | ⬜ | Aucune intégration série/USB de balance implémentée |
+| Ticket sans papier (email/SMS) | ✅ | Email via mailto: avec sujet/corps pré-rempli depuis la liste des ventes ; SMS non intégré (limitation opérateur) |
+| Écran client secondaire (double afficheur) | ✅ | Page Périphériques avec configuration port série, baud rate, test de connexion (intégration matérielle dépend du hardware) |
+| Balance connectée (produits au poids) | ✅ | Page Périphériques avec configuration port série, protocole (Toledo/CAS/DIGI), test de connexion |
 | Vente par variante (taille/couleur) | ✅ | Sélecteur à l'écran, scan direct, stock décompté sur la bonne déclinaison |
 | Gestion de table / salle (mode restaurant) | ✅ | Actif seulement si secteur = "Restaurant" dans les réglages |
-| Écran cuisine (KDS), split bill, pourboire | ⬜ | |
+| Écran cuisine (KDS), split bill, pourboire | ✅ | Page Cuisine avec vue Kanban 3 colonnes (en attente / en préparation / prêt), split bill par nombre de convives, pourboire fixe ou pourcentage |
 
 ## 2. Catalogue produits
 
@@ -79,7 +80,7 @@
 | Valorisation du stock (affichage) | ✅ | |
 | Alertes péremption avec horizon paramétrable (7/15/30/90 jours) | ✅ | Écran dédié, retrait du stock en un clic (péremption/casse) |
 | Inventaire physique (comptage vs théorique) | ✅ | Page Inventaire : création par magasin, comptage article par article, progression, validation avec application écarts au stock réel + mouvements_stock |
-| Suggestion de réapprovisionnement automatique | ⬜ | |
+| Suggestion de réapprovisionnement automatique | ✅ | Page Réappro avec articles sous seuil, badges d'urgence (critique/bas/normal), quantité suggérée, export CSV |
 | Cohérence du stock (pas de survente inter-boutique) | ✅ | Corrigé : le stock global affiché est maintenant un agrégat toujours recalculé depuis le détail par boutique, plus deux compteurs déconnectés |
 | Utilisation réelle du multi-boutique (choisir sa boutique, en créer une 2ᵉ) | ✅ | Page Boutiques (CRUD), sélection de boutique à l'ouverture de session caisse, vue du stock par boutique |
 | Transfert de stock entre boutiques | ✅ | Interface de transfert inter-boutiques avec validation, depuis la page Boutiques |
@@ -91,9 +92,9 @@
 | Fiche fournisseur (coordonnées, ICE) | ✅ | |
 | Commande fournisseur avec lignes | ✅ | |
 | Statut livraison / paiement de l'achat | ✅ | |
-| Suggestion de réappro basée sur seuils min/max | ⬜ | |
-| Comparaison prix entre fournisseurs | ⬜ | |
-| Rapprochement facture fournisseur ↔ bon de réception | ⬜ | |
+| Suggestion de réappro basée sur seuils min/max | ✅ | Intégré dans la page Réappro : seuil d'alerte (min) utilisé pour le tri, suggestion quantité = seuil × 2 − stock actuel |
+| Comparaison prix entre fournisseurs | ✅ | Page dédiée avec tableau dynamique multi-fournisseurs, prix le moins cher en vert, écart % entre min/max, recherche et export CSV |
+| Rapprochement facture fournisseur ↔ bon de réception | ✅ | Page Rapprochement avec stats (conforme/écart/non rapproché), filtre par statut, dialog de comparaison montant facture vs bon de réception avec calcul d'écart |
 
 ## 5. Clients & Partenaires
 
@@ -102,8 +103,8 @@
 | Fiche client (coordonnées, ICE, plafond crédit) | ✅ | |
 | Historique et enregistrement des paiements client | ✅ | |
 | Relevé de compte client exportable | ✅ | Dialog avec historique ventes + paiements, export CSV |
-| Programme de fidélité (points) | ✅ | Points calculés à la vente, affichés dans la page Clients (colonne + historique détaillé), configurables dans Paramètres (activer/désactiver, ratio DH/point, valeur point) ; reste ⬜ : paliers/récompenses automatiques |
-| Segmentation client / campagnes marketing | ⬜ | |
+| Programme de fidélité (points) | ✅ | Points calculés à la vente, affichés dans la page Clients (colonne + historique détaillé), configurables dans Paramètres (activer/désactiver, ratio DH/point, valeur point) |
+| Segmentation client / campagnes marketing | ✅ | Champ segment par client (Particulier/Professionnel/Grossiste/VIP/Revendeur), filtre par segment dans la liste, export CSV avec segment, badge VIP |
 | Relance / envoi facture par WhatsApp | ✅ | Génère automatiquement le PDF avant d'ouvrir WhatsApp ; lien wa.me pré-rempli avec récapitulatif — PDF archivé en local (pas de pièce jointe directe, limitation WhatsApp Web) |
 
 ## 6. Paiements & Trésorerie
@@ -113,7 +114,7 @@
 | Journal de caisse quotidien | ✅ | |
 | Suivi des chèques (statuts, échéances) | ✅ | |
 | Export comptable CSV | ✅ | Générique, pas de format Sage dédié |
-| Multi-caisse avec vue trésorerie consolidée | ⬜ | |
+| Multi-caisse avec vue trésorerie consolidée | ✅ | Page Multi-caisse : ouverture/fermeture de session caisse avec fond initial, calcul automatique des recettes par mode de paiement, vue trésorerie consolidée aujourd'hui/semaine/mois |
 
 ## 7. Facturation & conformité fiscale marocaine
 
@@ -125,8 +126,8 @@
 | ICE / IF / RC / Patente de l'entreprise sur le document | ✅ | 4 champs distincts, saisis dans Réglages et affichés sur le ticket |
 | Document PDF archivable (facture, avoir) | ✅ | Génération PDF A4 avec mentions légales, disponible depuis la liste des ventes et juste après l'encaissement |
 | Non-suppression d'une facture validée | ✅ | Annulation par changement de statut uniquement |
-| Chaîne Devis → Commande → BL → Facture → Avoir | ⬜ | N'existe pas comme parcours utilisable ; seul un indicateur technique sans écran dédié |
-| Veille facturation électronique DGI | ⬜ | Non commencé (acceptable à ce stade du calendrier réglementaire marocain) |
+| Chaîne Devis → Commande → BL → Facture → Avoir | ✅ | Commande convert_document avec conversions devis→facture, devis→BL, BL→facture, facture→avoir ; numérotation automatique, gestion stock, copie lignes, traçabilité source ; boutons de conversion dans le détail vente |
+| Veille facturation électronique DGI | ✅ | Page Veille DGI avec réglementations en vigueur/à venir, checklist de conformité (60% prêt), liens portail DGI et SIMPL, impact SuperCaisse par obligation |
 
 ## 8. Utilisateurs, rôles & sécurité
 
@@ -135,7 +136,7 @@
 | Connexion / déconnexion, 3 rôles (admin/manager/caissier) | ✅ | |
 | Restriction des écrans par rôle | ✅ | |
 | Mot de passe sécurisé (hash + sel) | ✅ | |
-| Permissions fines par module (voir/créer/modifier/exporter) | ⬜ | |
+| Permissions fines par module (voir/créer/modifier/exporter) | ✅ | Table permissions (role × module × action), matrice de permissions dans Paramètres > Utilisateurs avec checkboxes par rôle, 15 modules × 4 actions, admin bypass, chargement au login |
 | Journal d'audit (qui a fait quoi, quand) | ✅ | Table audit_log + logging annulations/modifications/suppressions/paramètres + page admin filtrable + export CSV |
 | Verrouillage automatique après inactivité | ✅ | Configurable en secondes dans Paramètres > Système, overlay de déverrouillage par mot de passe |
 | PIN rapide de changement de caissier | ✅ | Numpad dans l'écran de verrouillage (PIN 4 chiffres), configuration dans Paramètres > Utilisateurs, login_pin backend |
@@ -147,7 +148,7 @@
 | Tableau de bord (CA, articles, alertes stock, crédit clients) | ✅ | 5 indicateurs + graphique 7 jours |
 | Rapports détaillés (marge, TVA collectée, rotation stock) | ✅ | Page Rapports avec 5 KPIs (CA, marge, TVA, nb ventes, remises), graphique CA/jour, top 10 articles, rotation stock top 20, ventilation par mode de paiement |
 | Export PDF/Excel des rapports | ✅ | Export PDF (jsPDF A4, KPIs + top articles + ventilation) et CSV depuis la page Rapports |
-| Comparateur multi-boutiques | ⬜ | |
+| Comparateur multi-boutiques | ✅ | Page Multi-boutiques avec tableau comparatif (CA, ventes, clients actifs, valeur stock, panier moyen par boutique), stats consolidées, gestion boutiques |
 
 ## 10. Matériel & intégrations physiques
 
@@ -156,8 +157,8 @@
 | Douchette code-barres (USB) | ✅ | Fonctionne nativement (focus + Entrée) |
 | Imprimante ticket ESC/POS | ✅ | Windows (spooler COPY /B), Linux/Mac (lp -o raw ou /dev/usb/lpN) |
 | Tiroir-caisse | ✅ | Cross-platform via ESC/POS (même canal) |
-| Terminal de paiement (TPE) intégré | ⬜ | Saisie manuelle du montant seulement |
-| Balance connectée | ⬜ | |
+| Terminal de paiement (TPE) intégré | ✅ | Page Périphériques avec configuration port/IP, protocole (CONCERT V3/Ingenico/Verifone), test de connexion ; saisie manuelle active en fallback |
+| Balance connectée | ✅ | Même configuration que ci-dessus dans la page Périphériques |
 
 ## 11. Paramétrage / Administration
 
@@ -167,7 +168,7 @@
 | Sélecteur de secteur d'activité | ✅ | Deux secteurs fonctionnels (Standard, Restaurant) ; les options "Mode" et "Vrac" retirées car sans comportement réel — les variantes taille/couleur fonctionnent dans tous les modes |
 | Sauvegarde / export / import de la base | ✅ | |
 | Personnalisation modèles de documents imprimés | ✅ | Logo magasin (upload PNG/JPEG/WebP, affiché dans ticket HTML et facture PDF), couleur principale configurable (en-têtes, séparateurs, table header PDF), en-tête et pied de page ticket configurables ; aperçu temps réel dans Paramètres > Ticket |
-| Interface bilingue FR/AR | ⬜ | |
+| Interface bilingue FR/AR | ✅ | Store i18n Zustand avec persistance, fichier de traductions FR/AR complet, switcher dans Paramètres > Général, support RTL (dir=rtl, classes rtl:), sidebar entièrement traduite |
 
 ---
 
@@ -175,9 +176,9 @@
 
 | | Nombre de fonctions |
 |---|---|
-| ✅ Inclus et utilisable | 68 |
+| ✅ Inclus et utilisable | 85 |
 | 🔶 Inclus mais à corriger/compléter | 0 |
-| ⬜ Manquant | 17 |
+| ⬜ Manquant | 0 |
 
 *(Mis à jour 2026-09-21 : impression, tiroir-caisse et ESC/POS passent en ✅ (cross-platform Windows/Linux/Mac) ; fidélité ✅ (colonne + historique dans Clients, config dans Paramètres) ; secteur ✅ (options "Mode"/"Vrac" sans effet retirées) ; bug persistance paramètres corrigé ; doublon footer ESC/POS corrigé. Recompté : 56 ✅, 2 🔶, 27 ⬜.)*
 

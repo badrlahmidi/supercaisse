@@ -56,6 +56,7 @@ pub fn run() {
             commands::delete_article_composant,
             commands::create_vente,
             commands::annuler_vente,
+            commands::convert_document,
             commands::get_ventes,
             commands::get_vente_details,
             commands::create_achat,
@@ -111,6 +112,13 @@ pub fn run() {
             commands::get_inventaires,
             commands::update_inventaire_ligne,
             commands::valider_inventaire,
+            commands::get_permissions,
+            commands::update_permission,
+            commands::get_caisses,
+            commands::open_caisse,
+            commands::close_caisse,
+            commands::get_tresorerie,
+            commands::compare_fournisseur_prices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

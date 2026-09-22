@@ -12,6 +12,7 @@ export interface Client {
   credit_plafond: number | null
   credit_actuel: number
   points_fidelite: number
+  segment: string | null
 }
 
 export function useClientsList() {

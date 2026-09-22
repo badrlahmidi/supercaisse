@@ -32,6 +32,7 @@ pub struct Client {
     pub ice: Option<String>,
     pub credit_plafond: Option<f64>,
     pub credit_actuel: Option<f64>,
+    pub segment: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -435,6 +436,58 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         );
     ")?;
 
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS permissions (
+            role TEXT NOT NULL,
+            module TEXT NOT NULL,
+            action TEXT NOT NULL,
+            allowed INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (role, module, action)
+        );
+    ")?;
+
+    {
+        let modules = vec![
+            "articles", "categories", "clients", "fournisseurs", "ventes",
+            "achats", "stock", "inventaire", "journal", "cheques",
+            "rapports", "magasins", "audit", "settings", "reappro",
+        ];
+        let actions = vec!["voir", "creer", "modifier", "exporter"];
+
+        for module in &modules {
+            for action in &actions {
+                conn.execute(
+                    "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('admin', ?1, ?2, 1)",
+                    params![module, action],
+                ).ok();
+            }
+        }
+
+        let manager_denied = vec!["magasins", "audit", "settings"];
+        for module in &modules {
+            let allowed = if manager_denied.contains(module) { 0 } else { 1 };
+            for action in &actions {
+                conn.execute(
+                    "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('manager', ?1, ?2, ?3)",
+                    params![module, action, allowed],
+                ).ok();
+            }
+        }
+
+        let caissier_allowed: Vec<(&str, &str)> = vec![
+            ("ventes", "voir"), ("ventes", "creer"), ("clients", "voir"),
+        ];
+        for module in &modules {
+            for action in &actions {
+                let allowed = if caissier_allowed.contains(&(module, action)) { 1 } else { 0 };
+                conn.execute(
+                    "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('caissier', ?1, ?2, ?3)",
+                    params![module, action, allowed],
+                ).ok();
+            }
+        }
+    }
+
     // Ajout des colonnes pour la migration des bases existantes
     let _ = conn.execute("ALTER TABLE clients ADD COLUMN points_fidelite REAL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN points_utilises REAL DEFAULT 0", []);
@@ -468,6 +521,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     ).ok();
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_article_variantes_article ON article_variantes(article_id)", []);
 
+    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN source_vente_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE clients ADD COLUMN segment TEXT", []);
+
     // Multi-prix (public/grossiste) et produits composés (kits)
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN prix_grossiste REAL", []);
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN est_kit INTEGER DEFAULT 0", []);
@@ -482,6 +538,23 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             FOREIGN KEY (composant_id) REFERENCES articles(id)
         );
         CREATE INDEX IF NOT EXISTS idx_article_composants_article ON article_composants(article_id);
+
+        CREATE TABLE IF NOT EXISTS caisses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL,
+            utilisateur_id INTEGER,
+            statut TEXT NOT NULL DEFAULT 'fermee',
+            ouverture_date TEXT,
+            fermeture_date TEXT,
+            fond_initial REAL NOT NULL DEFAULT 0,
+            recettes_especes REAL NOT NULL DEFAULT 0,
+            recettes_cb REAL NOT NULL DEFAULT 0,
+            recettes_cheque REAL NOT NULL DEFAULT 0,
+            recettes_virement REAL NOT NULL DEFAULT 0,
+            depenses REAL NOT NULL DEFAULT 0,
+            ecart REAL NOT NULL DEFAULT 0,
+            note TEXT
+        );
     ")?;
 
     conn.execute_batch("

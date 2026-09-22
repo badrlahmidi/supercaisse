@@ -51,6 +51,7 @@ interface Client {
   email: string | null
   credit_plafond: number
   credit_actuel: number
+  segment: string | null
 }
 
 interface Fournisseur {
@@ -181,6 +182,26 @@ const mockSettings: Settings = {
   doc_primary_color: null,
 }
 
+interface MockCaisse {
+  id: number
+  nom: string
+  utilisateur_id: number | null
+  statut: string
+  ouverture_date: string | null
+  fermeture_date: string | null
+  fond_initial: number
+  recettes_especes: number
+  recettes_cb: number
+  recettes_cheque: number
+  recettes_virement: number
+  depenses: number
+  ecart: number
+  note: string | null
+  utilisateur_nom: string | null
+}
+
+const mockCaisses: MockCaisse[] = []
+
 let nextId = 100
 let mockCurrentSession: SessionCaisse | null = null
 
@@ -290,7 +311,8 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   // Ventes
   create_vente: () => { nextId++; return nextId },
   get_ventes: () => [],
-  get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin" }, lignes: [] }),
+  get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin", dtype: "facture", source_vente_id: null, source_dtype: null, source_numero: null }, lignes: [] }),
+  convert_document: () => { nextId++; return nextId },
 
   // Achats
   create_achat: () => { nextId++; return nextId },
@@ -329,7 +351,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   }),
 
   // Stock alerts
-  get_articles_stock_alerte: () => [],
+  get_articles_stock_alerte: () => [] as { id: number; designation: string; stock: number; stock_alerte: number; categorie_nom: string | null; fournisseur_nom: string | null; fournisseur_id: number | null; prix_achat: number; suggestion_qte: number }[],
 
   // Journal
   get_journal_caisse: () => [],
@@ -359,8 +381,52 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   update_inventaire_ligne: () => {},
   valider_inventaire: () => {},
 
+  // Permissions
+  get_permissions: () => [],
+  update_permission: () => {},
+
+  // Multi-caisse
+  get_caisses: () => mockCaisses,
+  open_caisse: ({ nom, fond_initial, utilisateur_id }) => {
+    nextId++
+    mockCaisses.push({
+      id: nextId,
+      nom: nom as string,
+      utilisateur_id: (utilisateur_id as number) || null,
+      statut: "ouverte",
+      ouverture_date: new Date().toISOString().replace("T", " ").slice(0, 19),
+      fermeture_date: null,
+      fond_initial: (fond_initial as number) || 0,
+      recettes_especes: 0,
+      recettes_cb: 0,
+      recettes_cheque: 0,
+      recettes_virement: 0,
+      depenses: 0,
+      ecart: 0,
+      note: null,
+      utilisateur_nom: null,
+    })
+    return nextId
+  },
+  close_caisse: ({ id, note }) => {
+    const c = mockCaisses.find(c => c.id === id)
+    if (c) {
+      c.statut = "fermee"
+      c.fermeture_date = new Date().toISOString().replace("T", " ").slice(0, 19)
+      c.note = (note as string) || null
+    }
+  },
+  get_tresorerie: () => ({
+    jour: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
+    semaine: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
+    mois: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
+  }),
+
   // Stock movements
   get_mouvements_stock: () => [],
+
+  // Comparaison prix
+  compare_fournisseur_prices: () => [],
 
   // Magasins
   get_magasins: () => mockMagasins,

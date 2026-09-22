@@ -16,7 +16,9 @@ import { z } from "zod"
 import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import { useAuth } from "@/context/AuthContext"
-import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X } from "lucide-react"
+import { Checkbox } from "@/ui/Checkbox"
+import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages } from "lucide-react"
+import { useI18nStore } from "@/store/i18n"
 
 
 interface User {
@@ -74,6 +76,7 @@ type SettingsForm = z.infer<typeof settingsSchema>
 export default function Settings() {
   const queryClient = useQueryClient()
   const { user: currentUser } = useAuth()
+  const { locale, setLocale, t } = useI18nStore()
   const [showPassword, setShowPassword] = useState(false)
   const [activeTab, setActiveTab] = useState("general")
   const [editingUser, setEditingUser] = useState<Utilisateur | null>(null)
@@ -81,6 +84,40 @@ export default function Settings() {
   const [deleteUserConfirm, setDeleteUserConfirm] = useState<Utilisateur | null>(null)
   const [pinValue, setPinValue] = useState("")
   const [savingPin, setSavingPin] = useState(false)
+  const [permRole, setPermRole] = useState("manager")
+
+  const MODULES = [
+    "articles", "categories", "clients", "fournisseurs", "ventes",
+    "achats", "stock", "inventaire", "journal", "cheques",
+    "rapports", "magasins", "audit", "settings", "reappro",
+  ] as const
+
+  const ACTIONS = ["voir", "creer", "modifier", "exporter"] as const
+
+  const MODULE_LABELS: Record<string, string> = {
+    articles: "Articles",
+    categories: "Catégories",
+    clients: "Clients",
+    fournisseurs: "Fournisseurs",
+    ventes: "Ventes",
+    achats: "Achats",
+    stock: "Stock",
+    inventaire: "Inventaire",
+    journal: "Journal de caisse",
+    cheques: "Chèques",
+    rapports: "Rapports",
+    magasins: "Magasins",
+    audit: "Audit",
+    settings: "Paramètres",
+    reappro: "Réappro",
+  }
+
+  const ACTION_LABELS: Record<string, string> = {
+    voir: "Voir",
+    creer: "Créer",
+    modifier: "Modifier",
+    exporter: "Exporter",
+  }
 
   const { data: users } = useQuery({
     queryKey: ["utilisateurs"],
@@ -90,6 +127,39 @@ export default function Settings() {
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: () => invoke<SettingsForm>("get_settings"),
+  })
+
+  const { data: permissionsData } = useQuery({
+    queryKey: ["permissions", permRole],
+    queryFn: () => invoke<Array<{ role: string; module: string; action: string; allowed: boolean }>>("get_permissions", { role: permRole }),
+    enabled: permRole !== "admin",
+  })
+
+  const permMap = (() => {
+    const map: Record<string, Record<string, boolean>> = {}
+    if (permRole === "admin") {
+      for (const m of MODULES) {
+        map[m] = {}
+        for (const a of ACTIONS) map[m][a] = true
+      }
+      return map
+    }
+    if (permissionsData) {
+      for (const row of permissionsData) {
+        if (!map[row.module]) map[row.module] = {}
+        map[row.module][row.action] = row.allowed
+      }
+    }
+    return map
+  })()
+
+  const updatePermMutation = useMutation({
+    mutationFn: ({ role, module, action, allowed }: { role: string; module: string; action: string; allowed: boolean }) =>
+      invoke("update_permission", { role, module, action, allowed }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["permissions", permRole] })
+    },
+    onError: (err) => toast.error(String(err)),
   })
 
   useEffect(() => {
@@ -187,15 +257,15 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Paramètres" description="Configuration du système" />
+      <PageHeader title={t("settings.title")} description={t("settings.description")} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="general">Général</TabsTrigger>
-          <TabsTrigger value="users">Utilisateurs</TabsTrigger>
-          <TabsTrigger value="receipt">Ticket</TabsTrigger>
-          <TabsTrigger value="system">Système</TabsTrigger>
-          <TabsTrigger value="backup">Sauvegarde</TabsTrigger>
+          <TabsTrigger value="general">{t("settings.general")}</TabsTrigger>
+          <TabsTrigger value="users">{t("settings.users")}</TabsTrigger>
+          <TabsTrigger value="receipt">{t("settings.receipt")}</TabsTrigger>
+          <TabsTrigger value="system">{t("settings.systemTab")}</TabsTrigger>
+          <TabsTrigger value="backup">{t("settings.backup")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
@@ -322,12 +392,40 @@ export default function Settings() {
               </CardContent>
             </Card>
 
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Languages className="h-5 w-5" />
+                  {t("settings.language")}
+                </CardTitle>
+                <CardDescription>{t("settings.languageDescription")}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant={locale === "fr" ? "default" : "outline"}
+                    onClick={() => setLocale("fr")}
+                  >
+                    {t("settings.french")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={locale === "ar" ? "default" : "outline"}
+                    onClick={() => setLocale("ar")}
+                  >
+                    {t("settings.arabic")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             <div className="flex justify-end">
               <Button type="submit" disabled={updateSettingsMutation.isPending}>
                 {updateSettingsMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enregistrement...</>
+                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />{t("settings.saving")}</>
                 ) : (
-                  "Enregistrer les paramètres"
+                  t("settings.saveSettings")
                 )}
               </Button>
             </div>
@@ -507,6 +605,74 @@ export default function Settings() {
               </form>
             </DialogContent>
           </Dialog>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Permissions par module
+              </CardTitle>
+              <CardDescription>
+                {"Configurez les droits d'accès par rôle pour chaque module de l'application"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Tabs value={permRole} onValueChange={setPermRole}>
+                <TabsList>
+                  <TabsTrigger value="admin">Admin</TabsTrigger>
+                  <TabsTrigger value="manager">Manager</TabsTrigger>
+                  <TabsTrigger value="caissier">Caissier</TabsTrigger>
+                </TabsList>
+
+                {(["admin", "manager", "caissier"] as const).map((role) => (
+                  <TabsContent key={role} value={role}>
+                    {role === "admin" && (
+                      <p className="text-sm text-muted-foreground mb-4">
+                        {"L'administrateur a tous les droits. Les permissions ne peuvent pas être modifiées."}
+                      </p>
+                    )}
+                    <div className="rounded-md border overflow-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="min-w-[140px]">Module</TableHead>
+                            {ACTIONS.map((action) => (
+                              <TableHead key={action} className="text-center w-[100px]">
+                                {ACTION_LABELS[action]}
+                              </TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {MODULES.map((mod_) => (
+                            <TableRow key={mod_}>
+                              <TableCell className="font-medium">{MODULE_LABELS[mod_]}</TableCell>
+                              {ACTIONS.map((action) => (
+                                <TableCell key={action} className="text-center">
+                                  <Checkbox
+                                    checked={permMap[mod_]?.[action] ?? false}
+                                    disabled={role === "admin"}
+                                    onChange={(e) => {
+                                      updatePermMutation.mutate({
+                                        role,
+                                        module: mod_,
+                                        action,
+                                        allowed: e.target.checked,
+                                      })
+                                    }}
+                                  />
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="receipt" className="space-y-6">
