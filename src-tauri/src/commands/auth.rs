@@ -2,6 +2,8 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
+use super::log_audit;
+
 #[tauri::command]
 pub fn login(db: State<DbState>, login: String, password: String) -> Result<Option<Utilisateur>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -21,6 +23,9 @@ pub fn login(db: State<DbState>, login: String, password: String) -> Result<Opti
         None => Ok(None),
         Some((id, ulogin, nom, role, hash)) => {
             if !verify_password(&password, &hash) {
+                log_audit(&conn, Some(id), "echec_connexion",
+                    &format!("Tentative de connexion échouée pour: {}", ulogin),
+                    Some("utilisateur"), Some(id));
                 return Ok(None);
             }
             if !hash.starts_with("$argon2") {
@@ -30,6 +35,9 @@ pub fn login(db: State<DbState>, login: String, password: String) -> Result<Opti
                     params![new_hash, id],
                 );
             }
+            log_audit(&conn, Some(id), "connexion",
+                &format!("Connexion réussie: {} ({})", nom, role),
+                Some("utilisateur"), Some(id));
             Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role }))
         }
     }

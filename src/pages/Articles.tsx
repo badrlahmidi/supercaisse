@@ -17,7 +17,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes, Printer } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes, Printer, AlertTriangle } from "lucide-react"
 import { jsPDF } from "jspdf"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
@@ -71,6 +71,7 @@ export default function Articles() {
   const [composantsArticle, setComposantsArticle] = useState<Article | null>(null)
   const [showComposants, setShowComposants] = useState(false)
   const [selectedForLabels, setSelectedForLabels] = useState<Set<number>>(new Set())
+  const [articleToDelete, setArticleToDelete] = useState<Article | null>(null)
 
   const { data: articles, isLoading, refetch } = useProductsList(debouncedSearch)
   const { data: categories } = useCategoriesList()
@@ -458,7 +459,7 @@ export default function Articles() {
                             <Boxes className="h-4 w-4" />
                           </Button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(article.id)} title="Supprimer">
+                        <Button variant="ghost" size="icon" onClick={() => setArticleToDelete(article)} title="Supprimer">
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
@@ -882,6 +883,33 @@ export default function Articles() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowComposants(false)}>Fermer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!articleToDelete} onOpenChange={() => setArticleToDelete(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Confirmer la suppression
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Êtes-vous sûr de vouloir supprimer <strong>{articleToDelete?.designation}</strong> ? Cette action est irréversible.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setArticleToDelete(null)}>Annuler</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (articleToDelete) deleteMutation.mutate(articleToDelete.id, { onSuccess: () => setArticleToDelete(null) })
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Supprimer
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

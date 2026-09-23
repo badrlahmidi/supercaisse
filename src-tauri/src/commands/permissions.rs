@@ -2,6 +2,8 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
+use super::log_audit;
+
 #[tauri::command]
 pub fn get_permissions(db: State<DbState>, role: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -27,5 +29,8 @@ pub fn update_permission(db: State<DbState>, role: String, module: String, actio
          ON CONFLICT(role, module, action) DO UPDATE SET allowed = ?4",
         params![role, module, action, allowed as i32],
     ).map_err(|e| e.to_string())?;
+    log_audit(&conn, None, "modifier_permission",
+        &format!("Permission {} / {} / {} → {}", role, module, action, if allowed { "autorisé" } else { "refusé" }),
+        None, None);
     Ok(())
 }

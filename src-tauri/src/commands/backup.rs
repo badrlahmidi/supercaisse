@@ -3,6 +3,8 @@ use rusqlite::{backup::Backup, Connection};
 use std::time::Duration;
 use tauri::State;
 
+use super::log_audit;
+
 #[tauri::command]
 pub fn backup_database(db: State<DbState>) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -38,8 +40,13 @@ pub fn export_database(db: State<DbState>) -> Result<String, String> {
 #[tauri::command]
 pub fn import_database(db: State<DbState>, path: String) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let src = Connection::open(&path).map_err(|e| e.to_string())?;
-    let backup = Backup::new(&src, &mut *conn).map_err(|e| e.to_string())?;
-    backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
+    {
+        let src = Connection::open(&path).map_err(|e| e.to_string())?;
+        let backup = Backup::new(&src, &mut *conn).map_err(|e| e.to_string())?;
+        backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
+    }
+    log_audit(&*conn, None, "importer_base",
+        &format!("Import base de données depuis: {}", path),
+        None, None);
     Ok(())
 }

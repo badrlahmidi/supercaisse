@@ -2,7 +2,7 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
-use super::default_magasin_id;
+use super::{default_magasin_id, log_audit};
 
 #[tauri::command]
 pub fn get_current_session(db: State<DbState>, caissier_id: i64) -> Result<Option<serde_json::Value>, String> {
@@ -54,7 +54,11 @@ pub fn open_session(db: State<DbState>, caissier_id: i64, fond_initial: f64, mag
         params![caissier_id, fond_initial, mid]
     ).map_err(|e| e.to_string())?;
 
-    Ok(conn.last_insert_rowid())
+    let session_id = conn.last_insert_rowid();
+    log_audit(&conn, Some(caissier_id), "ouvrir_session",
+        &format!("Ouverture session #{} - fond initial: {} DH", session_id, fond_initial),
+        Some("session"), Some(session_id));
+    Ok(session_id)
 }
 
 #[tauri::command]
@@ -96,6 +100,10 @@ pub fn close_session(db: State<DbState>, session_id: i64, total_especes_declare:
          WHERE id = ?5",
         params![date_cloture, total_attendu, total_especes_declare, ecart, session_id]
     ).map_err(|e| e.to_string())?;
+
+    log_audit(&tx, None, "fermer_session",
+        &format!("Clôture session #{} - attendu: {:.2} DH, déclaré: {:.2} DH, écart: {:.2} DH", session_id, total_attendu, total_especes_declare, ecart),
+        Some("session"), Some(session_id));
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())

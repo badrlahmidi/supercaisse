@@ -2,6 +2,8 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
+use super::log_audit;
+
 #[tauri::command]
 pub fn get_clients(db: State<DbState>) -> Result<Vec<Client>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -47,7 +49,13 @@ pub fn update_client(db: State<DbState>, id: i64, code: Option<String>, nom: Str
 #[tauri::command]
 pub fn delete_client(db: State<DbState>, id: i64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let nom: String = conn.query_row(
+        "SELECT nom FROM clients WHERE id = ?1", params![id], |r| r.get(0)
+    ).unwrap_or_else(|_| format!("ID {}", id));
     conn.execute("DELETE FROM clients WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    log_audit(&conn, None, "supprimer_client",
+        &format!("Suppression client: {} (ID {})", nom, id),
+        Some("client"), Some(id));
     Ok(())
 }
 

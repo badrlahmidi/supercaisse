@@ -197,6 +197,10 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
         }
     }
 
+    log_audit(&tx, None, "importer_csv",
+        &format!("Import CSV: {} articles importés, {} erreurs", imported, errors.len()),
+        None, None);
+
     tx.commit().map_err(|e| e.to_string())?;
 
     let mut report = format!("Import terminé. {} articles importés.", imported);

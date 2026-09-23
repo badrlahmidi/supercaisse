@@ -2,7 +2,7 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
-use super::adjust_article_stock;
+use super::{adjust_article_stock, log_audit};
 
 #[tauri::command]
 pub fn get_magasins(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
@@ -176,6 +176,10 @@ pub fn validate_transfert(db: State<DbState>, transfert_id: i64) -> Result<(), S
     }
 
     tx.execute("UPDATE transferts_stock SET statut = 'valide' WHERE id = ?1", params![transfert_id]).map_err(|e| e.to_string())?;
+
+    log_audit(&tx, None, "valider_transfert",
+        &format!("Validation transfert #{} (magasin {} → {})", transfert_id, source_id, dest_id),
+        Some("transfert"), Some(transfert_id));
 
     drop(stmt);
     tx.commit().map_err(|e| e.to_string())?;

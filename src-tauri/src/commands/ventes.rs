@@ -193,6 +193,10 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         }
     }
 
+    log_audit(&tx, caissier_id, "creer_vente",
+        &format!("Vente #{} - {} DH ({}) - {}", vente_id, montant_total, document_type, mode_paiement),
+        Some("vente"), Some(vente_id));
+
     tx.commit().map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "id": vente_id, "numero_facture": numero_facture }))

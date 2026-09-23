@@ -577,7 +577,7 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
 
 ---
 
-## Chantier 5 — Confirmation suppression Articles + Error state Rapports (+2 UI/UX)
+## Chantier 5 — Confirmation suppression Articles + Error state Rapports (+2 UI/UX) ✅ TERMINÉ
 
 **Impact estimé : UI/UX 19→21**
 
@@ -651,7 +651,7 @@ if (query.isError) {
 
 ---
 
-## Chantier 6 — Audit log élargi (+1 Production Ready)
+## Chantier 6 — Audit log élargi (+1 Production Ready) ✅ TERMINÉ
 
 **Impact estimé : Production Ready 22→23**
 
@@ -699,7 +699,7 @@ Note : `log_audit` utilise `let _ =` (fire-and-forget). C'est intentionnel — u
 
 ---
 
-## Chantier 7 (Bonus) — Tests frontend manquants (+1 Code Quality)
+## Chantier 7 (Bonus) — Tests frontend manquants (+1 Code Quality) ✅ TERMINÉ
 
 **Impact estimé : Code Quality 23→24**
 

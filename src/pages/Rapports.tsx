@@ -38,7 +38,7 @@ export default function Rapports() {
   const [debut, setDebut] = useState(thirtyDaysAgoISO)
   const [fin, setFin] = useState(todayISO)
 
-  const { data: rapport, isLoading } = useQuery({
+  const { data: rapport, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["rapport_detaille", debut, fin],
     queryFn: () => invoke<RapportDetaille>("get_rapport_detaille", { debut, fin }),
   })
@@ -146,6 +146,16 @@ export default function Rapports() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
+      )}
+
+      {isError && (
+        <Card className="mt-4">
+          <CardContent className="py-8 text-center">
+            <p className="text-destructive font-medium">Erreur de chargement du rapport</p>
+            <p className="text-sm text-muted-foreground mt-1">{String(error)}</p>
+            <Button className="mt-4" onClick={() => refetch()}>Réessayer</Button>
+          </CardContent>
+        </Card>
       )}
 
       {rapport && (

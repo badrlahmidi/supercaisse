@@ -2,6 +2,8 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
+use super::log_audit;
+
 #[tauri::command]
 pub fn get_fournisseurs(db: State<DbState>) -> Result<Vec<Fournisseur>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -43,6 +45,12 @@ pub fn update_fournisseur(db: State<DbState>, id: i64, nom: String, adresse: Opt
 #[tauri::command]
 pub fn delete_fournisseur(db: State<DbState>, id: i64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let nom: String = conn.query_row(
+        "SELECT nom FROM fournisseurs WHERE id = ?1", params![id], |r| r.get(0)
+    ).unwrap_or_else(|_| format!("ID {}", id));
     conn.execute("DELETE FROM fournisseurs WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    log_audit(&conn, None, "supprimer_fournisseur",
+        &format!("Suppression fournisseur: {} (ID {})", nom, id),
+        Some("fournisseur"), Some(id));
     Ok(())
 }
