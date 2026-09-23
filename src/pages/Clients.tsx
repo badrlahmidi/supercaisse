@@ -394,12 +394,12 @@ export default function Clients() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="segment">Segment</Label>
-                <Select value={form.watch("segment") || ""} onValueChange={(v) => form.setValue("segment", v || null)}>
+                <Select value={form.watch("segment") || "none"} onValueChange={(v) => form.setValue("segment", v === "none" ? null : v)}>
                   <SelectTrigger id="segment">
                     <SelectValue placeholder="Aucun segment" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Aucun</SelectItem>
+                    <SelectItem value="none">Aucun</SelectItem>
                     {SEGMENTS.map((s) => (
                       <SelectItem key={s} value={s}>{s}</SelectItem>
                     ))}

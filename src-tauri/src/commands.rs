@@ -803,50 +803,64 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let statut: String = tx.query_row(
-        "SELECT statut FROM ventes WHERE id = ?1",
+    let (statut, dtype): (String, String) = tx.query_row(
+        "SELECT statut, COALESCE(dtype, 'facture') FROM ventes WHERE id = ?1",
         params![vente_id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|e| e.to_string())?;
 
     if statut == "annulee" {
         return Err("Cette vente est déjà annulée".to_string());
     }
 
-    // Remettre le stock
-    let magasin_id = default_magasin_id(&tx)?;
-    let mut stmt = tx.prepare("SELECT article_id, quantite, variante_id FROM vente_articles WHERE vente_id = ?1").map_err(|e| e.to_string())?;
-    let lignes = stmt.query_map(params![vente_id], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?, row.get::<_, Option<i64>>(2)?))
-    }).map_err(|e| e.to_string())?;
-    let lignes: Vec<(i64, f64, Option<i64>)> = lignes.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
-    drop(stmt);
+    let stock_was_deducted = dtype == "facture" || dtype == "bl";
+    let is_avoir = dtype == "avoir";
 
-    for (article_id, qte, variante_id) in lignes {
-        if let Some(vid) = variante_id {
-            tx.execute("UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2", params![qte, vid])
-                .map_err(|e| e.to_string())?;
-            tx.execute(
-                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente_variante', ?4)",
-                params![article_id, qte, vid, magasin_id],
-            ).map_err(|e| e.to_string())?;
+    if stock_was_deducted || is_avoir {
+        let magasin_id = default_magasin_id(&tx)?;
+        let mut stmt = tx.prepare("SELECT article_id, quantite, variante_id FROM vente_articles WHERE vente_id = ?1").map_err(|e| e.to_string())?;
+        let lignes = stmt.query_map(params![vente_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?, row.get::<_, Option<i64>>(2)?))
+        }).map_err(|e| e.to_string())?;
+        let lignes: Vec<(i64, f64, Option<i64>)> = lignes.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
+        drop(stmt);
+
+        let (adjustment_sign, mtype_suffix) = if is_avoir {
+            (-1.0_f64, "annulation_avoir")
         } else {
-            let composants = get_composants(&tx, article_id)?;
-            if !composants.is_empty() {
-                for (composant_id, comp_qte) in composants {
-                    let qte_composant = comp_qte * qte;
-                    adjust_article_stock(&tx, composant_id, magasin_id, qte_composant)?;
+            (1.0_f64, "annulation_vente")
+        };
+
+        for (article_id, qte, variante_id) in lignes {
+            if let Some(vid) = variante_id {
+                let delta = qte * adjustment_sign;
+                tx.execute("UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2", params![delta, vid])
+                    .map_err(|e| e.to_string())?;
+                let mtype = if is_avoir { "sortie" } else { "entree" };
+                tx.execute(
+                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![article_id, qte, mtype, vid, format!("{}_variante", mtype_suffix), magasin_id],
+                ).map_err(|e| e.to_string())?;
+            } else {
+                let composants = get_composants(&tx, article_id)?;
+                if !composants.is_empty() {
+                    for (composant_id, comp_qte) in composants {
+                        let qte_composant = comp_qte * qte;
+                        adjust_article_stock(&tx, composant_id, magasin_id, qte_composant * adjustment_sign)?;
+                        let mtype = if is_avoir { "sortie" } else { "entree" };
+                        tx.execute(
+                            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![composant_id, qte_composant, mtype, vente_id, format!("{}_kit", mtype_suffix), magasin_id],
+                        ).map_err(|e| e.to_string())?;
+                    }
+                } else {
+                    adjust_article_stock(&tx, article_id, magasin_id, qte * adjustment_sign)?;
+                    let mtype = if is_avoir { "sortie" } else { "entree" };
                     tx.execute(
-                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente_kit', ?4)",
-                        params![composant_id, qte_composant, vente_id, magasin_id],
+                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![article_id, qte, mtype, vente_id, mtype_suffix, magasin_id],
                     ).map_err(|e| e.to_string())?;
                 }
-            } else {
-                adjust_article_stock(&tx, article_id, magasin_id, qte)?;
-                tx.execute(
-                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'annulation_vente', ?4)",
-                    params![article_id, qte, vente_id, magasin_id],
-                ).map_err(|e| e.to_string())?;
             }
         }
     }
@@ -987,6 +1001,15 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
         return Err("Impossible de convertir un document annulé".to_string());
     }
 
+    let already_converted: bool = tx.query_row(
+        "SELECT COUNT(*) > 0 FROM ventes WHERE source_vente_id = ?1 AND dtype = ?2 AND statut != 'annulee'",
+        params![vente_id, target_type],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if already_converted {
+        return Err(format!("Ce document a déjà été converti en {}", target_type));
+    }
+
     let allowed = match source_dtype.as_str() {
         "devis" => target_type == "facture" || target_type == "bl",
         "bl" => target_type == "facture",
@@ -1109,6 +1132,30 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
                         params![article_id, qte, new_vente_id, magasin_id],
                     ).map_err(|e| e.to_string())?;
                 }
+            }
+        }
+    }
+
+    tx.execute(
+        "UPDATE ventes SET statut = 'convertie' WHERE id = ?1",
+        params![vente_id],
+    ).map_err(|e| e.to_string())?;
+
+    if mode_paiement == "credit" && (target_type == "facture" || target_type == "bl") {
+        if let Some(cid) = client_id {
+            tx.execute(
+                "UPDATE clients SET credit_actuel = credit_actuel + ?1 WHERE id = ?2",
+                params![new_montant_total.abs(), cid],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+    if target_type == "avoir" {
+        if let Some(cid) = client_id {
+            if mode_paiement == "credit" {
+                tx.execute(
+                    "UPDATE clients SET credit_actuel = credit_actuel - ?1 WHERE id = ?2",
+                    params![montant_total.abs(), cid],
+                ).map_err(|e| e.to_string())?;
             }
         }
     }
@@ -2360,7 +2407,7 @@ pub fn get_audit_log(db: State<DbState>, debut: Option<String>, fin: Option<Stri
     let mut where_clause = String::new();
     let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(d) = &debut { if !d.is_empty() { where_clause.push_str(" AND a.date >= ?"); qp.push(Box::new(d.clone())); } }
-    if let Some(f) = &fin { if !f.is_empty() { where_clause.push_str(" AND a.date <= ?"); qp.push(Box::new(f.clone())); } }
+    if let Some(f) = &fin { if !f.is_empty() { where_clause.push_str(" AND a.date <= ?"); qp.push(Box::new(format!("{} 23:59:59", f))); } }
     if let Some(af) = &action_filter { if !af.is_empty() { where_clause.push_str(" AND a.action = ?"); qp.push(Box::new(af.clone())); } }
     let sql = format!(
         "SELECT a.id, a.date, a.utilisateur_id, a.action, a.detail, a.reference_type, a.reference_id, u.nom as user_nom
@@ -2493,10 +2540,10 @@ pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Opti
 
     let (wc5, wp5) = date_filter("v.date");
     let rotation_sql = format!(
-        "SELECT a.id, a.designation, a.stock, COALESCE(SUM(va.quantite), 0) as vendu
+        "SELECT a.id, a.designation, a.stock, COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN va.quantite ELSE 0 END), 0) as vendu
          FROM articles a
          LEFT JOIN vente_articles va ON va.article_id = a.id
-         LEFT JOIN ventes v ON v.id = va.vente_id AND v.statut != 'annulee' {}
+         LEFT JOIN ventes v ON v.id = va.vente_id AND v.statut != 'annulee' AND v.dtype IN ('facture', 'bl') {}
          WHERE a.actif = 1
          GROUP BY a.id ORDER BY vendu DESC LIMIT 20", wc5
     );
@@ -2673,7 +2720,7 @@ pub fn update_inventaire_ligne(db: State<DbState>, ligne_id: i64, stock_compte: 
 
 #[tauri::command]
 pub fn valider_inventaire(db: State<DbState>, inventaire_id: i64, utilisateur_id: i64) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let statut: String = conn.query_row(
         "SELECT statut FROM inventaires WHERE id = ?1",
@@ -2694,36 +2741,40 @@ pub fn valider_inventaire(db: State<DbState>, inventaire_id: i64, utilisateur_id
     let adjustments: Vec<(i64, f64, f64)> = stmt.query_map(params![inventaire_id], |r| {
         Ok((r.get(0)?, r.get(1)?, r.get(2)?))
     }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect();
+    drop(stmt);
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     for (article_id, stock_compte, ecart) in &adjustments {
-        conn.execute(
+        tx.execute(
             "INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES (?1, ?2, ?3)
              ON CONFLICT(article_id, magasin_id) DO UPDATE SET quantite = ?3",
             params![article_id, magasin_id, stock_compte],
         ).map_err(|e| e.to_string())?;
 
-        let total_stock: f64 = conn.query_row(
+        let total_stock: f64 = tx.query_row(
             "SELECT COALESCE(SUM(quantite), 0) FROM article_stocks WHERE article_id = ?1",
             params![article_id], |r| r.get(0),
         ).unwrap_or(0.0);
-        conn.execute("UPDATE articles SET stock = ?1 WHERE id = ?2", params![total_stock, article_id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE articles SET stock = ?1 WHERE id = ?2", params![total_stock, article_id]).map_err(|e| e.to_string())?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id)
              VALUES (?1, ?2, 'inventaire', ?3, 'inventaire', ?4)",
             params![article_id, ecart, inventaire_id, magasin_id],
         ).map_err(|e| e.to_string())?;
     }
 
-    conn.execute(
+    tx.execute(
         "UPDATE inventaires SET statut = 'valide', date_fin = datetime('now','localtime') WHERE id = ?1",
         params![inventaire_id],
     ).map_err(|e| e.to_string())?;
 
-    log_audit(&conn, Some(utilisateur_id), "valider_inventaire",
+    log_audit(&tx, Some(utilisateur_id), "valider_inventaire",
         &format!("Inventaire #{} validé ({} écarts appliqués)", inventaire_id, adjustments.len()),
         Some("inventaire"), Some(inventaire_id));
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 

@@ -463,6 +463,7 @@ export default function POS() {
         docPrimaryColor: settings.doc_primary_color || null,
         receiptHeader: settings.receipt_header || null,
         venteId,
+        docType: documentType,
         date: new Date().toISOString(),
         caissier: user?.nom || "",
         client: clientName,

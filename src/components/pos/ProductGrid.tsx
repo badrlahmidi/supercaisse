@@ -36,8 +36,6 @@ export default function ProductGrid({ articles, onAddToCart }: ProductGridProps)
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
       {articles.slice(0, 100).map((article) => {
-        // Le stock agrégé d'un article à variantes ne reflète pas la disponibilité réelle
-        // (chaque déclinaison a son propre stock, vérifié dans le sélecteur de variante).
         const lowStock = !article.a_variantes && article.stock_alerte && article.stock <= article.stock_alerte
         const outOfStock = !article.a_variantes && article.stock <= 0
         return (

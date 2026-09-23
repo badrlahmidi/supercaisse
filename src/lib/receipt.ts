@@ -39,6 +39,7 @@ export interface ReceiptData {
 const DOC_TITLES: Record<string, string> = {
   facture: "FACTURE",
   devis: "DEVIS",
+  commande: "COMMANDE",
   bl: "BON DE LIVRAISON",
   avoir: "AVOIR",
 }
