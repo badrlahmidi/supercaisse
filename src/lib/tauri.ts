@@ -309,7 +309,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
 
   // Ventes
-  create_vente: () => { nextId++; return nextId },
+  create_vente: () => { nextId++; return { id: nextId, numero_facture: `FA-2026-${String(nextId).padStart(5, "0")}` } },
   get_ventes: () => [],
   get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin", dtype: "facture", source_vente_id: null, source_dtype: null, source_numero: null }, lignes: [] }),
   convert_document: () => { nextId++; return nextId },

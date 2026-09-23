@@ -433,7 +433,7 @@ export default function POS() {
       }))
       const isSplit = paymentSplits.length > 0
       const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
-      return invoke<number>("create_vente", {
+      return invoke<{ id: number; numero_facture: string }>("create_vente", {
         clientId: selectedClient,
         caissierId: user?.id ?? 0,
         articles: items,
@@ -446,7 +446,7 @@ export default function POS() {
         magasinId: currentSession?.magasin_id ?? null,
       })
     },
-    onSuccess: (venteId) => {
+    onSuccess: ({ id: venteId, numero_facture: numeroFacture }) => {
       const clientObj = clients.find((c) => c.id === selectedClient)
       const clientName = clientObj?.nom || "Client de passage"
       const clientIce = clientObj?.ice || null
@@ -465,6 +465,7 @@ export default function POS() {
         receiptHeader: settings.receipt_header || null,
         venteId,
         docType: documentType,
+        docNumero: numeroFacture,
         date: new Date().toISOString(),
         caissier: user?.nom || "",
         client: clientName,

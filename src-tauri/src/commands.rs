@@ -626,7 +626,7 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
     splits: Option<Vec<serde_json::Value>>, dtype: Option<String>,
     points_utilises: Option<f64>, points_gagnes: Option<f64>,
     magasin_id: Option<i64>
-) -> Result<i64, String> {
+) -> Result<serde_json::Value, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = match magasin_id {
@@ -808,7 +808,7 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         }
     }
 
-    Ok(vente_id)
+    Ok(serde_json::json!({ "id": vente_id, "numero_facture": numero_facture }))
 }
 
 #[tauri::command]
@@ -2342,12 +2342,13 @@ pub fn get_rapport_x(db: State<DbState>, session_id: i64) -> Result<serde_json::
     ).unwrap_or(0.0);
 
     let mut stmt = conn.prepare(
-        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee' GROUP BY mode_paiement"
+        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0), COUNT(*) FROM ventes WHERE session_id = ?1 AND statut != 'annulee' GROUP BY mode_paiement"
     ).map_err(|e| e.to_string())?;
     let par_mode = stmt.query_map(params![session_id], |r| {
         Ok(serde_json::json!({
             "mode": r.get::<_, String>(0)?,
-            "total": r.get::<_, f64>(1)?
+            "total": r.get::<_, f64>(1)?,
+            "count": r.get::<_, i64>(2)?
         }))
     }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
 
@@ -2573,8 +2574,8 @@ pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Opti
         Ok(serde_json::json!({
             "id": r.get::<_, i64>(0)?,
             "designation": r.get::<_, String>(1)?,
-            "stock": r.get::<_, f64>(2)?,
-            "vendu": r.get::<_, f64>(3)?
+            "stock_actuel": r.get::<_, f64>(2)?,
+            "quantite_vendue": r.get::<_ , f64>(3)?
         }))
     }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
 
@@ -2589,7 +2590,7 @@ pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Opti
     let ventes_par_jour = stmt3.query_map(params_ref6.as_slice(), |r| {
         Ok(serde_json::json!({
             "jour": r.get::<_, String>(0)?,
-            "ca": r.get::<_, f64>(1)?,
+            "total": r.get::<_, f64>(1)?,
             "nb": r.get::<_, i64>(2)?
         }))
     }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
@@ -2606,7 +2607,7 @@ pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Opti
         Ok(serde_json::json!({
             "mode": r.get::<_, String>(0)?,
             "total": r.get::<_, f64>(1)?,
-            "count": r.get::<_, i64>(2)?
+            "nb": r.get::<_, i64>(2)?
         }))
     }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
 
