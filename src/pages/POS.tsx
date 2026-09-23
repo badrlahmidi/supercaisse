@@ -443,6 +443,7 @@ export default function POS() {
         dtype: documentType,
         points_utilises: ptsToUse,
         points_gagnes: ptsEarned,
+        magasinId: currentSession?.magasin_id ?? null,
       })
     },
     onSuccess: (venteId) => {

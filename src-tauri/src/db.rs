@@ -523,6 +523,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN source_vente_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE clients ADD COLUMN segment TEXT", []);
+    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN magasin_id INTEGER", []);
 
     // Multi-prix (public/grossiste) et produits composés (kits)
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN prix_grossiste REAL", []);

@@ -624,11 +624,24 @@ pub fn delete_article_composant(db: State<DbState>, id: i64) -> Result<(), Strin
 pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Option<i64>,
     articles: Vec<serde_json::Value>, montant_remise: f64, mode_paiement: String,
     splits: Option<Vec<serde_json::Value>>, dtype: Option<String>,
-    points_utilises: Option<f64>, points_gagnes: Option<f64>
+    points_utilises: Option<f64>, points_gagnes: Option<f64>,
+    magasin_id: Option<i64>
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let magasin_id = default_magasin_id(&tx)?;
+    let magasin_id = match magasin_id {
+        Some(id) => id,
+        None => {
+            if let Some(cid) = caissier_id {
+                tx.query_row(
+                    "SELECT magasin_id FROM sessions_caisse WHERE caissier_id = ?1 AND statut = 'ouverte' ORDER BY id DESC LIMIT 1",
+                    params![cid], |r| r.get::<_, Option<i64>>(0)
+                ).ok().flatten().unwrap_or(default_magasin_id(&tx)?)
+            } else {
+                default_magasin_id(&tx)?
+            }
+        }
+    };
     let mut montant_total = 0.0;
     for a in &articles {
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
@@ -715,8 +728,8 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
     let pts_gagnes = points_gagnes.unwrap_or(0.0);
 
     tx.execute(
-        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, dtype, session_id, points_utilises, points_gagnes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, document_type, current_session_id, pts_utilises, pts_gagnes],
+        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, dtype, session_id, points_utilises, points_gagnes, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, document_type, current_session_id, pts_utilises, pts_gagnes, magasin_id],
     ).map_err(|e| e.to_string())?;
     let vente_id = tx.last_insert_rowid();
 
@@ -803,10 +816,10 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let (statut, dtype): (String, String) = tx.query_row(
-        "SELECT statut, COALESCE(dtype, 'facture') FROM ventes WHERE id = ?1",
+    let (statut, dtype, vente_magasin_id): (String, String, Option<i64>) = tx.query_row(
+        "SELECT statut, COALESCE(dtype, 'facture'), magasin_id FROM ventes WHERE id = ?1",
         params![vente_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).map_err(|e| e.to_string())?;
 
     if statut == "annulee" {
@@ -817,7 +830,7 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
     let is_avoir = dtype == "avoir";
 
     if stock_was_deducted || is_avoir {
-        let magasin_id = default_magasin_id(&tx)?;
+        let magasin_id = vente_magasin_id.map_or_else(|| default_magasin_id(&tx), Ok)?;
         let mut stmt = tx.prepare("SELECT article_id, quantite, variante_id FROM vente_articles WHERE vente_id = ?1").map_err(|e| e.to_string())?;
         let lignes = stmt.query_map(params![vente_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?, row.get::<_, Option<i64>>(2)?))
@@ -991,10 +1004,10 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let (source_dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture_src): (String, Option<i64>, Option<i64>, f64, f64, String, String, Option<String>) = tx.query_row(
-        "SELECT dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture FROM ventes WHERE id = ?1",
+    let (source_dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture_src, source_magasin_id): (String, Option<i64>, Option<i64>, f64, f64, String, String, Option<String>, Option<i64>) = tx.query_row(
+        "SELECT dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture, magasin_id FROM ventes WHERE id = ?1",
         params![vente_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?)),
     ).map_err(|_| "Document source introuvable".to_string())?;
 
     if statut == "annulee" {
@@ -1062,13 +1075,13 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
     let new_montant_total = if target_type == "avoir" { -montant_total.abs() } else { montant_total };
     let new_montant_remise = if target_type == "avoir" { -montant_remise.abs() } else { montant_remise };
 
+    let magasin_id = source_magasin_id.map_or_else(|| default_magasin_id(&tx), Ok)?;
+
     tx.execute(
-        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, dtype, source_vente_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![client_id, caissier_id, new_montant_total, new_montant_remise, mode_paiement, numero_facture, target_type, vente_id],
+        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, dtype, source_vente_id, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![client_id, caissier_id, new_montant_total, new_montant_remise, mode_paiement, numero_facture, target_type, vente_id, magasin_id],
     ).map_err(|e| e.to_string())?;
     let new_vente_id = tx.last_insert_rowid();
-
-    let magasin_id = default_magasin_id(&tx)?;
 
     for (article_id, qte, pu, tva, total_ligne, remise_ligne, note, variante_id, prix_type) in &lignes {
         let new_total_ligne = if target_type == "avoir" { -total_ligne.abs() } else { *total_ligne };
@@ -1299,19 +1312,20 @@ pub fn update_cheque_status(db: State<DbState>, cheque_id: i64, statut: String) 
 pub fn get_current_session(db: State<DbState>, caissier_id: i64) -> Result<Option<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT id, caissier_id, date_ouverture, fond_initial, statut
+        "SELECT id, caissier_id, date_ouverture, fond_initial, statut, magasin_id
          FROM sessions_caisse
          WHERE caissier_id = ?1 AND statut = 'ouverte'
          ORDER BY id DESC LIMIT 1"
     ).map_err(|e| e.to_string())?;
-    
+
     let mut rows = stmt.query_map(params![caissier_id], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
             "caissier_id": row.get::<_, i64>(1)?,
             "date_ouverture": row.get::<_, String>(2)?,
             "fond_initial": row.get::<_, f64>(3)?,
-            "statut": row.get::<_, String>(4)?
+            "statut": row.get::<_, String>(4)?,
+            "magasin_id": row.get::<_, Option<i64>>(5)?
         }))
     }).map_err(|e| e.to_string())?;
 
@@ -1369,7 +1383,7 @@ pub fn update_magasin(db: State<DbState>, id: i64, nom: String, adresse: Option<
 
 #[tauri::command]
 pub fn delete_magasin(db: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let count: i64 = conn.query_row(
         "SELECT count(*) FROM magasins", [], |r| r.get(0)
     ).unwrap_or(0);
@@ -1382,8 +1396,14 @@ pub fn delete_magasin(db: State<DbState>, id: i64) -> Result<(), String> {
     if has_sessions {
         return Err("Ce magasin a des sessions de caisse associées".to_string());
     }
-    conn.execute("DELETE FROM article_stocks WHERE magasin_id = ?1", params![id]).map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM magasins WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM article_stocks WHERE magasin_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM magasins WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE articles SET stock = COALESCE((SELECT SUM(quantite) FROM article_stocks WHERE article_id = articles.id), 0)",
+        [],
+    ).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
