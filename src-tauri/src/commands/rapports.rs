@@ -1,0 +1,192 @@
+use crate::db::*;
+use rusqlite::params;
+use tauri::State;
+
+#[tauri::command]
+pub fn get_rapport_x(db: State<DbState>, session_id: i64) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let (date_ouverture, fond_initial): (String, f64) = conn.query_row(
+        "SELECT date_ouverture, fond_initial FROM sessions_caisse WHERE id = ?1",
+        params![session_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|_| "Session introuvable".to_string())?;
+
+    let nb_ventes: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0);
+
+    let ca_total: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(montant_total - montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0.0);
+
+    let total_remises: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0.0);
+
+    let nb_annulations: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ventes WHERE session_id = ?1 AND statut = 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0);
+
+    let nb_articles_vendus: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(va.quantite), 0) FROM vente_articles va JOIN ventes v ON v.id = va.vente_id WHERE v.session_id = ?1 AND v.statut != 'annulee'",
+        params![session_id], |r| r.get(0),
+    ).unwrap_or(0.0);
+
+    let mut stmt = conn.prepare(
+        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0), COUNT(*) FROM ventes WHERE session_id = ?1 AND statut != 'annulee' GROUP BY mode_paiement"
+    ).map_err(|e| e.to_string())?;
+    let par_mode = stmt.query_map(params![session_id], |r| {
+        Ok(serde_json::json!({
+            "mode": r.get::<_, String>(0)?,
+            "total": r.get::<_, f64>(1)?,
+            "count": r.get::<_, i64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "session_id": session_id,
+        "date_ouverture": date_ouverture,
+        "fond_initial": fond_initial,
+        "nb_ventes": nb_ventes,
+        "ca_total": ca_total,
+        "total_remises": total_remises,
+        "nb_annulations": nb_annulations,
+        "nb_articles_vendus": nb_articles_vendus,
+        "par_mode": par_mode,
+    }))
+}
+
+#[tauri::command]
+pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Option<String>) -> Result<serde_json::Value, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+
+    let date_filter = |col: &str| -> (String, Vec<String>) {
+        let mut clause = String::new();
+        let mut params = Vec::new();
+        if let Some(d) = &debut { if !d.is_empty() { clause.push_str(&format!(" AND {} >= ?", col)); params.push(d.clone()); } }
+        if let Some(f) = &fin { if !f.is_empty() { clause.push_str(&format!(" AND {} <= ?", col)); params.push(format!("{} 23:59:59", f)); } }
+        (clause, params)
+    };
+
+    let (wc, wp) = date_filter("v.date");
+    let base_sql = format!(
+        "SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0),
+                COALESCE(SUM(v.montant_remise), 0),
+                COUNT(*)
+         FROM ventes v WHERE v.statut != 'annulee' {}", wc
+    );
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = wp.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let (ca_total, total_remises, nb_ventes): (f64, f64, i64) = conn.query_row(
+        &base_sql, params_ref.as_slice(),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).unwrap_or((0.0, 0.0, 0));
+
+    let (wc2, wp2) = date_filter("v.date");
+    let marge_sql = format!(
+        "SELECT COALESCE(SUM(va.quantite * (va.prix_unitaire - a.prix_achat)), 0)
+         FROM vente_articles va
+         JOIN ventes v ON v.id = va.vente_id
+         JOIN articles a ON a.id = va.article_id
+         WHERE v.statut != 'annulee' {}", wc2
+    );
+    let params_ref2: Vec<&dyn rusqlite::types::ToSql> = wp2.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let marge_brute: f64 = conn.query_row(&marge_sql, params_ref2.as_slice(), |r| r.get(0)).unwrap_or(0.0);
+
+    let (wc3, wp3) = date_filter("v.date");
+    let tva_sql = format!(
+        "SELECT COALESCE(SUM(va.quantite * va.prix_unitaire * va.tva / 100.0), 0)
+         FROM vente_articles va
+         JOIN ventes v ON v.id = va.vente_id
+         WHERE v.statut != 'annulee' {}", wc3
+    );
+    let params_ref3: Vec<&dyn rusqlite::types::ToSql> = wp3.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let tva_collectee: f64 = conn.query_row(&tva_sql, params_ref3.as_slice(), |r| r.get(0)).unwrap_or(0.0);
+
+    let (wc4, wp4) = date_filter("v.date");
+    let top_sql = format!(
+        "SELECT a.designation, SUM(va.quantite) as qty, SUM(va.total_ligne) as total
+         FROM vente_articles va
+         JOIN ventes v ON v.id = va.vente_id
+         JOIN articles a ON a.id = va.article_id
+         WHERE v.statut != 'annulee' {}
+         GROUP BY va.article_id ORDER BY qty DESC LIMIT 10", wc4
+    );
+    let params_ref4: Vec<&dyn rusqlite::types::ToSql> = wp4.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt = conn.prepare(&top_sql).map_err(|e| e.to_string())?;
+    let top_articles = stmt.query_map(params_ref4.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "designation": r.get::<_, String>(0)?,
+            "quantite": r.get::<_, f64>(1)?,
+            "total": r.get::<_, f64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let (wc5, wp5) = date_filter("v.date");
+    let rotation_sql = format!(
+        "SELECT a.id, a.designation, a.stock, COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN va.quantite ELSE 0 END), 0) as vendu
+         FROM articles a
+         LEFT JOIN vente_articles va ON va.article_id = a.id
+         LEFT JOIN ventes v ON v.id = va.vente_id AND v.statut != 'annulee' AND v.dtype IN ('facture', 'bl') {}
+         WHERE a.actif = 1
+         GROUP BY a.id ORDER BY vendu DESC LIMIT 20", wc5
+    );
+    let params_ref5: Vec<&dyn rusqlite::types::ToSql> = wp5.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt2 = conn.prepare(&rotation_sql).map_err(|e| e.to_string())?;
+    let rotation_stock = stmt2.query_map(params_ref5.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "designation": r.get::<_, String>(1)?,
+            "stock_actuel": r.get::<_, f64>(2)?,
+            "quantite_vendue": r.get::<_ , f64>(3)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let (wc6, wp6) = date_filter("v.date");
+    let daily_sql = format!(
+        "SELECT date(v.date) as jour, COALESCE(SUM(v.montant_total - v.montant_remise), 0) as ca, COUNT(*) as nb
+         FROM ventes v WHERE v.statut != 'annulee' {}
+         GROUP BY jour ORDER BY jour", wc6
+    );
+    let params_ref6: Vec<&dyn rusqlite::types::ToSql> = wp6.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt3 = conn.prepare(&daily_sql).map_err(|e| e.to_string())?;
+    let ventes_par_jour = stmt3.query_map(params_ref6.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "jour": r.get::<_, String>(0)?,
+            "total": r.get::<_, f64>(1)?,
+            "nb": r.get::<_, i64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    let (wc7, wp7) = date_filter("v.date");
+    let mode_sql = format!(
+        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0) as total, COUNT(*) as nb
+         FROM ventes v WHERE v.statut != 'annulee' {}
+         GROUP BY mode_paiement", wc7
+    );
+    let params_ref7: Vec<&dyn rusqlite::types::ToSql> = wp7.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt4 = conn.prepare(&mode_sql).map_err(|e| e.to_string())?;
+    let par_mode = stmt4.query_map(params_ref7.as_slice(), |r| {
+        Ok(serde_json::json!({
+            "mode": r.get::<_, String>(0)?,
+            "total": r.get::<_, f64>(1)?,
+            "nb": r.get::<_, i64>(2)?
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect::<Vec<_>>();
+
+    Ok(serde_json::json!({
+        "ca_total": ca_total,
+        "total_remises": total_remises,
+        "nb_ventes": nb_ventes,
+        "marge_brute": marge_brute,
+        "tva_collectee": tva_collectee,
+        "top_articles": top_articles,
+        "rotation_stock": rotation_stock,
+        "ventes_par_jour": ventes_par_jour,
+        "par_mode": par_mode,
+    }))
+}
