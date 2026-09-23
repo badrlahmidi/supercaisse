@@ -5,11 +5,13 @@ import { Badge } from "@/ui/Badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
 import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
-import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send } from "lucide-react"
+import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
 
 interface Article {
   id: number
   stock: number
+  prix_vente?: number
+  prix_grossiste?: number | null
 }
 
 interface Client {
@@ -49,11 +51,13 @@ interface CartPanelProps {
   cashAmount: number
   change: number
   itemCount: number
-  onUpdateQuantity: (articleId: number, quantity: number, maxStock?: number) => void
-  onRemoveItem: (articleId: number) => void
+  onUpdateQuantity: (articleId: number, quantity: number, maxStock?: number, varianteId?: number | null) => void
+  onRemoveItem: (articleId: number, varianteId?: number | null) => void
   onClearCart: () => void
   onValidateSale: () => void
   onPrintLastReceipt: () => void
+  onGeneratePdf: () => void
+  generatingPdf?: boolean
   documentType: string
   setDocumentType: (type: string) => void
   isLoyaltyActive: boolean
@@ -77,7 +81,7 @@ const QUICK_AMOUNTS = [10, 20, 50, 100, 200, 500]
 export default function CartPanel({
   articles, clients, processing, lastReceipt,
   subtotal, totalTVA, netAmount, discount, discountAmount, cashAmount, change, itemCount,
-  onUpdateQuantity, onRemoveItem, onClearCart, onValidateSale, onPrintLastReceipt,
+  onUpdateQuantity, onRemoveItem, onClearCart, onValidateSale, onPrintLastReceipt, onGeneratePdf, generatingPdf,
   documentType, setDocumentType, isLoyaltyActive, ptsValueDH, ptsEarned, loyaltyDiscount, ptsToUse, isRestaurant
 }: CartPanelProps) {
   const cart = useCartStore((s) => s.items)
@@ -93,6 +97,7 @@ export default function CartPanel({
   const setCashGiven = useCartStore((s) => s.setCashGiven)
   const setLineDiscount = useCartStore((s) => s.setLineDiscount)
   const setLineNote = useCartStore((s) => s.setLineNote)
+  const setLinePrice = useCartStore((s) => s.setLinePrice)
   const holdCart = useCartStore((s) => s.holdCart)
   const resumeCart = useCartStore((s) => s.resumeCart)
   const deleteHeldCart = useCartStore((s) => s.deleteHeldCart)
@@ -155,9 +160,14 @@ export default function CartPanel({
         </div>
         <div className="flex items-center gap-1">
           {lastReceipt && (
-            <Button variant="ghost" size="sm" onClick={onPrintLastReceipt}>
-              <Printer className="h-4 w-4" />
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" onClick={onPrintLastReceipt} title="Imprimer">
+                <Printer className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onGeneratePdf} disabled={generatingPdf} title="Générer PDF">
+                {generatingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              </Button>
+            </>
           )}
           {cart.length > 0 && (
             <>
@@ -185,37 +195,41 @@ export default function CartPanel({
         ) : (
           cart.map((item) => {
             const article = articles.find((a) => a.id === item.article_id)
+            const maxStock = item.variante_id ? item.stock_max : article?.stock
             const lineTotalBase = item.quantite * item.prix_unitaire * (1 + item.tva / 100)
             const lineDiscountAmount = lineTotalBase * (item.remise_ligne / 100)
             const lineTotal = lineTotalBase - lineDiscountAmount
             return (
               <div
-                key={item.article_id}
+                key={`${item.article_id}-${item.variante_id ?? "x"}`}
                 className="group flex items-start gap-3 p-3 rounded-xl bg-muted/30 border border-border/50 hover:border-border transition-colors animate-fade-in"
               >
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm truncate">{item.designation}</p>
+                  {item.variante_label && (
+                    <Badge variant="outline" className="mt-1 text-[10px] px-1.5 py-0">{item.variante_label}</Badge>
+                  )}
                   <div className="flex items-center gap-2 mt-2">
                     <div className="flex items-center border border-border rounded-md overflow-hidden">
                       <button
                         type="button"
                         className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
-                        onClick={() => onUpdateQuantity(item.article_id, item.quantite - 1)}
+                        onClick={() => onUpdateQuantity(item.article_id, item.quantite - 1, maxStock, item.variante_id)}
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </button>
                       <input
                         type="number"
                         value={item.quantite}
-                        onChange={(e) => onUpdateQuantity(item.article_id, parseInt(e.target.value) || 0, article?.stock)}
+                        onChange={(e) => onUpdateQuantity(item.article_id, parseInt(e.target.value) || 0, maxStock, item.variante_id)}
                         className="h-8 w-12 text-center text-sm bg-background border-x border-border outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min="1"
-                        max={article?.stock || 999}
+                        max={maxStock || 999}
                       />
                       <button
                         type="button"
                         className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
-                        onClick={() => onUpdateQuantity(item.article_id, item.quantite + 1, article?.stock)}
+                        onClick={() => onUpdateQuantity(item.article_id, item.quantite + 1, maxStock, item.variante_id)}
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>
@@ -224,7 +238,7 @@ export default function CartPanel({
                       <input
                         type="number"
                         value={item.remise_ligne || 0}
-                        onChange={(e) => setLineDiscount(item.article_id, parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setLineDiscount(item.article_id, parseFloat(e.target.value) || 0, item.variante_id)}
                         className="h-8 w-14 text-center text-xs bg-background border border-border rounded-md outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min="0"
                         max="100"
@@ -243,16 +257,37 @@ export default function CartPanel({
                     <input
                       type="text"
                       value={item.note || ""}
-                      onChange={(e) => setLineNote(item.article_id, e.target.value)}
+                      onChange={(e) => setLineNote(item.article_id, e.target.value, item.variante_id)}
                       placeholder="Note (optionnel)"
                       className="w-full h-7 px-2 text-xs bg-background border border-border/50 rounded-md outline-none focus:ring-1 focus:ring-primary/30 placeholder:text-muted-foreground/50 text-muted-foreground"
                     />
                   </div>
+                  {!item.variante_id && article?.prix_grossiste != null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const grossiste = item.prix_type === "grossiste"
+                        setLinePrice(
+                          item.article_id,
+                          grossiste ? (article.prix_vente ?? item.prix_unitaire) : article.prix_grossiste!,
+                          grossiste ? "public" : "grossiste"
+                        )
+                      }}
+                      className={cn(
+                        "mt-1.5 text-[11px] px-2 py-0.5 rounded-full border transition-colors",
+                        item.prix_type === "grossiste"
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/50"
+                      )}
+                    >
+                      {item.prix_type === "grossiste" ? "Prix grossiste ✓" : "Passer en prix grossiste"}
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"
                   className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                  onClick={() => onRemoveItem(item.article_id)}
+                  onClick={() => onRemoveItem(item.article_id, item.variante_id)}
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

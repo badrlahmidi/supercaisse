@@ -1,5 +1,9 @@
 # QA — Scénarios de test POS Supermarché (50 cas)
 
+> Scénarios de non-régression pour le module POS/Supermarché tel qu'implémenté aujourd'hui.
+> Pour l'état d'avancement global du produit (modules manquants, verticaux non couverts),
+> voir `ROADMAP_STATUS.md` à la racine du dépôt.
+
 ## Contexte
 Application de caisse (POS) pour supermarché — Tauri + React.  
 Backend Rust (IPC via invoke). Frontend avec gestion d'état, stock, clients, fournisseurs, ventes, impressions.

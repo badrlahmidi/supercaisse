@@ -20,6 +20,26 @@ interface Article {
   actif: boolean
   categorie_nom?: string
   fournisseur_nom?: string
+  suivi_lot?: boolean
+  prix_grossiste?: number | null
+  est_kit?: boolean
+  a_variantes?: boolean
+}
+
+interface ArticleComposant {
+  id: number
+  composant_id: number
+  designation: string
+  stock: number
+  quantite: number
+}
+
+interface ArticleLot {
+  id: number
+  numero_lot: string | null
+  date_peremption: string | null
+  quantite: number
+  date_reception: string
 }
 
 interface Client {
@@ -31,6 +51,7 @@ interface Client {
   email: string | null
   credit_plafond: number
   credit_actuel: number
+  segment: string | null
 }
 
 interface Fournisseur {
@@ -53,10 +74,22 @@ interface Settings {
   shop_address: string | null
   shop_phone: string | null
   shop_email: string | null
-  tax_number: string | null
+  ice: string | null
+  if_number: string | null
+  rc_number: string | null
+  patente: string | null
   default_tva: number
   receipt_footer: string | null
   currency: string
+  printer_name: string | null
+  business_type: string
+  fidelite_actif: string
+  fidelite_dh_pour_1_point: string
+  fidelite_valeur_1_point: string
+  idle_timeout: string
+  logo_base64: string | null
+  receipt_header: string | null
+  doc_primary_color: string | null
 }
 
 interface SessionCaisse {
@@ -90,12 +123,35 @@ const mockArticles: Article[] = [
   { id: 1, code_barre: "123456789", designation: "Produit Test", prix_achat: 5, prix_vente: 10, tva: 20, stock: 100, stock_alerte: 10, categorie_id: 1, fournisseur_id: null, actif: true, categorie_nom: "Alimentation" },
 ]
 
+const mockLots: Record<number, ArticleLot[]> = {}
+
+interface ArticleVariante {
+  id: number
+  taille: string | null
+  couleur: string | null
+  code_barre: string | null
+  stock_dedie: number
+}
+
+const mockVariantes: Record<number, ArticleVariante[]> = {}
+const mockComposants: Record<number, ArticleComposant[]> = {}
+
 const mockClients: Client[] = [
   { id: 1, code: "CL001", nom: "Client de passage", adresse: null, telephone: null, email: null, credit_plafond: 0, credit_actuel: 0 },
 ]
 
 const mockFournisseurs: Fournisseur[] = [
   { id: 1, nom: "Fournisseur Test", adresse: null, telephone: null, ice: null, email: null },
+]
+
+interface Magasin {
+  id: number
+  nom: string
+  adresse: string | null
+}
+
+const mockMagasins: Magasin[] = [
+  { id: 1, nom: "Magasin Principal", adresse: "123 Rue Mohammed V, Casablanca" },
 ]
 
 const mockTables: TableResto[] = [
@@ -108,11 +164,43 @@ const mockSettings: Settings = {
   shop_address: null,
   shop_phone: null,
   shop_email: null,
-  tax_number: null,
+  ice: null,
+  if_number: null,
+  rc_number: null,
+  patente: null,
   default_tva: 20,
   receipt_footer: "Merci de votre visite",
   currency: "MAD",
+  printer_name: "POS-80",
+  business_type: "standard",
+  fidelite_actif: "true",
+  fidelite_dh_pour_1_point: "100",
+  fidelite_valeur_1_point: "1",
+  idle_timeout: "300",
+  logo_base64: null,
+  receipt_header: null,
+  doc_primary_color: null,
 }
+
+interface MockCaisse {
+  id: number
+  nom: string
+  utilisateur_id: number | null
+  statut: string
+  ouverture_date: string | null
+  fermeture_date: string | null
+  fond_initial: number
+  recettes_especes: number
+  recettes_cb: number
+  recettes_cheque: number
+  recettes_virement: number
+  depenses: number
+  ecart: number
+  note: string | null
+  utilisateur_nom: string | null
+}
+
+const mockCaisses: MockCaisse[] = []
 
 let nextId = 100
 let mockCurrentSession: SessionCaisse | null = null
@@ -154,10 +242,77 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   delete_article: ({ id }) => { const idx = mockArticles.findIndex(a => a.id === id); if (idx >= 0) mockArticles.splice(idx, 1) },
   update_article_stock: ({ article_id, quantite }) => { const a = mockArticles.find(a => a.id === article_id); if (a) a.stock += quantite as number },
 
+  // Lots / péremption
+  add_article_lot: ({ article_id, numero_lot, date_peremption, quantite }) => {
+    nextId++
+    const lot: ArticleLot = { id: nextId, numero_lot: (numero_lot as string) || null, date_peremption: (date_peremption as string) || null, quantite: quantite as number, date_reception: new Date().toISOString() }
+    mockLots[article_id as number] = [...(mockLots[article_id as number] || []), lot]
+    const a = mockArticles.find(a => a.id === article_id)
+    if (a) a.stock += quantite as number
+    return nextId
+  },
+  get_article_lots: ({ article_id }) => mockLots[article_id as number] || [],
+  get_lots_peremption_proche: () => [],
+  discard_article_lot: ({ lot_id, quantite }) => {
+    for (const lots of Object.values(mockLots)) {
+      const lot = lots.find((l) => l.id === lot_id)
+      if (lot) lot.quantite -= quantite as number
+    }
+  },
+
+  // Variantes
+  add_article_variante: ({ article_id, taille, couleur, code_barre, stock_initial }) => {
+    nextId++
+    const v: ArticleVariante = { id: nextId, taille: (taille as string) || null, couleur: (couleur as string) || null, code_barre: (code_barre as string) || null, stock_dedie: stock_initial as number }
+    mockVariantes[article_id as number] = [...(mockVariantes[article_id as number] || []), v]
+    return nextId
+  },
+  get_article_variantes: ({ article_id }) => mockVariantes[article_id as number] || [],
+  update_article_variante: ({ id, taille, couleur, code_barre }) => {
+    for (const list of Object.values(mockVariantes)) {
+      const v = list.find((v) => v.id === id)
+      if (v) { v.taille = (taille as string) || null; v.couleur = (couleur as string) || null; v.code_barre = (code_barre as string) || null }
+    }
+  },
+  adjust_article_variante_stock: ({ id, quantite }) => {
+    for (const list of Object.values(mockVariantes)) {
+      const v = list.find((v) => v.id === id)
+      if (v) v.stock_dedie += quantite as number
+    }
+  },
+  delete_article_variante: ({ id }) => {
+    for (const key of Object.keys(mockVariantes)) {
+      mockVariantes[Number(key)] = mockVariantes[Number(key)].filter((v) => v.id !== id)
+    }
+  },
+  find_variante_by_barcode: () => null,
+
+  // Produits composés (kits)
+  add_article_composant: ({ article_id, composant_id, quantite }) => {
+    nextId++
+    const composant = mockArticles.find((a) => a.id === composant_id)
+    const c: ArticleComposant = { id: nextId, composant_id: composant_id as number, designation: composant?.designation || "Article", stock: composant?.stock || 0, quantite: quantite as number }
+    mockComposants[article_id as number] = [...(mockComposants[article_id as number] || []), c]
+    return nextId
+  },
+  get_article_composants: ({ article_id }) => mockComposants[article_id as number] || [],
+  update_article_composant_quantite: ({ id, quantite }) => {
+    for (const list of Object.values(mockComposants)) {
+      const c = list.find((c) => c.id === id)
+      if (c) c.quantite = quantite as number
+    }
+  },
+  delete_article_composant: ({ id }) => {
+    for (const key of Object.keys(mockComposants)) {
+      mockComposants[Number(key)] = mockComposants[Number(key)].filter((c) => c.id !== id)
+    }
+  },
+
   // Ventes
-  create_vente: () => { nextId++; return nextId },
+  create_vente: () => { nextId++; return { id: nextId, numero_facture: `FA-2026-${String(nextId).padStart(5, "0")}` } },
   get_ventes: () => [],
-  get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin" }, lignes: [] }),
+  get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin", dtype: "facture", source_vente_id: null, source_dtype: null, source_numero: null }, lignes: [] }),
+  convert_document: () => { nextId++; return nextId },
 
   // Achats
   create_achat: () => { nextId++; return nextId },
@@ -196,7 +351,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   }),
 
   // Stock alerts
-  get_articles_stock_alerte: () => [],
+  get_articles_stock_alerte: () => [] as { id: number; designation: string; stock: number; stock_alerte: number; categorie_nom: string | null; fournisseur_nom: string | null; fournisseur_id: number | null; prix_achat: number; suggestion_qte: number }[],
 
   // Journal
   get_journal_caisse: () => [],
@@ -212,8 +367,74 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_settings: () => ({ ...mockSettings }),
   update_settings: (args) => { Object.assign(mockSettings, args) },
 
+  // Fidélité
+  get_mouvements_fidelite: () => [],
+  get_rapport_x: () => ({ session_id: 1, date_ouverture: new Date().toISOString(), fond_initial: 0, nb_ventes: 0, ca_total: 0, total_remises: 0, nb_annulations: 0, nb_articles_vendus: 0, par_mode: [] }),
+  get_releve_client: () => ({ client_id: 1, nom: "Client", credit_actuel: 0, credit_plafond: 0, ventes: [], paiements: [] }),
+  get_audit_log: () => [],
+  login_pin: () => null,
+  set_user_pin: () => {},
+  get_rapport_detaille: () => ({ ca_total: 0, total_remises: 0, nb_ventes: 0, marge_brute: 0, tva_collectee: 0, top_articles: [], rotation_stock: [], ventes_par_jour: [], par_mode: [] }),
+  create_inventaire: () => ({ id: 1, nb_articles: 0 }),
+  get_inventaire: () => ({ id: 1, date_debut: new Date().toISOString(), statut: "en_cours", magasin_id: 1, lignes: [] }),
+  get_inventaires: () => [],
+  update_inventaire_ligne: () => {},
+  valider_inventaire: () => {},
+
+  // Permissions
+  get_permissions: () => [],
+  update_permission: () => {},
+
+  // Multi-caisse
+  get_caisses: () => mockCaisses,
+  open_caisse: ({ nom, fond_initial, utilisateur_id }) => {
+    nextId++
+    mockCaisses.push({
+      id: nextId,
+      nom: nom as string,
+      utilisateur_id: (utilisateur_id as number) || null,
+      statut: "ouverte",
+      ouverture_date: new Date().toISOString().replace("T", " ").slice(0, 19),
+      fermeture_date: null,
+      fond_initial: (fond_initial as number) || 0,
+      recettes_especes: 0,
+      recettes_cb: 0,
+      recettes_cheque: 0,
+      recettes_virement: 0,
+      depenses: 0,
+      ecart: 0,
+      note: null,
+      utilisateur_nom: null,
+    })
+    return nextId
+  },
+  close_caisse: ({ id, note }) => {
+    const c = mockCaisses.find(c => c.id === id)
+    if (c) {
+      c.statut = "fermee"
+      c.fermeture_date = new Date().toISOString().replace("T", " ").slice(0, 19)
+      c.note = (note as string) || null
+    }
+  },
+  get_tresorerie: () => ({
+    jour: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
+    semaine: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
+    mois: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
+  }),
+
   // Stock movements
   get_mouvements_stock: () => [],
+
+  // Comparaison prix
+  compare_fournisseur_prices: () => [],
+
+  // Magasins
+  get_magasins: () => mockMagasins,
+  add_magasin: ({ nom, adresse }) => { nextId++; mockMagasins.push({ id: nextId, nom: nom as string, adresse: (adresse as string) || null }); return nextId },
+  update_magasin: ({ id, nom, adresse }) => { const m = mockMagasins.find(m => m.id === id); if (m) { m.nom = nom as string; m.adresse = (adresse as string) || null } },
+  delete_magasin: ({ id }) => { if (mockMagasins.length <= 1) throw new Error("Impossible de supprimer le dernier magasin"); const idx = mockMagasins.findIndex(m => m.id === id); if (idx >= 0) mockMagasins.splice(idx, 1) },
+  get_transferts: () => [],
+  get_stock_par_magasin: () => [],
 
   // Restaurant tables
   get_tables: () => mockTables,
@@ -234,6 +455,9 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   // Print
   print_receipt: () => true,
   print_ticket: () => true,
+
+  // Documents
+  save_document_pdf: ({ filename }) => `documents/${filename || "document"}.pdf`,
 
   // Backup
   backup_database: () => "backups/supercaisse_20240101_120000.db",

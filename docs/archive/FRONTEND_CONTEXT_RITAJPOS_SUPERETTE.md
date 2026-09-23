@@ -1,3 +1,9 @@
+> **ARCHIVÉ — 2026-09-20.** Ce document décrit une arborescence cible (`routes/`, `stores/`,
+> `lib/schemas/`...) qui ne correspond pas à la structure réelle du projet (`src/pages/`,
+> `src/store/`, `src/routes/router.tsx`, cf. `AGENTS.md`). Conservé comme trace historique du
+> brief de design initial. Pour les conventions réellement en vigueur, se référer à `AGENTS.md`
+> à la racine du dépôt.
+
 # FRONTEND_CONTEXT.md — RitajPOS Superette
 
 > À coller en tête de tes prompts L'Orchestrateur pour ce projet. Structure/densité inspirées d'Alina POS, recolorées avec l'identité RitajPOS, spécifiées pour le stack ci-dessous.

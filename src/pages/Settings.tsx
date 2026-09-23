@@ -16,7 +16,9 @@ import { z } from "zod"
 import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import { useAuth } from "@/context/AuthContext"
-import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle } from "lucide-react"
+import { Checkbox } from "@/ui/Checkbox"
+import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages } from "lucide-react"
+import { useI18nStore } from "@/store/i18n"
 
 
 interface User {
@@ -51,7 +53,10 @@ const settingsSchema = z.object({
   shop_address: z.string().optional(),
   shop_phone: z.string().optional(),
   shop_email: z.string().email().optional().or(z.literal("")),
-  tax_number: z.string().optional(),
+  ice: z.string().optional(),
+  if_number: z.string().optional(),
+  rc_number: z.string().optional(),
+  patente: z.string().optional(),
   default_tva: z.number().min(0).max(100).default(20),
   receipt_footer: z.string().optional(),
   currency: z.string().default("MAD"),
@@ -59,7 +64,11 @@ const settingsSchema = z.object({
   fidelite_actif: z.string().optional().default("true"),
   fidelite_dh_pour_1_point: z.string().optional().default("100"),
   fidelite_valeur_1_point: z.string().optional().default("1"),
-  business_type: z.enum(["standard", "restaurant", "mode", "vrac"]).default("standard"),
+  business_type: z.enum(["standard", "restaurant"]).default("standard"),
+  idle_timeout: z.string().optional().default("300"),
+  logo_base64: z.string().nullable().optional(),
+  receipt_header: z.string().nullable().optional(),
+  doc_primary_color: z.string().nullable().optional(),
 })
 
 type SettingsForm = z.infer<typeof settingsSchema>
@@ -67,11 +76,48 @@ type SettingsForm = z.infer<typeof settingsSchema>
 export default function Settings() {
   const queryClient = useQueryClient()
   const { user: currentUser } = useAuth()
+  const { locale, setLocale, t } = useI18nStore()
   const [showPassword, setShowPassword] = useState(false)
   const [activeTab, setActiveTab] = useState("general")
   const [editingUser, setEditingUser] = useState<Utilisateur | null>(null)
   const [showUserForm, setShowUserForm] = useState(false)
   const [deleteUserConfirm, setDeleteUserConfirm] = useState<Utilisateur | null>(null)
+  const [pinValue, setPinValue] = useState("")
+  const [savingPin, setSavingPin] = useState(false)
+  const [permRole, setPermRole] = useState("manager")
+
+  const MODULES = [
+    "articles", "categories", "clients", "fournisseurs", "ventes",
+    "achats", "stock", "inventaire", "journal", "cheques",
+    "rapports", "magasins", "audit", "settings", "reappro",
+  ] as const
+
+  const ACTIONS = ["voir", "creer", "modifier", "exporter"] as const
+
+  const MODULE_LABELS: Record<string, string> = {
+    articles: "Articles",
+    categories: "Catégories",
+    clients: "Clients",
+    fournisseurs: "Fournisseurs",
+    ventes: "Ventes",
+    achats: "Achats",
+    stock: "Stock",
+    inventaire: "Inventaire",
+    journal: "Journal de caisse",
+    cheques: "Chèques",
+    rapports: "Rapports",
+    magasins: "Magasins",
+    audit: "Audit",
+    settings: "Paramètres",
+    reappro: "Réappro",
+  }
+
+  const ACTION_LABELS: Record<string, string> = {
+    voir: "Voir",
+    creer: "Créer",
+    modifier: "Modifier",
+    exporter: "Exporter",
+  }
 
   const { data: users } = useQuery({
     queryKey: ["utilisateurs"],
@@ -81,6 +127,39 @@ export default function Settings() {
   const { data: settings } = useQuery({
     queryKey: ["settings"],
     queryFn: () => invoke<SettingsForm>("get_settings"),
+  })
+
+  const { data: permissionsData } = useQuery({
+    queryKey: ["permissions", permRole],
+    queryFn: () => invoke<Array<{ role: string; module: string; action: string; allowed: boolean }>>("get_permissions", { role: permRole }),
+    enabled: permRole !== "admin",
+  })
+
+  const permMap = (() => {
+    const map: Record<string, Record<string, boolean>> = {}
+    if (permRole === "admin") {
+      for (const m of MODULES) {
+        map[m] = {}
+        for (const a of ACTIONS) map[m][a] = true
+      }
+      return map
+    }
+    if (permissionsData) {
+      for (const row of permissionsData) {
+        if (!map[row.module]) map[row.module] = {}
+        map[row.module][row.action] = row.allowed
+      }
+    }
+    return map
+  })()
+
+  const updatePermMutation = useMutation({
+    mutationFn: ({ role, module, action, allowed }: { role: string; module: string; action: string; allowed: boolean }) =>
+      invoke("update_permission", { role, module, action, allowed }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["permissions", permRole] })
+    },
+    onError: (err) => toast.error(String(err)),
   })
 
   useEffect(() => {
@@ -136,7 +215,10 @@ export default function Settings() {
       shop_address: "",
       shop_phone: "",
       shop_email: "",
-      tax_number: "",
+      ice: "",
+      if_number: "",
+      rc_number: "",
+      patente: "",
       default_tva: 20,
       receipt_footer: "Merci de votre visite",
       currency: "MAD",
@@ -158,12 +240,14 @@ export default function Settings() {
   const openEditUser = (u: Utilisateur) => {
     setEditingUser(u)
     userForm.reset({ login: u.login, nom: u.nom, role: u.role as "admin" | "manager" | "caissier", password: "", confirmPassword: "" })
+    setPinValue("")
     setShowUserForm(true)
   }
 
   const openCreateUser = () => {
     setEditingUser(null)
     userForm.reset({ login: "", nom: "", role: "caissier", password: "", confirmPassword: "" })
+    setPinValue("")
     setShowUserForm(true)
   }
 
@@ -173,15 +257,15 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Paramètres" description="Configuration du système" />
+      <PageHeader title={t("settings.title")} description={t("settings.description")} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="general">Général</TabsTrigger>
-          <TabsTrigger value="users">Utilisateurs</TabsTrigger>
-          <TabsTrigger value="receipt">Ticket</TabsTrigger>
-          <TabsTrigger value="system">Système</TabsTrigger>
-          <TabsTrigger value="backup">Sauvegarde</TabsTrigger>
+          <TabsTrigger value="general">{t("settings.general")}</TabsTrigger>
+          <TabsTrigger value="users">{t("settings.users")}</TabsTrigger>
+          <TabsTrigger value="receipt">{t("settings.receipt")}</TabsTrigger>
+          <TabsTrigger value="system">{t("settings.systemTab")}</TabsTrigger>
+          <TabsTrigger value="backup">{t("settings.backup")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
@@ -216,12 +300,35 @@ export default function Settings() {
                     <Input type="email" {...settingsForm.register("shop_email")} id="email" placeholder="contact@magasin.ma" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="tax_number">Numéro fiscal (ICE/IF)</Label>
-                    <Input {...settingsForm.register("tax_number")} id="tax_number" placeholder="Optionnel" />
-                  </div>
-                  <div className="space-y-2">
                     <Label htmlFor="tva_defaut">TVA par défaut (%)</Label>
                     <Input type="number" min="0" max="100" step="0.1" {...settingsForm.register("default_tva", { valueAsNumber: true })} id="tva_defaut" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Identifiants légaux (facture conforme DGI)</CardTitle>
+                <CardDescription>ICE, IF, RC et Patente sont 4 identifiants distincts exigés sur toute facture professionnelle au Maroc</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="ice">ICE (Identifiant Commun de l'Entreprise)</Label>
+                    <Input {...settingsForm.register("ice")} id="ice" placeholder="15 chiffres" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="if_number">IF (Identifiant Fiscal)</Label>
+                    <Input {...settingsForm.register("if_number")} id="if_number" placeholder="Optionnel" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rc_number">RC (Registre de Commerce)</Label>
+                    <Input {...settingsForm.register("rc_number")} id="rc_number" placeholder="Optionnel" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="patente">Patente</Label>
+                    <Input {...settingsForm.register("patente")} id="patente" placeholder="Optionnel" />
                   </div>
                 </div>
               </CardContent>
@@ -245,8 +352,6 @@ export default function Settings() {
                     <SelectContent>
                       <SelectItem value="standard">Supermarché / Épicerie (Standard)</SelectItem>
                       <SelectItem value="restaurant">Restaurant / Café (Tables & Cuisine)</SelectItem>
-                      <SelectItem value="mode">Boutique Mode / Prêt-à-porter (Tailles/Couleurs)</SelectItem>
-                      <SelectItem value="vrac">Vrac / Boucherie (Balances connectées)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -287,12 +392,40 @@ export default function Settings() {
               </CardContent>
             </Card>
 
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Languages className="h-5 w-5" />
+                  {t("settings.language")}
+                </CardTitle>
+                <CardDescription>{t("settings.languageDescription")}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant={locale === "fr" ? "default" : "outline"}
+                    onClick={() => setLocale("fr")}
+                  >
+                    {t("settings.french")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={locale === "ar" ? "default" : "outline"}
+                    onClick={() => setLocale("ar")}
+                  >
+                    {t("settings.arabic")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             <div className="flex justify-end">
               <Button type="submit" disabled={updateSettingsMutation.isPending}>
                 {updateSettingsMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enregistrement...</>
+                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />{t("settings.saving")}</>
                 ) : (
-                  "Enregistrer les paramètres"
+                  t("settings.saveSettings")
                 )}
               </Button>
             </div>
@@ -414,6 +547,46 @@ export default function Settings() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pin">PIN rapide (4 chiffres, optionnel)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      pattern="[0-9]*"
+                      placeholder="ex: 1234"
+                      id="pin"
+                      value={pinValue}
+                      onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      className="max-w-[120px]"
+                    />
+                    {editingUser && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={pinValue.length !== 4 || savingPin}
+                        onClick={async () => {
+                          if (!editingUser || pinValue.length !== 4) return
+                          setSavingPin(true)
+                          try {
+                            await invoke("set_user_pin", { userId: editingUser.id, pin: pinValue })
+                            toast.success("PIN enregistré")
+                            setPinValue("")
+                          } catch (err) {
+                            toast.error(String(err))
+                          } finally {
+                            setSavingPin(false)
+                          }
+                        }}
+                      >
+                        {savingPin ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enregistrer le PIN"}
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Permet le changement rapide de caissier sans saisir le mot de passe complet</p>
+                </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setShowUserForm(false)}>
                     Annuler
@@ -432,16 +605,85 @@ export default function Settings() {
               </form>
             </DialogContent>
           </Dialog>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Permissions par module
+              </CardTitle>
+              <CardDescription>
+                {"Configurez les droits d'accès par rôle pour chaque module de l'application"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Tabs value={permRole} onValueChange={setPermRole}>
+                <TabsList>
+                  <TabsTrigger value="admin">Admin</TabsTrigger>
+                  <TabsTrigger value="manager">Manager</TabsTrigger>
+                  <TabsTrigger value="caissier">Caissier</TabsTrigger>
+                </TabsList>
+
+                {(["admin", "manager", "caissier"] as const).map((role) => (
+                  <TabsContent key={role} value={role}>
+                    {role === "admin" && (
+                      <p className="text-sm text-muted-foreground mb-4">
+                        {"L'administrateur a tous les droits. Les permissions ne peuvent pas être modifiées."}
+                      </p>
+                    )}
+                    <div className="rounded-md border overflow-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="min-w-[140px]">Module</TableHead>
+                            {ACTIONS.map((action) => (
+                              <TableHead key={action} className="text-center w-[100px]">
+                                {ACTION_LABELS[action]}
+                              </TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {MODULES.map((mod_) => (
+                            <TableRow key={mod_}>
+                              <TableCell className="font-medium">{MODULE_LABELS[mod_]}</TableCell>
+                              {ACTIONS.map((action) => (
+                                <TableCell key={action} className="text-center">
+                                  <Checkbox
+                                    checked={permMap[mod_]?.[action] ?? false}
+                                    disabled={role === "admin"}
+                                    onChange={(e) => {
+                                      updatePermMutation.mutate({
+                                        role,
+                                        module: mod_,
+                                        action,
+                                        allowed: e.target.checked,
+                                      })
+                                    }}
+                                  />
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="receipt" className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Printer className="h-5 w-5" />
                 Configuration du ticket
               </CardTitle>
-              <CardDescription>Personnalisez l'apparence de vos tickets de caisse</CardDescription>
+              <CardDescription>Personnalisez l'apparence de vos tickets de caisse et documents PDF</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -450,24 +692,179 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">Exemples : POS-80, \\localhost\Tickets, COM1</p>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="receipt_header">En-tête du ticket</Label>
+                <Input {...settingsForm.register("receipt_header")} id="receipt_header" placeholder="Bienvenue chez nous !" />
+                <p className="text-xs text-muted-foreground">Texte affiché sous le logo et le nom du magasin</p>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="receipt_footer">Pied de page du ticket</Label>
                 <Input {...settingsForm.register("receipt_footer")} id="receipt_footer" placeholder="Merci de votre visite" />
               </div>
-              <div className="p-4 bg-muted rounded-lg border border-dashed">
-                <p className="text-sm font-medium mb-2">Aperçu du ticket</p>
-                <div className="font-mono text-sm text-muted-foreground">
-                  <div className="text-center font-bold">{settingsForm.watch("shop_name") || "SuperCaisse"}</div>
-                  <div className="text-center text-xs">{settingsForm.watch("shop_address") || "Adresse du magasin"}</div>
-                  <div className="text-center text-xs">{settingsForm.watch("shop_phone") || "Téléphone"}</div>
-                  <div className="my-2 border-t" />
-                  <div className="text-center text-xs mt-2">{settingsForm.watch("receipt_footer") || "Merci de votre visite"}</div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Palette className="h-5 w-5" />
+                Personnalisation des documents
+              </CardTitle>
+              <CardDescription>Logo et couleurs des factures, devis et bons de livraison PDF</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Logo du magasin</Label>
+                <div className="flex items-center gap-4">
+                  {settingsForm.watch("logo_base64") ? (
+                    <div className="relative">
+                      <img
+                        src={`data:image/png;base64,${settingsForm.watch("logo_base64")}`}
+                        alt="Logo"
+                        className="h-16 w-16 object-contain border rounded-lg bg-white p-1"
+                      />
+                      <button
+                        type="button"
+                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-0.5"
+                        onClick={() => settingsForm.setValue("logo_base64", null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="h-16 w-16 border-2 border-dashed rounded-lg flex items-center justify-center text-muted-foreground">
+                      <Upload className="h-6 w-6" />
+                    </div>
+                  )}
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const input = document.createElement("input")
+                        input.type = "file"
+                        input.accept = "image/png,image/jpeg,image/webp"
+                        input.onchange = (e) => {
+                          const file = (e.target as HTMLInputElement).files?.[0]
+                          if (!file) return
+                          if (file.size > 500 * 1024) {
+                            toast.error("Le logo ne doit pas dépasser 500 Ko")
+                            return
+                          }
+                          const reader = new FileReader()
+                          reader.onload = () => {
+                            const base64 = (reader.result as string).split(",")[1]
+                            settingsForm.setValue("logo_base64", base64)
+                          }
+                          reader.readAsDataURL(file)
+                        }
+                        input.click()
+                      }}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Choisir un logo
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-1">PNG, JPEG ou WebP, max 500 Ko</p>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="doc_primary_color">Couleur principale des documents</Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    id="doc_primary_color"
+                    value={settingsForm.watch("doc_primary_color") || "#2563eb"}
+                    onChange={(e) => settingsForm.setValue("doc_primary_color", e.target.value)}
+                    className="h-10 w-14 cursor-pointer rounded border p-1"
+                  />
+                  <Input
+                    value={settingsForm.watch("doc_primary_color") || "#2563eb"}
+                    onChange={(e) => settingsForm.setValue("doc_primary_color", e.target.value)}
+                    placeholder="#2563eb"
+                    className="max-w-[140px]"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => settingsForm.setValue("doc_primary_color", null)}
+                  >
+                    Réinitialiser
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Utilisée pour les en-têtes et titres des factures PDF</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Aperçu</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="text-sm font-medium mb-2">Ticket de caisse (thermique)</p>
+                  <div className="p-4 bg-white dark:bg-zinc-950 rounded-lg border border-dashed">
+                    <div className="font-mono text-sm text-black dark:text-zinc-200">
+                      {settingsForm.watch("logo_base64") && (
+                        <div className="flex justify-center mb-2">
+                          <img src={`data:image/png;base64,${settingsForm.watch("logo_base64")}`} alt="" className="h-10 object-contain" />
+                        </div>
+                      )}
+                      <div className="text-center font-bold">{settingsForm.watch("shop_name") || "SuperCaisse"}</div>
+                      <div className="text-center text-xs">{settingsForm.watch("shop_address") || "Adresse du magasin"}</div>
+                      <div className="text-center text-xs">{settingsForm.watch("shop_phone") || "Téléphone"}</div>
+                      {settingsForm.watch("receipt_header") && (
+                        <div className="text-center text-xs mt-1 italic">{settingsForm.watch("receipt_header")}</div>
+                      )}
+                      <div className="my-2 border-t border-dashed border-gray-400" />
+                      <div className="text-xs">Article exemple × 2 ........ 20.00 MAD</div>
+                      <div className="my-2 border-t border-dashed border-gray-400" />
+                      <div className="text-center font-bold">Total: 20.00 MAD</div>
+                      <div className="my-2 border-t border-dashed border-gray-400" />
+                      <div className="text-center text-xs mt-2">{settingsForm.watch("receipt_footer") || "Merci de votre visite"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Document PDF (A4)</p>
+                  <div className="p-4 bg-white dark:bg-zinc-950 rounded-lg border border-dashed text-sm text-black dark:text-zinc-200">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex items-center gap-2">
+                        {settingsForm.watch("logo_base64") && (
+                          <img src={`data:image/png;base64,${settingsForm.watch("logo_base64")}`} alt="" className="h-8 object-contain" />
+                        )}
+                        <span className="font-bold">{settingsForm.watch("shop_name") || "SuperCaisse"}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold" style={{ color: settingsForm.watch("doc_primary_color") || "#2563eb" }}>FACTURE</div>
+                        <div className="text-xs text-muted-foreground">N° FA-2024-001</div>
+                      </div>
+                    </div>
+                    <div className="h-px mb-2" style={{ backgroundColor: settingsForm.watch("doc_primary_color") || "#2563eb" }} />
+                    <div className="text-xs text-muted-foreground">Aperçu simplifié du document A4</div>
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={updateSettingsMutation.isPending}>
+              {updateSettingsMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enregistrement...</>
+              ) : (
+                "Enregistrer les paramètres"
+              )}
+            </Button>
+          </div>
+          </form>
         </TabsContent>
 
         <TabsContent value="system" className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -476,19 +873,18 @@ export default function Settings() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Verrouillage automatique</p>
-                  <p className="text-sm text-muted-foreground">Verrouiller l'application après inactivité</p>
-                </div>
-                <Button variant="outline">Configurer</Button>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Journal d'audit</p>
-                  <p className="text-sm text-muted-foreground">Tracer toutes les actions sensibles</p>
-                </div>
-                <Button variant="outline">Voir les logs</Button>
+              <div className="space-y-2">
+                <Label htmlFor="idle_timeout">Délai de verrouillage automatique (secondes)</Label>
+                <p className="text-sm text-muted-foreground">L'application se verrouille après cette période d'inactivité. 0 = désactivé.</p>
+                <Input
+                  type="number"
+                  min="0"
+                  step="30"
+                  {...settingsForm.register("idle_timeout")}
+                  id="idle_timeout"
+                  className="max-w-[200px]"
+                  placeholder="300"
+                />
               </div>
             </CardContent>
           </Card>
@@ -520,6 +916,17 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={updateSettingsMutation.isPending}>
+              {updateSettingsMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enregistrement...</>
+              ) : (
+                "Enregistrer"
+              )}
+            </Button>
+          </div>
+          </form>
         </TabsContent>
 
         <TabsContent value="backup" className="space-y-6">

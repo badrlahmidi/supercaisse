@@ -11,10 +11,12 @@ import { Textarea } from "@/ui/Textarea"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, Download, SearchX, DollarSign, MessageCircle } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, Download, SearchX, DollarSign, MessageCircle, Star, History, FileText } from "lucide-react"
+import { Badge } from "@/ui/Badge"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import { formatCurrency, exportCSV } from "@/lib/utils"
+import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
+import { invoke } from "@/lib/tauri"
 
 interface Client {
   id: number
@@ -26,7 +28,30 @@ interface Client {
   ice: string | null
   credit_plafond: number | null
   credit_actuel: number | null
+  points_fidelite: number | null
+  segment: string | null
 }
+
+interface MouvementFidelite {
+  id: number
+  client_id: number
+  vente_id: number | null
+  points: number
+  mtype: "gain" | "depense"
+  date: string
+  numero_facture: string | null
+}
+
+interface ReleveClient {
+  client_id: number
+  nom: string
+  credit_actuel: number
+  credit_plafond: number
+  ventes: { id: number; date: string; numero_facture: string; montant_total: number; mode_paiement: string; statut: string }[]
+  paiements: { id: number; date: string; montant: number; type_paiement: string; reference: string | null }[]
+}
+
+const SEGMENTS = ["Particulier", "Professionnel", "Grossiste", "VIP", "Revendeur"] as const
 
 const clientSchema = z.object({
   code: z.string().optional().nullable(),
@@ -36,12 +61,14 @@ const clientSchema = z.object({
   email: z.string().email("Email invalide").optional().nullable(),
   ice: z.string().optional().nullable(),
   credit_plafond: z.number().min(0).optional().nullable(),
+  segment: z.string().optional().nullable(),
 })
 
 type ClientForm = z.infer<typeof clientSchema>
 
 export default function Clients() {
   const [search, setSearch] = useState("")
+  const [segmentFilter, setSegmentFilter] = useState<string>("all")
   const [editingClient, setEditingClient] = useState<Client | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [paymentClient, setPaymentClient] = useState<Client | null>(null)
@@ -60,15 +87,66 @@ export default function Clients() {
     if (!client.telephone) return
     const phone = client.telephone.replace(/\s+/g, "").replace(/^0/, "212")
     const amount = formatCurrency(client.credit_actuel || 0)
-    const text = encodeURIComponent(`Bonjour ${client.nom},\n\nSauf erreur de notre part, votre compte présente un solde débiteur de ${amount}.\n\nMerci de bien vouloir régulariser cette situation dès que possible.\n\nCordialement.`)
+    const text = encodeURIComponent(`Bonjour ${client.nom},\n\nSauf erreur de notre part, votre compte chez nous présente un solde débiteur de ${amount}.\n\nMerci de bien vouloir régulariser cette situation à votre prochaine visite.\n\nCordialement.`)
     window.open(`https://wa.me/${phone}?text=${text}`, "_blank")
   }
 
   const [deleteConfirm, setDeleteConfirm] = useState<Client | null>(null)
+  const [releveClient, setReleveClient] = useState<Client | null>(null)
+  const [releveData, setReleveData] = useState<ReleveClient | null>(null)
+  const [releveLoading, setReleveLoading] = useState(false)
+  const [loyaltyClient, setLoyaltyClient] = useState<Client | null>(null)
+  const [loyaltyHistory, setLoyaltyHistory] = useState<MouvementFidelite[]>([])
+  const [loyaltyLoading, setLoyaltyLoading] = useState(false)
+
+  const openReleve = async (client: Client) => {
+    setReleveClient(client)
+    setReleveLoading(true)
+    try {
+      const data = await invoke<ReleveClient>("get_releve_client", { clientId: client.id })
+      setReleveData(data)
+    } catch {
+      setReleveData(null)
+    } finally {
+      setReleveLoading(false)
+    }
+  }
+
+  const exportReleveCSV = () => {
+    if (!releveData || !releveClient) return
+    const header = "Type,Date,Référence,Montant,Mode"
+    const venteRows = releveData.ventes.map(v =>
+      `"Vente","${v.date}","${v.numero_facture}","${v.montant_total}","${v.mode_paiement}"`
+    )
+    const paiementRows = releveData.paiements.map(p =>
+      `"Paiement","${p.date}","${p.reference || ""}","${p.montant}","${p.type_paiement}"`
+    )
+    const csv = [header, ...venteRows, ...paiementRows].join("\n")
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `releve_${releveClient.nom.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const openLoyaltyHistory = async (client: Client) => {
+    setLoyaltyClient(client)
+    setLoyaltyLoading(true)
+    try {
+      const data = await invoke<MouvementFidelite[]>("get_mouvements_fidelite", { clientId: client.id })
+      setLoyaltyHistory(data)
+    } catch {
+      setLoyaltyHistory([])
+    } finally {
+      setLoyaltyLoading(false)
+    }
+  }
 
   const form = useForm<ClientForm>({
     resolver: zodResolver(clientSchema),
-    defaultValues: { code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0 },
+    defaultValues: { code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0, segment: null },
   })
 
   const handleSubmit = (data: ClientForm) => {
@@ -86,13 +164,14 @@ export default function Clients() {
       email: client.email,
       ice: client.ice,
       credit_plafond: client.credit_plafond,
+      segment: client.segment,
     })
     setShowForm(true)
   }
 
   const openCreate = () => {
     setEditingClient(null)
-    form.reset({ code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0 })
+    form.reset({ code: "", nom: "", adresse: "", telephone: "", email: "", ice: "", credit_plafond: 0, segment: null })
     setShowForm(true)
   }
 
@@ -122,10 +201,11 @@ export default function Clients() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => {
             if (!clients) return
-            const headers = ["Code", "Nom", "Téléphone", "Email", "ICE", "Adresse", "Plafond crédit", "Crédit actuel"]
+            const headers = ["Code", "Nom", "Segment", "Téléphone", "Email", "ICE", "Adresse", "Points fidélité", "Plafond crédit", "Crédit actuel"]
             const rows = clients.map((c) => [
-              c.code || "", c.nom, c.telephone || "", c.email || "", c.ice || "",
-              c.adresse || "", c.credit_plafond ? formatCurrency(c.credit_plafond) : "",
+              c.code || "", c.nom, c.segment || "", c.telephone || "", c.email || "", c.ice || "",
+              c.adresse || "", String(c.points_fidelite ?? 0),
+              c.credit_plafond ? formatCurrency(c.credit_plafond) : "",
               c.credit_actuel ? formatCurrency(c.credit_actuel) : "",
             ])
             exportCSV(headers, rows, "clients.csv")
@@ -152,6 +232,18 @@ export default function Clients() {
                 className="pl-10"
               />
             </div>
+            <Select value={segmentFilter} onValueChange={setSegmentFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Tous segments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous segments</SelectItem>
+                {SEGMENTS.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+                <SelectItem value="__none">Non classé</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="overflow-x-auto">
@@ -160,26 +252,44 @@ export default function Clients() {
                 <TableRow>
                   <TableHead>Code</TableHead>
                   <TableHead>Nom</TableHead>
+                  <TableHead>Segment</TableHead>
                   <TableHead>Téléphone</TableHead>
                   <TableHead>ICE</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead className="text-right">Points fidélité</TableHead>
                   <TableHead className="text-right">Plafond crédit</TableHead>
                   <TableHead className="text-right">Crédit actuel</TableHead>
-                  <TableHead className="w-[100px]">Actions</TableHead>
+                  <TableHead className="w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {clients?.filter((c) =>
-                  c.nom.toLowerCase().includes(search.toLowerCase()) ||
-                  c.code?.toLowerCase().includes(search.toLowerCase()) ||
-                  c.telephone?.includes(search)
-                ).map((client) => (
+                {clients?.filter((c) => {
+                  const matchSearch = c.nom.toLowerCase().includes(search.toLowerCase()) ||
+                    c.code?.toLowerCase().includes(search.toLowerCase()) ||
+                    c.telephone?.includes(search)
+                  const matchSegment = segmentFilter === "all" ||
+                    (segmentFilter === "__none" ? !c.segment : c.segment === segmentFilter)
+                  return matchSearch && matchSegment
+                }).map((client) => (
                   <TableRow key={client.id}>
                     <TableCell className="font-mono text-sm">{client.code || "—"}</TableCell>
                     <TableCell className="font-medium">{client.nom}</TableCell>
+                    <TableCell>
+                      {client.segment ? (
+                        <Badge variant={client.segment === "VIP" ? "default" : "secondary"}>{client.segment}</Badge>
+                      ) : "—"}
+                    </TableCell>
                     <TableCell>{client.telephone || "—"}</TableCell>
                     <TableCell className="font-mono text-xs">{client.ice || "—"}</TableCell>
                     <TableCell>{client.email || "—"}</TableCell>
+                    <TableCell className="text-right">
+                      {client.points_fidelite && client.points_fidelite > 0 ? (
+                        <Badge variant="secondary" className="gap-1 cursor-pointer" onClick={() => openLoyaltyHistory(client)}>
+                          <Star className="h-3 w-3" />
+                          {client.points_fidelite}
+                        </Badge>
+                      ) : "—"}
+                    </TableCell>
                     <TableCell className="text-right">{client.credit_plafond ? formatCurrency(client.credit_plafond) : "—"}</TableCell>
                     <TableCell className="text-right">
                       <span className={client.credit_actuel && client.credit_actuel > 0 ? "text-destructive font-medium" : ""}>
@@ -191,6 +301,14 @@ export default function Clients() {
                         <Button variant="ghost" size="icon" onClick={() => openEdit(client)}>
                           <Edit className="h-4 w-4" />
                         </Button>
+                        <Button variant="ghost" size="icon" onClick={() => openReleve(client)} title="Relevé de compte">
+                          <FileText className="h-4 w-4 text-blue-500" />
+                        </Button>
+                        {client.points_fidelite != null && client.points_fidelite > 0 && (
+                          <Button variant="ghost" size="icon" onClick={() => openLoyaltyHistory(client)} title="Historique fidélité">
+                            <History className="h-4 w-4 text-amber-500" />
+                          </Button>
+                        )}
                         {client.credit_actuel && client.credit_actuel > 0 && (
                           <>
                             <Button variant="ghost" size="icon" onClick={() => { setPaymentClient(client); setPaymentAmount(""); setPaymentType("especes"); setPaymentRef("") }} title="Encaisser">
@@ -212,7 +330,7 @@ export default function Clients() {
                 ))}
                 {!clients?.length && (
                   <TableRow>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={<SearchX className="h-12 w-12" />}
                         title="Aucun client trouvé"
@@ -273,6 +391,20 @@ export default function Clients() {
                   {...form.register("credit_plafond", { valueAsNumber: true })}
                   id="credit_plafond"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="segment">Segment</Label>
+                <Select value={form.watch("segment") || "none"} onValueChange={(v) => form.setValue("segment", v === "none" ? null : v)}>
+                  <SelectTrigger id="segment">
+                    <SelectValue placeholder="Aucun segment" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Aucun</SelectItem>
+                    {SEGMENTS.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>
@@ -395,6 +527,149 @@ export default function Clients() {
               Supprimer
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!loyaltyClient} onOpenChange={() => setLoyaltyClient(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Star className="h-5 w-5 text-amber-500" />
+              Historique fidélité — {loyaltyClient?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Solde actuel : <strong className="text-foreground">{loyaltyClient?.points_fidelite ?? 0} points</strong>
+            </p>
+            {loyaltyLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : loyaltyHistory.length === 0 ? (
+              <p className="text-center py-8 text-sm text-muted-foreground">Aucun mouvement enregistré</p>
+            ) : (
+              <div className="max-h-80 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Facture</TableHead>
+                      <TableHead className="text-right">Points</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loyaltyHistory.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="text-xs">{new Date(m.date).toLocaleDateString("fr-MA")}</TableCell>
+                        <TableCell>
+                          <Badge variant={m.mtype === "gain" ? "success" : "destructive"} className="text-xs">
+                            {m.mtype === "gain" ? "Gain" : "Utilisé"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{m.numero_facture || "—"}</TableCell>
+                        <TableCell className={`text-right font-medium ${m.mtype === "gain" ? "text-green-600" : "text-destructive"}`}>
+                          {m.mtype === "gain" ? "+" : "−"}{m.points}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!releveClient} onOpenChange={() => { setReleveClient(null); setReleveData(null) }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Relevé de compte — {releveClient?.nom}
+            </DialogTitle>
+          </DialogHeader>
+          {releveLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : releveData ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Crédit actuel : </span>
+                  <span className={releveData.credit_actuel > 0 ? "font-bold text-destructive" : "font-bold"}>
+                    {formatCurrency(releveData.credit_actuel)}
+                  </span>
+                  {releveData.credit_plafond > 0 && (
+                    <span className="text-muted-foreground"> / {formatCurrency(releveData.credit_plafond)}</span>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={exportReleveCSV}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+              </div>
+
+              {releveData.ventes.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Ventes ({releveData.ventes.length})</p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Facture</TableHead>
+                        <TableHead>Mode</TableHead>
+                        <TableHead className="text-right">Montant</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {releveData.ventes.map((v) => (
+                        <TableRow key={v.id}>
+                          <TableCell className="text-xs">{formatDate(v.date)}</TableCell>
+                          <TableCell className="font-mono text-xs">{v.numero_facture}</TableCell>
+                          <TableCell className="text-xs capitalize">{v.mode_paiement}</TableCell>
+                          <TableCell className="text-right font-medium">{formatCurrency(v.montant_total)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {releveData.paiements.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Paiements ({releveData.paiements.length})</p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Référence</TableHead>
+                        <TableHead className="text-right">Montant</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {releveData.paiements.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-xs">{formatDate(p.date)}</TableCell>
+                          <TableCell className="text-xs capitalize">{p.type_paiement}</TableCell>
+                          <TableCell className="text-xs">{p.reference || "—"}</TableCell>
+                          <TableCell className="text-right font-medium text-green-600">{formatCurrency(p.montant)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {releveData.ventes.length === 0 && releveData.paiements.length === 0 && (
+                <p className="text-center py-8 text-muted-foreground">Aucune transaction enregistrée</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-center py-8 text-muted-foreground">Erreur de chargement</p>
+          )}
         </DialogContent>
       </Dialog>
     </div>

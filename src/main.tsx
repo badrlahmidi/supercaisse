@@ -5,9 +5,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from '@/ui/Toast'
 import { router } from '@/routes/router'
 import { initTheme } from '@/store/ui'
+import { initLocale } from '@/store/i18n'
 import './index.css'
 
 initTheme()
+initLocale()
 
 const queryClient = new QueryClient({
   defaultOptions: {

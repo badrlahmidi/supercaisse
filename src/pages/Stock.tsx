@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { invoke } from "@/lib/tauri"
 import { useProductsList } from "@/hooks/useProducts"
 import { useAdjustStock } from "@/hooks/useStock"
 import { Card, CardContent } from "@/ui/Card"
@@ -11,8 +13,9 @@ import { Label } from "@/ui/Label"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Search, SearchX, AlertTriangle, Package, Loader2, ArrowUpDown, History } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { toast } from "sonner"
+import { Search, SearchX, AlertTriangle, Package, Loader2, ArrowUpDown, History, CalendarClock, Plus, Trash2 } from "lucide-react"
+import { formatCurrency, formatDate } from "@/lib/utils"
 import { useNavigate } from "react-router-dom"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
@@ -25,7 +28,23 @@ interface Article {
   stock: number
   stock_alerte: number | null
   categorie_nom?: string
+  suivi_lot?: boolean
 }
+
+interface ArticleLot {
+  id: number
+  numero_lot: string | null
+  date_peremption: string | null
+  quantite: number
+  date_reception: string
+}
+
+const lotSchema = z.object({
+  numero_lot: z.string().optional(),
+  date_peremption: z.string().optional(),
+  quantite: z.number().min(0.01, "Quantité requise"),
+})
+type LotForm = z.infer<typeof lotSchema>
 
 const stockAdjustSchema = z.object({
   article_id: z.number().min(1),
@@ -39,10 +58,60 @@ export default function Stock() {
   const [filter, setFilter] = useState<"all" | "low" | "out" | "ok">("all")
   const [adjustingArticle, setAdjustingArticle] = useState<Article | null>(null)
   const [showAdjust, setShowAdjust] = useState(false)
+  const [lotsArticle, setLotsArticle] = useState<Article | null>(null)
+  const [showLots, setShowLots] = useState(false)
 
   const { data: articles, isLoading } = useProductsList()
+  const queryClient = useQueryClient()
 
   const adjustMutation = useAdjustStock()
+
+  const { data: lots } = useQuery({
+    queryKey: ["article_lots", lotsArticle?.id],
+    queryFn: () => invoke<ArticleLot[]>("get_article_lots", { article_id: lotsArticle?.id }),
+    enabled: showLots && !!lotsArticle,
+  })
+
+  const lotForm = useForm<LotForm>({
+    resolver: zodResolver(lotSchema),
+    defaultValues: { numero_lot: "", date_peremption: "", quantite: 0 },
+  })
+
+  const invalidateLots = () => {
+    queryClient.invalidateQueries({ queryKey: ["article_lots", lotsArticle?.id] })
+    queryClient.invalidateQueries({ queryKey: ["articles"] })
+  }
+
+  const addLotMutation = useMutation({
+    mutationFn: (data: LotForm) => invoke("add_article_lot", {
+      article_id: lotsArticle?.id,
+      numero_lot: data.numero_lot || null,
+      date_peremption: data.date_peremption || null,
+      quantite: data.quantite,
+    }),
+    onSuccess: () => {
+      toast.success("Lot ajouté")
+      lotForm.reset({ numero_lot: "", date_peremption: "", quantite: 0 })
+      invalidateLots()
+    },
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const discardLotMutation = useMutation({
+    mutationFn: ({ lot_id, quantite }: { lot_id: number; quantite: number }) =>
+      invoke("discard_article_lot", { lot_id, quantite, motif: "peremption" }),
+    onSuccess: () => {
+      toast.success("Lot retiré du stock")
+      invalidateLots()
+    },
+    onError: (e) => toast.error("Erreur", { description: String(e) }),
+  })
+
+  const openLots = (article: Article) => {
+    setLotsArticle(article)
+    lotForm.reset({ numero_lot: "", date_peremption: "", quantite: 0 })
+    setShowLots(true)
+  }
 
   const form = useForm<StockAdjustForm>({
     resolver: zodResolver(stockAdjustSchema),
@@ -83,6 +152,10 @@ export default function Stock() {
   return (
     <div className="space-y-6">
       <PageHeader title="Gestion du stock" description="Suivi des niveaux de stock">
+        <Button variant="outline" onClick={() => navigate("/stock/peremptions")}>
+          <CalendarClock className="h-4 w-4 mr-2" />
+          Péremptions
+        </Button>
         <Button variant="outline" onClick={() => navigate("/stock/mouvements")}>
           <History className="h-4 w-4 mr-2" />
           Mouvements
@@ -200,9 +273,14 @@ export default function Stock() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => openAdjust(article)}>
+                          <Button variant="ghost" size="icon" onClick={() => openAdjust(article)} title="Ajuster le stock">
                             <ArrowUpDown className="h-4 w-4" />
                           </Button>
+                          {article.suivi_lot && (
+                            <Button variant="ghost" size="icon" onClick={() => openLots(article)} title="Lots / péremption">
+                              <CalendarClock className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -259,6 +337,91 @@ export default function Stock() {
               </DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showLots} onOpenChange={setShowLots}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Lots — {lotsArticle?.designation}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <form
+              onSubmit={lotForm.handleSubmit((data) => addLotMutation.mutate(data))}
+              className="grid grid-cols-3 gap-2 items-end p-3 bg-muted/30 rounded-lg"
+            >
+              <div className="space-y-1">
+                <Label htmlFor="numero_lot" className="text-xs">N° lot</Label>
+                <Input {...lotForm.register("numero_lot")} id="numero_lot" placeholder="Optionnel" className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="date_peremption" className="text-xs">Péremption</Label>
+                <Input type="date" {...lotForm.register("date_peremption")} id="date_peremption" className="h-9" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="quantite_lot" className="text-xs">Quantité</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  min="0"
+                  {...lotForm.register("quantite", { valueAsNumber: true })}
+                  id="quantite_lot"
+                  className="h-9"
+                />
+              </div>
+              <Button type="submit" size="sm" className="col-span-3" disabled={addLotMutation.isPending}>
+                {addLotMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                Ajouter ce lot (entrée de stock)
+              </Button>
+            </form>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>N° lot</TableHead>
+                  <TableHead>Péremption</TableHead>
+                  <TableHead className="text-right">Qté restante</TableHead>
+                  <TableHead className="w-[50px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lots?.filter((l) => l.quantite > 0).map((lot) => {
+                  const isSoon = lot.date_peremption && new Date(lot.date_peremption).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30
+                  const isExpired = lot.date_peremption && new Date(lot.date_peremption).getTime() < Date.now()
+                  return (
+                    <TableRow key={lot.id} className={isExpired ? "bg-destructive/5" : isSoon ? "bg-warning/5" : ""}>
+                      <TableCell className="font-mono text-sm">{lot.numero_lot || "—"}</TableCell>
+                      <TableCell className={isExpired ? "text-destructive font-medium" : isSoon ? "text-warning font-medium" : ""}>
+                        {lot.date_peremption ? formatDate(lot.date_peremption) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">{lot.quantite}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Retirer du stock (péremption/casse)"
+                          onClick={() => discardLotMutation.mutate({ lot_id: lot.id, quantite: lot.quantite })}
+                          disabled={discardLotMutation.isPending}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {!lots?.filter((l) => l.quantite > 0).length && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-6 text-muted-foreground text-sm">
+                      Aucun lot en stock pour cet article
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLots(false)}>Fermer</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

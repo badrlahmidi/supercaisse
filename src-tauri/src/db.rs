@@ -32,6 +32,7 @@ pub struct Client {
     pub ice: Option<String>,
     pub credit_plafond: Option<f64>,
     pub credit_actuel: Option<f64>,
+    pub segment: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -144,10 +145,22 @@ pub struct Settings {
     pub shop_address: Option<String>,
     pub shop_phone: Option<String>,
     pub shop_email: Option<String>,
-    pub tax_number: Option<String>,
+    pub ice: Option<String>,
+    pub if_number: Option<String>,
+    pub rc_number: Option<String>,
+    pub patente: Option<String>,
     pub default_tva: f64,
     pub receipt_footer: Option<String>,
     pub currency: String,
+    pub printer_name: Option<String>,
+    pub fidelite_actif: Option<String>,
+    pub fidelite_dh_pour_1_point: Option<String>,
+    pub fidelite_valeur_1_point: Option<String>,
+    pub business_type: Option<String>,
+    pub idle_timeout: Option<String>,
+    pub logo_base64: Option<String>,
+    pub receipt_header: Option<String>,
+    pub doc_primary_color: Option<String>,
 }
 
 pub struct DbState {
@@ -388,7 +401,92 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             stock_dedie REAL DEFAULT 0,
             FOREIGN KEY (article_id) REFERENCES articles(id)
         );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            utilisateur_id INTEGER,
+            action TEXT NOT NULL,
+            detail TEXT,
+            reference_type TEXT,
+            reference_id INTEGER,
+            FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventaires (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date_debut TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            date_fin TEXT,
+            statut TEXT DEFAULT 'en_cours',
+            magasin_id INTEGER NOT NULL,
+            utilisateur_id INTEGER,
+            FOREIGN KEY (magasin_id) REFERENCES magasins(id),
+            FOREIGN KEY (utilisateur_id) REFERENCES utilisateurs(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventaire_lignes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inventaire_id INTEGER NOT NULL,
+            article_id INTEGER NOT NULL,
+            stock_theorique REAL NOT NULL DEFAULT 0,
+            stock_compte REAL,
+            ecart REAL,
+            FOREIGN KEY (inventaire_id) REFERENCES inventaires(id),
+            FOREIGN KEY (article_id) REFERENCES articles(id)
+        );
     ")?;
+
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS permissions (
+            role TEXT NOT NULL,
+            module TEXT NOT NULL,
+            action TEXT NOT NULL,
+            allowed INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (role, module, action)
+        );
+    ")?;
+
+    {
+        let modules = vec![
+            "articles", "categories", "clients", "fournisseurs", "ventes",
+            "achats", "stock", "inventaire", "journal", "cheques",
+            "rapports", "magasins", "audit", "settings", "reappro",
+        ];
+        let actions = vec!["voir", "creer", "modifier", "exporter"];
+
+        for module in &modules {
+            for action in &actions {
+                conn.execute(
+                    "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('admin', ?1, ?2, 1)",
+                    params![module, action],
+                ).ok();
+            }
+        }
+
+        let manager_denied = vec!["magasins", "audit", "settings"];
+        for module in &modules {
+            let allowed = if manager_denied.contains(module) { 0 } else { 1 };
+            for action in &actions {
+                conn.execute(
+                    "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('manager', ?1, ?2, ?3)",
+                    params![module, action, allowed],
+                ).ok();
+            }
+        }
+
+        let caissier_allowed: Vec<(&str, &str)> = vec![
+            ("ventes", "voir"), ("ventes", "creer"), ("clients", "voir"),
+        ];
+        for module in &modules {
+            for action in &actions {
+                let allowed = if caissier_allowed.contains(&(module, action)) { 1 } else { 0 };
+                conn.execute(
+                    "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('caissier', ?1, ?2, ?3)",
+                    params![module, action, allowed],
+                ).ok();
+            }
+        }
+    }
 
     // Ajout des colonnes pour la migration des bases existantes
     let _ = conn.execute("ALTER TABLE clients ADD COLUMN points_fidelite REAL DEFAULT 0", []);
@@ -398,7 +496,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     // Configuration par défaut de la fidélité si elle n'existe pas
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_actif', 'true')", [])?;
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_dh_pour_1_point', '100')", [])?; // Dépenser 100 DH donne 1 point
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_valeur_1_point', '1')", [])?; // 1 point = 1 DH de réduction
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_valeur_1_point', '1')", [])?;
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('idle_timeout', '300')", [])?;
 
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN image_url TEXT", []);
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN numero_facture TEXT", []);
@@ -411,6 +510,80 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE achats ADD COLUMN statut_paiement TEXT DEFAULT 'non_paye'", []);
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN session_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE journal_caisse ADD COLUMN session_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE articles ADD COLUMN suivi_lot INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE article_variantes ADD COLUMN code_barre TEXT", []);
+    let _ = conn.execute("ALTER TABLE utilisateurs ADD COLUMN pin_hash TEXT", []);
+    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN variante_id INTEGER", []);
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_variantes_code_barre_unique ON article_variantes(code_barre) WHERE code_barre IS NOT NULL AND code_barre != ''",
+        [],
+    ).ok();
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_article_variantes_article ON article_variantes(article_id)", []);
+
+    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN source_vente_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE clients ADD COLUMN segment TEXT", []);
+    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN magasin_id INTEGER", []);
+
+    // Multi-prix (public/grossiste) et produits composés (kits)
+    let _ = conn.execute("ALTER TABLE articles ADD COLUMN prix_grossiste REAL", []);
+    let _ = conn.execute("ALTER TABLE articles ADD COLUMN est_kit INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN prix_type TEXT DEFAULT 'public'", []);
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS article_composants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL,
+            composant_id INTEGER NOT NULL,
+            quantite REAL NOT NULL DEFAULT 1,
+            FOREIGN KEY (article_id) REFERENCES articles(id),
+            FOREIGN KEY (composant_id) REFERENCES articles(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_article_composants_article ON article_composants(article_id);
+
+        CREATE TABLE IF NOT EXISTS caisses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL,
+            utilisateur_id INTEGER,
+            statut TEXT NOT NULL DEFAULT 'fermee',
+            ouverture_date TEXT,
+            fermeture_date TEXT,
+            fond_initial REAL NOT NULL DEFAULT 0,
+            recettes_especes REAL NOT NULL DEFAULT 0,
+            recettes_cb REAL NOT NULL DEFAULT 0,
+            recettes_cheque REAL NOT NULL DEFAULT 0,
+            recettes_virement REAL NOT NULL DEFAULT 0,
+            depenses REAL NOT NULL DEFAULT 0,
+            ecart REAL NOT NULL DEFAULT 0,
+            note TEXT
+        );
+    ")?;
+
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS article_lots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL,
+            magasin_id INTEGER NOT NULL,
+            numero_lot TEXT,
+            date_peremption TEXT,
+            quantite REAL NOT NULL DEFAULT 0,
+            date_reception TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (article_id) REFERENCES articles(id),
+            FOREIGN KEY (magasin_id) REFERENCES magasins(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_article_lots_article ON article_lots(article_id);
+        CREATE INDEX IF NOT EXISTS idx_article_lots_peremption ON article_lots(date_peremption);
+    ")?;
+
+    // Migration en-tête légal : l'ancien champ unique 'tax_number' (ICE/IF confondus)
+    // devient 'ice' ; 'if_number'/'rc_number'/'patente' sont ajoutés en distinct.
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) SELECT 'ice', value FROM settings WHERE key = 'tax_number'",
+        [],
+    ).ok();
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('if_number', '')", []).ok();
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('rc_number', '')", []).ok();
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('patente', '')", []).ok();
+    conn.execute("DELETE FROM settings WHERE key = 'tax_number'", []).ok();
 
     conn.execute_batch("
         CREATE INDEX IF NOT EXISTS idx_articles_code_barre ON articles(code_barre);
@@ -428,6 +601,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_paiements_client ON paiements(client_id);
         CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_caisse(date);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_code_barre_unique ON articles(code_barre) WHERE code_barre IS NOT NULL AND code_barre != '';
+        CREATE INDEX IF NOT EXISTS idx_audit_log_date ON audit_log(date);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+        CREATE INDEX IF NOT EXISTS idx_inventaire_lignes_inventaire ON inventaire_lignes(inventaire_id);
     ")?;
 
     // Migration du stock existant vers le "Magasin Principal"
@@ -481,7 +657,10 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             ("shop_address", ""),
             ("shop_phone", ""),
             ("shop_email", ""),
-            ("tax_number", ""),
+            ("ice", ""),
+            ("if_number", ""),
+            ("rc_number", ""),
+            ("patente", ""),
             ("default_tva", "20"),
             ("receipt_footer", "Merci de votre visite"),
             ("currency", "MAD"),

@@ -1,32 +1,40 @@
-# React + TypeScript + Vite
+# SuperCaisse (RitajPOS)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Logiciel de caisse / gestion retail (Tauri v2 + React 19 + TypeScript + SQLite),
+destiné au marché marocain.
 
-Currently, two official plugins are available:
+## Documentation
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Document | Rôle |
+|---|---|
+| `AGENTS.md` | Stack technique, conventions de code, structure du projet — à lire avant toute contribution |
+| `ROADMAP_STATUS.md` | **État d'avancement réel**, vérifié module par module dans le code (source de vérité pour "qu'est-ce qui marche aujourd'hui ?") |
+| `FONCTIONS_METIER.md` | Inventaire des fonctions métier — inclus / à améliorer / manquant, vue business pour prioriser le backlog |
+| `AUDIT_ARCHITECTURE_SENIOR_2026-09.md` | Audit architecture, conformité fiscale marocaine (DGI) et couverture par vertical retail (supermarché, pharmacie/para, prêt-à-porter, matériel pâtisserie) |
+| `SPEC_FONCTIONNELLE_RITAJ_RETAIL_MAROC.md` | Cahier des charges cible (vision produit, pas état d'avancement) |
+| `QA_POS_Supermarche.md` | Scénarios de non-régression du module POS |
+| `docs/archive/` | Anciens documents de planification, conservés pour historique — non fiables comme état actuel, cf. note en tête de chaque fichier |
 
-## React Compiler
+## Démarrage
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # serveur Vite
+npm run tauri dev    # application desktop complète (frontend + backend Rust)
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Commandes
+
+- `npm run build` — build production Vite
+- `npm run lint` — Oxlint
+- `npx tsc --noEmit` — vérification TypeScript
+- `npm run test` — Vitest
+- `cargo check` (dans `src-tauri/`) — vérification du backend Rust
+
+## Stack
+
+React 19 + TypeScript + Vite 8 · Tauri v2 (Rust, SQLite) · react-router-dom v7 ·
+@tanstack/react-query v5 · Zustand · react-hook-form + zod · Tailwind CSS v4 ·
+Vitest + Testing Library.
+
+Détails complets des conventions dans `AGENTS.md`.

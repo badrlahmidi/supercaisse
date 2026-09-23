@@ -2,6 +2,12 @@
 ## Cahier des charges fonctionnel complet pour une solution all-in-one prête marché
 
 > Document de référence à réutiliser dans L'Orchestrateur pour cadrer le scope produit, prioriser les sprints, et vérifier qu'aucune fonctionnalité "table stakes" du marché marocain n'est oubliée. Organisé par flux métier quotidien, pas par couche technique.
+>
+> **Nature du document : cible/vision, pas état d'avancement.** Ce cahier des charges décrit ce
+> que le produit doit couvrir, pas ce qui est implémenté aujourd'hui. Pour l'état réel vérifié
+> dans le code, voir `ROADMAP_STATUS.md` (suivi d'avancement module par module) et
+> `AUDIT_ARCHITECTURE_SENIOR_2026-09.md` (audit architecture + conformité + couverture par
+> vertical) à la racine du dépôt.
 
 ---
 

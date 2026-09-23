@@ -9,24 +9,48 @@ export interface User {
   role: "admin" | "manager" | "caissier"
 }
 
+type PermissionsMap = Record<string, Record<string, boolean>>
+
 interface AuthContextType {
   user: User | null
   login: (login: string, password: string) => Promise<void>
+  loginAs: (userData: User) => void
   logout: () => void
   isLoading: boolean
   hasPermission: (roles: string[]) => boolean
+  permissions: PermissionsMap
+  hasModulePermission: (module: string, action: string) => boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const AUTO_LOCK_MS = 15 * 60 * 1000
 
+function transformPermissions(rows: Array<{ module: string; action: string; allowed: boolean }>): PermissionsMap {
+  const map: PermissionsMap = {}
+  for (const row of rows) {
+    if (!map[row.module]) map[row.module] = {}
+    map[row.module][row.action] = row.allowed
+  }
+  return map
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [permissions, setPermissions] = useState<PermissionsMap>({})
   const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
 
   const lastActivity = useRef(Date.now())
+
+  const loadPermissions = useCallback(async (role: string) => {
+    try {
+      const rows = await invoke<Array<{ module: string; action: string; allowed: boolean }>>("get_permissions", { role })
+      setPermissions(transformPermissions(rows))
+    } catch {
+      setPermissions({})
+    }
+  }, [])
 
   useEffect(() => {
     const initAuth = async () => {
@@ -35,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (stored) {
           const parsed = JSON.parse(stored)
           setUser(parsed)
+          await loadPermissions(parsed.role)
         }
       } catch {
         localStorage.removeItem("supercaisse_user")
@@ -78,8 +103,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!userData) throw new Error("Login ou mot de passe incorrect")
     setUser(userData)
     localStorage.setItem("supercaisse_user", JSON.stringify(userData))
+    await loadPermissions(userData.role)
     navigate("/pos")
-  }, [navigate])
+  }, [navigate, loadPermissions])
+
+  const loginAs = useCallback((userData: User) => {
+    setUser(userData)
+    localStorage.setItem("supercaisse_user", JSON.stringify(userData))
+  }, [])
 
   const logout = useCallback(() => {
     logout_()
@@ -90,6 +121,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return roles.includes(user.role)
   }, [user])
 
+  const hasModulePermission = useCallback((module: string, action: string): boolean => {
+    if (!user) return false
+    if (user.role === "admin") return true
+    return permissions[module]?.[action] ?? false
+  }, [user, permissions])
+
   if (isLoading) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
@@ -99,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading, hasPermission }}>
+    <AuthContext.Provider value={{ user, login, loginAs, logout, isLoading, hasPermission, permissions, hasModulePermission }}>
       {children}
     </AuthContext.Provider>
   )

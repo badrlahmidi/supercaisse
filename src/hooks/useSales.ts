@@ -55,7 +55,7 @@ export function useRecentSales() {
 export function useCreateSale() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: CreateSaleInput) => invoke<number>("create_vente", data),
+    mutationFn: (data: CreateSaleInput) => invoke<{ id: number; numero_facture: string }>("create_vente", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ventes"] })
       qc.invalidateQueries({ queryKey: ["stats"] })

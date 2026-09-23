@@ -1,5 +1,5 @@
 import { Badge } from "@/ui/Badge"
-import { Package } from "lucide-react"
+import { Package, Tags } from "lucide-react"
 import { cn, formatCurrency } from "@/lib/utils"
 
 interface Article {
@@ -12,6 +12,7 @@ interface Article {
   stock_alerte: number | null
   categorie_id: number | null
   categorie_nom?: string
+  a_variantes?: boolean
 }
 
 interface ProductGridProps {
@@ -35,8 +36,8 @@ export default function ProductGrid({ articles, onAddToCart }: ProductGridProps)
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
       {articles.slice(0, 100).map((article) => {
-        const lowStock = article.stock_alerte && article.stock <= article.stock_alerte
-        const outOfStock = article.stock <= 0
+        const lowStock = !article.a_variantes && article.stock_alerte && article.stock <= article.stock_alerte
+        const outOfStock = !article.a_variantes && article.stock <= 0
         return (
           <button
             key={article.id}
@@ -55,7 +56,7 @@ export default function ProductGrid({ articles, onAddToCart }: ProductGridProps)
             disabled={outOfStock}
           >
             <div className="absolute top-2 right-2">
-              {outOfStock ? (
+              {article.a_variantes ? null : outOfStock ? (
                 <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Rupture</Badge>
               ) : lowStock ? (
                 <Badge variant="warning" className="text-[10px] px-1.5 py-0">{article.stock}</Badge>
@@ -73,6 +74,11 @@ export default function ProductGrid({ articles, onAddToCart }: ProductGridProps)
             <div className="flex flex-col justify-between h-full pt-6">
               <div>
                 <p className="font-semibold text-sm leading-tight line-clamp-2">{article.designation}</p>
+                {article.a_variantes && (
+                  <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-muted-foreground">
+                    <Tags className="h-3 w-3" /> Tailles/couleurs
+                  </span>
+                )}
               </div>
               <div className="mt-2">
                 <p className="text-xl font-bold text-primary">{formatCurrency(article.prix_vente)}</p>

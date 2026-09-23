@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@/lib/tauri"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/context/AuthContext"
 import { usePOSProducts } from "@/hooks/useProducts"
 import { useCategoriesList } from "@/hooks/useCategories"
@@ -12,9 +12,10 @@ import { Badge } from "@/ui/Badge"
 import { Button } from "@/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
-import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
-import { printViaTauri, type ReceiptData } from "@/lib/receipt"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
+import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee, Store, BarChart3 } from "lucide-react"
+import { formatCurrency, cn } from "@/lib/utils"
+import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useCartStore } from "@/store/cart"
 import { toast } from "sonner"
@@ -33,11 +34,32 @@ interface Article {
   stock_alerte: number | null
   categorie_id: number | null
   categorie_nom?: string
+  a_variantes?: boolean
+}
+
+interface ArticleVariante {
+  id: number
+  taille: string | null
+  couleur: string | null
+  code_barre: string | null
+  stock_dedie: number
 }
 
 interface Category {
   id: number
   nom: string
+}
+
+interface RapportX {
+  session_id: number
+  date_ouverture: string
+  fond_initial: number
+  nb_ventes: number
+  ca_total: number
+  total_remises: number
+  nb_annulations: number
+  nb_articles_vendus: number
+  par_mode: { mode: string; total: number; count: number }[]
 }
 
 interface Client {
@@ -79,10 +101,19 @@ export default function POS() {
   const [, setLastSync] = useState<Date>(new Date())
 
   const [documentType, setDocumentType] = useState<string>("facture")
+  const [variantPickerArticle, setVariantPickerArticle] = useState<Article | null>(null)
+  const [showVariantPicker, setShowVariantPicker] = useState(false)
+  const [showRapportX, setShowRapportX] = useState(false)
 
   const { data: currentSession, isLoading: isSessionLoading } = useCurrentSession(user?.id)
   const openSessionMutation = useOpenSession()
   const [fondInitial, setFondInitial] = useState("0")
+  const [selectedMagasinId, setSelectedMagasinId] = useState<string>("")
+
+  const { data: magasins = [] } = useQuery({
+    queryKey: ["magasins"],
+    queryFn: () => invoke<{ id: number; nom: string; adresse: string | null }[]>("get_magasins"),
+  })
 
   const cart = useCartStore((s) => s.items)
   const selectedClient = useCartStore((s) => s.selectedClient)
@@ -108,6 +139,12 @@ export default function POS() {
   const { data: articles = [], isFetching: articlesFetching } = usePOSProducts(debouncedSearch, activeCategory)
 
   const { data: categories = [] } = useCategoriesList()
+
+  const { data: pickerVariantes = [], isFetching: pickerVariantesFetching } = useQuery({
+    queryKey: ["article_variantes_pos", variantPickerArticle?.id],
+    queryFn: () => invoke<ArticleVariante[]>("get_article_variantes", { article_id: variantPickerArticle?.id }),
+    enabled: showVariantPicker && !!variantPickerArticle,
+  })
 
   const handleSelectTable = (table: TableResto) => {
     setActiveTable(table.id, table.nom)
@@ -155,30 +192,48 @@ export default function POS() {
     return a.designation.toLowerCase().includes(q) || a.code_barre?.includes(debouncedSearch)
   })
 
-  const addToCart = useCallback((article: Article) => {
-    if (article.stock <= 0) {
+  const addToCart = useCallback((article: Article, variante?: ArticleVariante) => {
+    if (!variante && article.a_variantes) {
+      setVariantPickerArticle(article)
+      setShowVariantPicker(true)
+      return
+    }
+    const stockDispo = variante ? variante.stock_dedie : article.stock
+    if (stockDispo <= 0) {
       toast.error("Stock épuisé", { description: `${article.designation} n'est plus disponible` })
       return
     }
-    const existing = cart.find((i) => i.article_id === article.id)
-    if (existing && existing.quantite + 1 > article.stock) {
-      toast.error("Stock maximum atteint", { description: `Stock disponible: ${article.stock}` })
+    const existing = cart.find((i) => i.article_id === article.id && (i.variante_id ?? null) === (variante?.id ?? null))
+    if (existing && existing.quantite + 1 > stockDispo) {
+      toast.error("Stock maximum atteint", { description: `Stock disponible: ${stockDispo}` })
       return
     }
-    addItem({ article_id: article.id, designation: article.designation, quantite: 1, prix_unitaire: article.prix_vente, tva: article.tva, remise_ligne: 0 })
+    const label = variante ? [variante.taille, variante.couleur].filter(Boolean).join(" / ") : undefined
+    addItem({
+      article_id: article.id,
+      variante_id: variante?.id,
+      variante_label: label,
+      designation: label ? `${article.designation} (${label})` : article.designation,
+      quantite: 1,
+      prix_unitaire: article.prix_vente,
+      tva: article.tva,
+      remise_ligne: 0,
+      stock_max: stockDispo,
+    })
+    setShowVariantPicker(false)
     searchRef.current?.focus()
   }, [cart, addItem])
 
-  const updateQuantity = useCallback((articleId: number, quantity: number, maxStock?: number) => {
+  const updateQuantity = useCallback((articleId: number, quantity: number, maxStock?: number, varianteId?: number | null) => {
     if (maxStock && quantity > maxStock) {
       toast.error("Stock maximum atteint", { description: `Stock disponible: ${maxStock}` })
       return
     }
-    updateQuantityStore(articleId, quantity)
+    updateQuantityStore(articleId, quantity, varianteId)
   }, [updateQuantityStore])
 
-  const removeFromCart = useCallback((articleId: number) => {
-    removeItem(articleId)
+  const removeFromCart = useCallback((articleId: number, varianteId?: number | null) => {
+    removeItem(articleId, varianteId)
   }, [removeItem])
 
   const clearCart = useCallback(() => {
@@ -212,9 +267,49 @@ export default function POS() {
   const removeLastItem = useCallback(() => {
     const items = useCartStore.getState().items
     if (items.length > 0) {
-      removeItem(items[items.length - 1].article_id)
+      const last = items[items.length - 1]
+      removeItem(last.article_id, last.variante_id)
     }
   }, [removeItem])
+
+  const resolveAndAddByBarcode = useCallback(async (code: string): Promise<boolean> => {
+    if (!code) return false
+    const exact = articlesRef.current.find((a) => a.code_barre === code)
+    if (exact) {
+      addToCart(exact)
+      return true
+    }
+    try {
+      const found = await invoke<{
+        variante_id: number; article_id: number; taille: string | null; couleur: string | null
+        stock_dedie: number; designation: string; prix_vente: number; tva: number; actif: boolean
+      } | null>("find_variante_by_barcode", { code_barre: code })
+      if (found && found.actif) {
+        const articleShim: Article = {
+          id: found.article_id,
+          code_barre: null,
+          designation: found.designation,
+          prix_vente: found.prix_vente,
+          tva: found.tva,
+          stock: found.stock_dedie,
+          stock_alerte: null,
+          categorie_id: null,
+        }
+        const varianteShim: ArticleVariante = {
+          id: found.variante_id,
+          taille: found.taille,
+          couleur: found.couleur,
+          code_barre: code,
+          stock_dedie: found.stock_dedie,
+        }
+        addToCart(articleShim, varianteShim)
+        return true
+      }
+    } catch {
+      // Pas de variante trouvée non plus : on ne fait rien, comme pour un code-barres article inconnu.
+    }
+    return false
+  }, [addToCart])
 
   const handleValidateSale = () => {
     if (cart.length === 0) return
@@ -240,12 +335,26 @@ export default function POS() {
     }
   }, [])
 
+  const [generatingPdf, setGeneratingPdf] = useState(false)
+  const generateLastReceiptPdf = useCallback(async () => {
+    if (!lastReceiptRef.current) return
+    setGeneratingPdf(true)
+    try {
+      const path = await saveFacturePdf(lastReceiptRef.current)
+      toast.success(`PDF généré : ${path}`)
+    } catch (err) {
+      toast.error(`Échec de la génération du PDF : ${String(err)}`)
+    } finally {
+      setGeneratingPdf(false)
+    }
+  }, [])
+
   articlesRef.current = articles
-  const handlerRef = useRef({ handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart })
+  const handlerRef = useRef({ handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode })
 
   useEffect(() => {
-    handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart }
-  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart])
+    handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode }
+  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -300,10 +409,7 @@ export default function POS() {
         case "Enter":
           if (!isInput && currentSearch.current.trim()) {
             e.preventDefault()
-            const exact = articlesRef.current.find((a) => a.code_barre === currentSearch.current.trim())
-            if (exact) {
-              handlerRef.current.addToCart(exact)
-            }
+            handlerRef.current.resolveAndAddByBarcode(currentSearch.current.trim())
           }
           break
       }
@@ -317,15 +423,17 @@ export default function POS() {
     mutationFn: async () => {
       const items = cart.map((i) => ({
         article_id: i.article_id,
+        variante_id: i.variante_id || null,
         quantite: i.quantite,
         prix_unitaire: i.prix_unitaire,
         tva: i.tva,
         remise_ligne: i.remise_ligne || 0,
         note: i.note || null,
+        prix_type: i.prix_type || "public",
       }))
       const isSplit = paymentSplits.length > 0
       const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
-      return invoke<number>("create_vente", {
+      return invoke<{ id: number; numero_facture: string }>("create_vente", {
         clientId: selectedClient,
         caissierId: user?.id ?? 0,
         articles: items,
@@ -335,9 +443,10 @@ export default function POS() {
         dtype: documentType,
         points_utilises: ptsToUse,
         points_gagnes: ptsEarned,
+        magasinId: currentSession?.magasin_id ?? null,
       })
     },
-    onSuccess: (venteId) => {
+    onSuccess: ({ id: venteId, numero_facture: numeroFacture }) => {
       const clientObj = clients.find((c) => c.id === selectedClient)
       const clientName = clientObj?.nom || "Client de passage"
       const clientIce = clientObj?.ice || null
@@ -346,9 +455,17 @@ export default function POS() {
         shopName: settings.shop_name || "SuperCaisse",
         shopAddress: settings.shop_address || "",
         shopPhone: settings.shop_phone || "",
-        shopIce: settings.tax_number || null,
+        shopIce: settings.ice || null,
+        shopIf: settings.if_number || null,
+        shopRc: settings.rc_number || null,
+        shopPatente: settings.patente || null,
         receiptFooter: settings.receipt_footer || "Merci de votre visite",
+        logoBase64: settings.logo_base64 || null,
+        docPrimaryColor: settings.doc_primary_color || null,
+        receiptHeader: settings.receipt_header || null,
         venteId,
+        docType: documentType,
+        docNumero: numeroFacture,
         date: new Date().toISOString(),
         caissier: user?.nom || "",
         client: clientName,
@@ -396,11 +513,10 @@ export default function POS() {
 
   const handleBarcodeScan = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && search.trim()) {
-      const exact = articles.find((a) => a.code_barre === search.trim())
-      if (exact) {
-        addToCart(exact)
-        setSearch("")
-      }
+      const code = search.trim()
+      resolveAndAddByBarcode(code).then((found) => {
+        if (found) setSearch("")
+      })
     }
   }
 
@@ -414,26 +530,45 @@ export default function POS() {
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Ouvrir la caisse</h2>
           <p className="text-muted-foreground text-sm">
-            Vous devez déclarer votre fond de caisse initial pour commencer à encaisser.
+            Déclarez votre fond de caisse et choisissez votre boutique pour commencer.
           </p>
+          {magasins.length > 1 && (
+            <div className="space-y-2 text-left">
+              <label className="text-sm font-medium flex items-center gap-2">
+                <Store className="h-4 w-4" />
+                Boutique
+              </label>
+              <Select value={selectedMagasinId} onValueChange={setSelectedMagasinId}>
+                <SelectTrigger className="h-12">
+                  <SelectValue placeholder="Sélectionner une boutique" />
+                </SelectTrigger>
+                <SelectContent>
+                  {magasins.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>{m.nom}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2 text-left">
             <label className="text-sm font-medium">Fond de caisse initial (DH)</label>
-            <Input 
-              type="number" 
-              value={fondInitial} 
-              onChange={(e) => setFondInitial(e.target.value)} 
+            <Input
+              type="number"
+              value={fondInitial}
+              onChange={(e) => setFondInitial(e.target.value)}
               className="h-12 text-lg text-center"
               min="0"
               step="0.01"
               autoFocus
             />
           </div>
-          <Button 
-            className="w-full h-12 text-lg" 
-            disabled={openSessionMutation.isPending}
+          <Button
+            className="w-full h-12 text-lg"
+            disabled={openSessionMutation.isPending || (magasins.length > 1 && !selectedMagasinId)}
             onClick={() => {
               if (user?.id) {
-                openSessionMutation.mutate({ caissierId: user.id, fondInitial: parseFloat(fondInitial) || 0 })
+                const magasinId = selectedMagasinId ? parseInt(selectedMagasinId) : undefined
+                openSessionMutation.mutate({ caissierId: user.id, fondInitial: parseFloat(fondInitial) || 0, magasinId })
               }
             }}
           >
@@ -507,6 +642,16 @@ export default function POS() {
             >
               <Keyboard className="h-5 w-5" />
             </Button>
+            {currentSession && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowRapportX(true)}
+                title="Rapport X (résumé session)"
+              >
+                <BarChart3 className="h-5 w-5" />
+              </Button>
+            )}
           </div>
 
           {/* Category Pills & Table Badge */}
@@ -568,6 +713,8 @@ export default function POS() {
         onClearCart={clearCart}
         onValidateSale={handleValidateSale}
         onPrintLastReceipt={printLastReceipt}
+        onGeneratePdf={generateLastReceiptPdf}
+        generatingPdf={generatingPdf}
         documentType={documentType}
         setDocumentType={setDocumentType}
         isLoyaltyActive={isLoyaltyActive}
@@ -642,7 +789,7 @@ export default function POS() {
                       <p className="text-xs text-muted-foreground mb-1.5 font-medium">Articles :</p>
                       <div className="space-y-0.5 max-h-20 overflow-y-auto">
                         {held.state.items.map((item) => (
-                          <div key={item.article_id} className="flex justify-between text-xs text-muted-foreground">
+                          <div key={`${item.article_id}-${item.variante_id ?? "x"}`} className="flex justify-between text-xs text-muted-foreground">
                             <span className="truncate max-w-[140px]">{item.designation}</span>
                             <span className="shrink-0 ml-1">×{item.quantite}</span>
                           </div>
@@ -704,7 +851,139 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
+      {/* Sélecteur de déclinaison (taille/couleur) */}
+      <Dialog open={showVariantPicker} onOpenChange={setShowVariantPicker}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{variantPickerArticle?.designation} — choisir une déclinaison</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto py-2">
+            {pickerVariantesFetching ? (
+              <div className="col-span-2 flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : pickerVariantes.length === 0 ? (
+              <p className="col-span-2 text-center text-sm text-muted-foreground py-8">
+                Aucune déclinaison définie pour cet article. Ajoutez-en depuis la page Articles.
+              </p>
+            ) : (
+              pickerVariantes.map((v) => {
+                const label = [v.taille, v.couleur].filter(Boolean).join(" / ") || `#${v.id}`
+                const epuise = v.stock_dedie <= 0
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    disabled={epuise}
+                    onClick={() => variantPickerArticle && addToCart(variantPickerArticle, v)}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 rounded-xl border p-4 transition-colors",
+                      epuise
+                        ? "opacity-50 cursor-not-allowed border-muted"
+                        : "border-border hover:border-primary hover:bg-primary/5"
+                    )}
+                  >
+                    <span className="font-semibold">{label}</span>
+                    <span className={cn("text-xs", epuise ? "text-destructive" : "text-muted-foreground")}>
+                      {epuise ? "Rupture" : `Stock: ${v.stock_dedie}`}
+                    </span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <RapportXDialog
+        open={showRapportX}
+        onOpenChange={setShowRapportX}
+        sessionId={currentSession?.id}
+      />
+
       <Toaster />
     </div>
+  )
+}
+
+function RapportXDialog({ open, onOpenChange, sessionId }: { open: boolean; onOpenChange: (v: boolean) => void; sessionId?: number }) {
+  const { data: rapport, isLoading } = useQuery({
+    queryKey: ["rapport_x", sessionId],
+    queryFn: () => invoke<RapportX>("get_rapport_x", { sessionId }),
+    enabled: open && !!sessionId,
+  })
+
+  const MODE_LABELS: Record<string, string> = {
+    especes: "Espèces",
+    carte: "Carte bancaire",
+    cheque: "Chèque",
+    mixte: "Mixte",
+    credit: "Crédit",
+    virement: "Virement",
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5" />
+            Rapport X — Résumé de session
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : rapport ? (
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Ouverture : {new Date(rapport.date_ouverture).toLocaleString("fr-MA")}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold text-primary">{formatCurrency(rapport.ca_total)}</p>
+                <p className="text-xs text-muted-foreground">Chiffre d'affaires</p>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold">{rapport.nb_ventes}</p>
+                <p className="text-xs text-muted-foreground">Ventes</p>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold">{rapport.nb_articles_vendus}</p>
+                <p className="text-xs text-muted-foreground">Articles vendus</p>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <p className="text-2xl font-bold">{formatCurrency(rapport.fond_initial)}</p>
+                <p className="text-xs text-muted-foreground">Fond de caisse</p>
+              </div>
+            </div>
+            {rapport.par_mode.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Par mode de paiement</p>
+                <div className="space-y-1">
+                  {rapport.par_mode.map((m) => (
+                    <div key={m.mode} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-muted/50">
+                      <span>{MODE_LABELS[m.mode] || m.mode}</span>
+                      <span className="font-medium">{formatCurrency(m.total)} ({m.count})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-sm border-t pt-3">
+              <span className="text-muted-foreground">Remises</span>
+              <span className="font-medium text-amber-600">{formatCurrency(rapport.total_remises)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Annulations</span>
+              <span className="font-medium text-destructive">{rapport.nb_annulations}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-center py-8 text-muted-foreground">Aucune donnée de session</p>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
