@@ -1154,11 +1154,12 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
         params![vente_id],
     ).map_err(|e| e.to_string())?;
 
+    let net_amount = (montant_total - montant_remise).abs();
     if mode_paiement == "credit" && (target_type == "facture" || target_type == "bl") {
         if let Some(cid) = client_id {
             tx.execute(
                 "UPDATE clients SET credit_actuel = credit_actuel + ?1 WHERE id = ?2",
-                params![new_montant_total.abs(), cid],
+                params![net_amount, cid],
             ).map_err(|e| e.to_string())?;
         }
     }
@@ -1167,7 +1168,7 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
             if mode_paiement == "credit" {
                 tx.execute(
                     "UPDATE clients SET credit_actuel = credit_actuel - ?1 WHERE id = ?2",
-                    params![montant_total.abs(), cid],
+                    params![net_amount, cid],
                 ).map_err(|e| e.to_string())?;
             }
         }
