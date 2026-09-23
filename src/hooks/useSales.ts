@@ -1,31 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { Sale, SaleLine } from "@/types"
 
-export interface Sale {
-  id: number
-  date: string
-  client_nom?: string
-  caissier_nom: string
-  montant_total: number
-  montant_remise: number
-  net_paye: number
-  mode_paiement: string
-  statut: string
-  numero_facture?: string
-  dtype: string
-  articles?: SaleLine[]
-}
-
-export interface SaleLine {
-  id: number
-  article_id: number
-  designation: string
-  quantite: number
-  prix_unitaire: number
-  tva: number
-  total_ligne: number
-}
+export type { Sale, SaleLine }
 
 export interface CreateSaleInput {
   clientId: number | null

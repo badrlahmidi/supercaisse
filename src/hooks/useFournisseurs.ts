@@ -1,15 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { Fournisseur } from "@/types"
 
-export interface Fournisseur {
-  id: number
-  nom: string
-  contact?: string
-  telephone?: string
-  email?: string
-  adresse?: string
-}
+export type { Fournisseur }
 
 export function useFournisseursList() {
   return useQuery({

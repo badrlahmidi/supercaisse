@@ -12,12 +12,7 @@ import { z } from "zod"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, SearchX } from "lucide-react"
-
-interface Category {
-  id: number
-  nom: string
-  description: string | null
-}
+import type { Category } from "@/types"
 
 const categorySchema = z.object({
   nom: z.string().min(1, "Nom requis"),

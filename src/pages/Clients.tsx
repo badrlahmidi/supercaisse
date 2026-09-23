@@ -17,20 +17,7 @@ import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
-
-interface Client {
-  id: number
-  code: string | null
-  nom: string
-  adresse: string | null
-  telephone: string | null
-  email: string | null
-  ice: string | null
-  credit_plafond: number | null
-  credit_actuel: number | null
-  points_fidelite: number | null
-  segment: string | null
-}
+import type { Client } from "@/types"
 
 interface MouvementFidelite {
   id: number

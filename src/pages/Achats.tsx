@@ -16,6 +16,7 @@ import { Plus, Search, Loader2, Trash2, SearchX } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
+import type { Article, Fournisseur } from "@/types"
 
 interface Achat {
   id: number
@@ -27,17 +28,6 @@ interface Achat {
   statut_livraison: string
   statut_paiement: string
   fournisseur_nom: string | null
-}
-
-interface Fournisseur {
-  id: number
-  nom: string
-}
-
-interface Article {
-  id: number
-  designation: string
-  prix_achat: number
 }
 
 const achatSchema = z.object({

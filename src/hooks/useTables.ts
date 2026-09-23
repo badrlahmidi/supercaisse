@@ -1,12 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
+import type { TableResto } from "@/types"
 
-export interface TableResto {
-  id: number
-  nom: string
-  statut: "libre" | "occupee"
-  ticket_id?: string | null
-}
+export type { TableResto }
 
 export function useTables() {
   return useQuery({

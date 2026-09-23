@@ -1,110 +1,21 @@
-interface User {
-  id: number
-  login: string
-  nom: string
-  role: "admin" | "manager" | "caissier"
-}
+import type { User, Article, ArticleComposant, ArticleLot, ArticleVariante, Client, Fournisseur, Category, Settings, SessionCaisse, TableResto, Magasin } from "@/types"
 
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  image_url?: string | null
-  prix_achat: number
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  fournisseur_id: number | null
-  actif: boolean
-  categorie_nom?: string
-  fournisseur_nom?: string
-  suivi_lot?: boolean
-  prix_grossiste?: number | null
-  est_kit?: boolean
-  a_variantes?: boolean
-}
-
-interface ArticleComposant {
-  id: number
-  composant_id: number
-  designation: string
-  stock: number
-  quantite: number
-}
-
-interface ArticleLot {
-  id: number
-  numero_lot: string | null
-  date_peremption: string | null
-  quantite: number
-  date_reception: string
-}
-
-interface Client {
-  id: number
-  code: string | null
-  nom: string
-  adresse: string | null
-  telephone: string | null
-  email: string | null
-  credit_plafond: number
-  credit_actuel: number
-  segment: string | null
-}
-
-interface Fournisseur {
+interface MockCaisse {
   id: number
   nom: string
-  adresse: string | null
-  telephone: string | null
-  ice: string | null
-  email: string | null
-}
-
-interface Category {
-  id: number
-  nom: string
-  description: string | null
-}
-
-interface Settings {
-  shop_name: string
-  shop_address: string | null
-  shop_phone: string | null
-  shop_email: string | null
-  ice: string | null
-  if_number: string | null
-  rc_number: string | null
-  patente: string | null
-  default_tva: number
-  receipt_footer: string | null
-  currency: string
-  printer_name: string | null
-  business_type: string
-  fidelite_actif: string
-  fidelite_dh_pour_1_point: string
-  fidelite_valeur_1_point: string
-  idle_timeout: string
-  logo_base64: string | null
-  receipt_header: string | null
-  doc_primary_color: string | null
-}
-
-interface SessionCaisse {
-  id: number
-  caissier_id: number
-  date_ouverture: string
-  fond_initial: number
+  utilisateur_id: number | null
   statut: string
-}
-
-interface TableResto {
-  id: number
-  nom: string
-  statut: "libre" | "occupee"
-  ticket_id: string | null
+  ouverture_date: string | null
+  fermeture_date: string | null
+  fond_initial: number
+  recettes_especes: number
+  recettes_cb: number
+  recettes_cheque: number
+  recettes_virement: number
+  depenses: number
+  ecart: number
+  note: string | null
+  utilisateur_nom: string | null
 }
 
 const mockUsers: User[] = [
@@ -125,30 +36,16 @@ const mockArticles: Article[] = [
 
 const mockLots: Record<number, ArticleLot[]> = {}
 
-interface ArticleVariante {
-  id: number
-  taille: string | null
-  couleur: string | null
-  code_barre: string | null
-  stock_dedie: number
-}
-
 const mockVariantes: Record<number, ArticleVariante[]> = {}
 const mockComposants: Record<number, ArticleComposant[]> = {}
 
 const mockClients: Client[] = [
-  { id: 1, code: "CL001", nom: "Client de passage", adresse: null, telephone: null, email: null, credit_plafond: 0, credit_actuel: 0 },
+  { id: 1, code: "CL001", nom: "Client de passage", adresse: null, telephone: null, email: null, ice: null, credit_plafond: 0, credit_actuel: 0, points_fidelite: 0, segment: null },
 ]
 
 const mockFournisseurs: Fournisseur[] = [
   { id: 1, nom: "Fournisseur Test", adresse: null, telephone: null, ice: null, email: null },
 ]
-
-interface Magasin {
-  id: number
-  nom: string
-  adresse: string | null
-}
 
 const mockMagasins: Magasin[] = [
   { id: 1, nom: "Magasin Principal", adresse: "123 Rue Mohammed V, Casablanca" },
@@ -182,24 +79,6 @@ const mockSettings: Settings = {
   doc_primary_color: null,
 }
 
-interface MockCaisse {
-  id: number
-  nom: string
-  utilisateur_id: number | null
-  statut: string
-  ouverture_date: string | null
-  fermeture_date: string | null
-  fond_initial: number
-  recettes_especes: number
-  recettes_cb: number
-  recettes_cheque: number
-  recettes_virement: number
-  depenses: number
-  ecart: number
-  note: string | null
-  utilisateur_nom: string | null
-}
-
 const mockCaisses: MockCaisse[] = []
 
 let nextId = 100
@@ -211,25 +90,21 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     return user || null
   },
 
-  // Categories
   get_categories: () => mockCategories,
   add_category: ({ nom, description }) => { nextId++; mockCategories.push({ id: nextId, nom: nom as string, description: description as string | null }); return nextId },
   update_category: ({ id, nom, description }) => { const c = mockCategories.find(c => c.id === id); if (c) { c.nom = nom as string; c.description = description as string | null } },
   delete_category: ({ id }) => { const idx = mockCategories.findIndex(c => c.id === id); if (idx >= 0) mockCategories.splice(idx, 1) },
 
-  // Fournisseurs
   get_fournisseurs: () => mockFournisseurs,
   add_fournisseur: (args) => { nextId++; mockFournisseurs.push({ id: nextId, ...args as Omit<Fournisseur, 'id'> }); return nextId },
   update_fournisseur: ({ id, ...rest }) => { const f = mockFournisseurs.find(f => f.id === id); if (f) Object.assign(f, rest) },
   delete_fournisseur: ({ id }) => { const idx = mockFournisseurs.findIndex(f => f.id === id); if (idx >= 0) mockFournisseurs.splice(idx, 1) },
 
-  // Clients
   get_clients: () => mockClients,
   add_client: (args) => { nextId++; mockClients.push({ id: nextId, ...args as Omit<Client, 'id'> }); return nextId },
   update_client: ({ id, ...rest }) => { const c = mockClients.find(c => c.id === id); if (c) Object.assign(c, rest) },
   delete_client: ({ id }) => { const idx = mockClients.findIndex(c => c.id === id); if (idx >= 0) mockClients.splice(idx, 1) },
 
-  // Articles
   get_articles: ({ recherche }) => {
     if (recherche) {
       const q = String(recherche).toLowerCase()
@@ -242,7 +117,6 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   delete_article: ({ id }) => { const idx = mockArticles.findIndex(a => a.id === id); if (idx >= 0) mockArticles.splice(idx, 1) },
   update_article_stock: ({ article_id, quantite }) => { const a = mockArticles.find(a => a.id === article_id); if (a) a.stock += quantite as number },
 
-  // Lots / péremption
   add_article_lot: ({ article_id, numero_lot, date_peremption, quantite }) => {
     nextId++
     const lot: ArticleLot = { id: nextId, numero_lot: (numero_lot as string) || null, date_peremption: (date_peremption as string) || null, quantite: quantite as number, date_reception: new Date().toISOString() }
@@ -260,7 +134,6 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     }
   },
 
-  // Variantes
   add_article_variante: ({ article_id, taille, couleur, code_barre, stock_initial }) => {
     nextId++
     const v: ArticleVariante = { id: nextId, taille: (taille as string) || null, couleur: (couleur as string) || null, code_barre: (code_barre as string) || null, stock_dedie: stock_initial as number }
@@ -287,7 +160,6 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
   find_variante_by_barcode: () => null,
 
-  // Produits composés (kits)
   add_article_composant: ({ article_id, composant_id, quantite }) => {
     nextId++
     const composant = mockArticles.find((a) => a.id === composant_id)
@@ -308,21 +180,17 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     }
   },
 
-  // Ventes
   create_vente: () => { nextId++; return { id: nextId, numero_facture: `FA-2026-${String(nextId).padStart(5, "0")}` } },
   get_ventes: () => [],
   get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin", dtype: "facture", source_vente_id: null, source_dtype: null, source_numero: null }, lignes: [] }),
   convert_document: () => { nextId++; return nextId },
 
-  // Achats
   create_achat: () => { nextId++; return nextId },
   get_achats: () => [],
 
-  // Paiements
   get_paiements: () => [],
   add_paiement: () => { nextId++; return nextId },
 
-  // Sessions caisse
   get_current_session: ({ caissierId }) =>
     mockCurrentSession?.caissier_id === caissierId && mockCurrentSession.statut === "ouverte" ? mockCurrentSession : null,
   open_session: ({ caissierId, fondInitial }) => {
@@ -341,7 +209,6 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     return true
   },
 
-  // Stats
   get_stats: () => ({
     total_ventes_30j: 0,
     nb_articles: mockArticles.length,
@@ -350,24 +217,19 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     nb_clients: mockClients.length,
   }),
 
-  // Stock alerts
   get_articles_stock_alerte: () => [] as { id: number; designation: string; stock: number; stock_alerte: number; categorie_nom: string | null; fournisseur_nom: string | null; fournisseur_id: number | null; prix_achat: number; suggestion_qte: number }[],
 
-  // Journal
   get_journal_caisse: () => [],
   add_journal_caisse: () => { nextId++; return nextId },
 
-  // Utilisateurs
   get_utilisateurs: () => [...mockUsers],
   add_utilisateur: (args) => { nextId++; mockUsers.push({ id: nextId, ...args as { login: string; nom: string; role: "admin" | "manager" | "caissier" } }); return nextId },
   update_utilisateur: ({ id, ...rest }) => { const u = mockUsers.find(u => u.id === id); if (u) Object.assign(u, rest) },
   delete_utilisateur: ({ id }) => { const idx = mockUsers.findIndex(u => u.id === id); if (idx >= 0) mockUsers.splice(idx, 1) },
 
-  // Settings
   get_settings: () => ({ ...mockSettings }),
   update_settings: (args) => { Object.assign(mockSettings, args) },
 
-  // Fidélité
   get_mouvements_fidelite: () => [],
   get_rapport_x: () => ({ session_id: 1, date_ouverture: new Date().toISOString(), fond_initial: 0, nb_ventes: 0, ca_total: 0, total_remises: 0, nb_annulations: 0, nb_articles_vendus: 0, par_mode: [] }),
   get_releve_client: () => ({ client_id: 1, nom: "Client", credit_actuel: 0, credit_plafond: 0, ventes: [], paiements: [] }),
@@ -381,11 +243,9 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   update_inventaire_ligne: () => {},
   valider_inventaire: () => {},
 
-  // Permissions
   get_permissions: () => [],
   update_permission: () => {},
 
-  // Multi-caisse
   get_caisses: () => mockCaisses,
   open_caisse: ({ nom, fond_initial, utilisateur_id }) => {
     nextId++
@@ -422,13 +282,10 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     mois: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
   }),
 
-  // Stock movements
   get_mouvements_stock: () => [],
 
-  // Comparaison prix
   compare_fournisseur_prices: () => [],
 
-  // Magasins
   get_magasins: () => mockMagasins,
   add_magasin: ({ nom, adresse }) => { nextId++; mockMagasins.push({ id: nextId, nom: nom as string, adresse: (adresse as string) || null }); return nextId },
   update_magasin: ({ id, nom, adresse }) => { const m = mockMagasins.find(m => m.id === id); if (m) { m.nom = nom as string; m.adresse = (adresse as string) || null } },
@@ -436,7 +293,6 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_transferts: () => [],
   get_stock_par_magasin: () => [],
 
-  // Restaurant tables
   get_tables: () => mockTables,
   update_table_status: ({ id, statut, ticket_id }) => {
     const table = mockTables.find((t) => t.id === id)
@@ -446,20 +302,16 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     }
   },
 
-  // Import
   import_articles_csv: ({ csvContent }) => {
     const lines = (csvContent as string).split("\n").filter(l => l.trim())
     return `Import terminé. ${Math.max(0, lines.length - 1)} articles importés.`
   },
 
-  // Print
   print_receipt: () => true,
   print_ticket: () => true,
 
-  // Documents
   save_document_pdf: ({ filename }) => `documents/${filename || "document"}.pdf`,
 
-  // Backup
   backup_database: () => "backups/supercaisse_20240101_120000.db",
   export_database: () => "exports/supercaisse_export_20240101_120000.db",
   import_database: () => true,

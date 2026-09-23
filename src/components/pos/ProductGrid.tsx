@@ -1,19 +1,7 @@
 import { Badge } from "@/ui/Badge"
 import { Package, Tags } from "lucide-react"
 import { cn, formatCurrency } from "@/lib/utils"
-
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  categorie_nom?: string
-  a_variantes?: boolean
-}
+import type { Article } from "@/types"
 
 interface ProductGridProps {
   articles: Article[]

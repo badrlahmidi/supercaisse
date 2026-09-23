@@ -24,14 +24,7 @@ import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { useDebounce } from "@/hooks/useDebounce"
-
-interface ArticleVariante {
-  id: number
-  taille: string | null
-  couleur: string | null
-  code_barre: string | null
-  stock_dedie: number
-}
+import type { Article, ArticleVariante, ArticleComposant, Category, Fournisseur } from "@/types"
 
 const varianteSchema = z.object({
   taille: z.string().optional(),
@@ -41,47 +34,11 @@ const varianteSchema = z.object({
 })
 type VarianteForm = z.infer<typeof varianteSchema>
 
-interface ArticleComposant {
-  id: number
-  composant_id: number
-  designation: string
-  stock: number
-  quantite: number
-}
-
 const composantSchema = z.object({
   composant_id: z.number().min(1, "Article requis"),
   quantite: z.number().min(0.01, "Quantité requise"),
 })
 type ComposantForm = z.infer<typeof composantSchema>
-
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  prix_achat: number
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  categorie_nom?: string
-  fournisseur_nom?: string
-  actif: boolean
-  suivi_lot?: boolean
-  prix_grossiste?: number | null
-  est_kit?: boolean
-}
-
-interface Category {
-  id: number
-  nom: string
-}
-
-interface Fournisseur {
-  id: number
-  nom: string
-}
 
 const articleSchema = z.object({
   code_barre: z.string().optional().nullable(),

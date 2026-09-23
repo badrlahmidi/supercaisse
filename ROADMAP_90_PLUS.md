@@ -336,9 +336,12 @@ mod tests {
 
 ---
 
-## Chantier 3 — Unifier les types TypeScript (+2 Code Quality)
+## ✅ Chantier 3 — Unifier les types TypeScript (+2 Code Quality)
 
-**Impact estimé : Code Quality 19→21**
+**Impact estimé : Code Quality 19→21** — **TERMINÉ**
+
+> 10 interfaces canoniques dans src/types/index.ts. 15 fichiers mis à jour (pages, hooks, composants).
+> Zéro duplication d'interfaces restante. Validé : tsc, vite build, vitest 72/72.
 
 ### Problème
 
