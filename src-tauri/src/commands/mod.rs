@@ -80,3 +80,47 @@ pub use tables::*;
 pub use utilisateurs::*;
 pub use variantes::*;
 pub use ventes::*;
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+    use super::*;
+
+    fn setup_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("
+            CREATE TABLE magasins (id INTEGER PRIMARY KEY, nom TEXT);
+            CREATE TABLE articles (id INTEGER PRIMARY KEY, stock REAL DEFAULT 0);
+            CREATE TABLE article_stocks (
+                id INTEGER PRIMARY KEY,
+                article_id INTEGER, magasin_id INTEGER, quantite REAL DEFAULT 0,
+                UNIQUE(article_id, magasin_id)
+            );
+            INSERT INTO magasins (id, nom) VALUES (1, 'Principal');
+            INSERT INTO articles (id, stock) VALUES (1, 0);
+        ").unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_default_magasin_id() {
+        let conn = setup_test_db();
+        assert_eq!(default_magasin_id(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_adjust_article_stock() {
+        let conn = setup_test_db();
+        adjust_article_stock(&conn, 1, 1, 10.0).unwrap();
+        let stock: f64 = conn.query_row(
+            "SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(stock, 10.0);
+
+        adjust_article_stock(&conn, 1, 1, -3.0).unwrap();
+        let stock: f64 = conn.query_row(
+            "SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(stock, 7.0);
+    }
+}

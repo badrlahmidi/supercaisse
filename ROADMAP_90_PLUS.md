@@ -44,9 +44,12 @@ npm test -- --run
 
 ---
 
-## Chantier 1 — Refactorer commands.rs en modules (+3 Code Quality)
+## ✅ Chantier 1 — Refactorer commands.rs en modules (+3 Code Quality)
 
-**Impact estimé : Code Quality 16→19**
+**Impact estimé : Code Quality 16→19** — **TERMINÉ** (commit 0ab321e)
+
+> 3050 lignes → 28 modules domaine + mod.rs. 98 commandes préservées.
+> Validé : cargo check, tsc, vite build, vitest 72/72.
 
 ### Problème
 
@@ -239,9 +242,11 @@ npm test -- --run
 
 ---
 
-## Chantier 2 — Activer CSP + cargo test en CI (+3 Production Ready)
+## ✅ Chantier 2 — Activer CSP + cargo test en CI (+3 Production Ready)
 
-**Impact estimé : Production Ready 18→21**
+**Impact estimé : Production Ready 18→21** — **TERMINÉ**
+
+> CSP activée dans tauri.conf.json. cargo test ajouté au CI. 2 tests Rust créés (default_magasin_id, adjust_article_stock).
 
 ### 2a. Activer CSP dans tauri.conf.json
 
