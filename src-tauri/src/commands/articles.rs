@@ -152,8 +152,9 @@ pub fn update_article_stock(db: State<DbState>, article_id: i64, quantite: f64) 
 
 #[tauri::command]
 pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<String, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let magasin_id = default_magasin_id(&conn)?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&tx)?;
     let mut imported = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
@@ -178,7 +179,7 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
             Some(cols[7].trim().trim_matches('"').to_string())
         } else { None };
 
-        match conn.execute(
+        match tx.execute(
             "INSERT INTO articles (code_barre, designation, prix_achat, prix_vente, tva, stock, stock_alerte, image_url)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![code_barre, designation, prix_achat, prix_vente, tva, stock, stock_alerte, image_url],
@@ -186,8 +187,8 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
             Ok(_) => {
                 imported += 1;
                 if stock != 0.0 {
-                    let article_id = conn.last_insert_rowid();
-                    if let Err(e) = adjust_article_stock(&conn, article_id, magasin_id, stock) {
+                    let article_id = tx.last_insert_rowid();
+                    if let Err(e) = adjust_article_stock(&tx, article_id, magasin_id, stock) {
                         errors.push(format!("Ligne {} (stock): {}", i+1, e));
                     }
                 }
@@ -195,6 +196,8 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
             Err(e) => errors.push(format!("Ligne {}: {}", i+1, e)),
         }
     }
+
+    tx.commit().map_err(|e| e.to_string())?;
 
     let mut report = format!("Import terminé. {} articles importés.", imported);
     if !errors.is_empty() {

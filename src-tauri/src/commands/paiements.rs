@@ -2,6 +2,8 @@ use crate::db::*;
 use rusqlite::params;
 use tauri::State;
 
+use super::log_audit;
+
 #[tauri::command]
 pub fn get_paiements(db: State<DbState>, client_id: Option<i64>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -36,12 +38,16 @@ pub fn get_paiements(db: State<DbState>, client_id: Option<i64>) -> Result<Vec<s
 
 #[tauri::command]
 pub fn add_paiement(db: State<DbState>, client_id: i64, montant: f64, ptype: String, reference: Option<String>) -> Result<i64, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
         "INSERT INTO paiements (client_id, montant, type, reference) VALUES (?1, ?2, ?3, ?4)",
         params![client_id, montant, ptype, reference],
     ).map_err(|e| e.to_string())?;
-    conn.execute("UPDATE clients SET credit_actuel = credit_actuel - ?1 WHERE id = ?2",
+    let paiement_id = tx.last_insert_rowid();
+    tx.execute("UPDATE clients SET credit_actuel = credit_actuel - ?1 WHERE id = ?2",
         params![montant, client_id]).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    log_audit(&tx, None, "ajouter_paiement", &format!("Paiement #{} client #{}: {} DH", paiement_id, client_id, montant), Some("paiement"), Some(paiement_id));
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(paiement_id)
 }

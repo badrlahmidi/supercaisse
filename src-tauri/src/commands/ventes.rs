@@ -179,22 +179,21 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         }
     }
 
-    tx.commit().map_err(|e| e.to_string())?;
-
     if let Some(ref split_list) = splits {
         if split_list.len() > 1 {
-            let conn2 = db.conn.lock().map_err(|e| e.to_string())?;
             for s in split_list {
                 let mode = s["mode"].as_str().unwrap_or("inconnu").to_string();
                 let montant = s["montant"].as_f64().unwrap_or(0.0);
                 let desc = format!("Split vente #{}: {}", vente_id, mode);
-                let _ = conn2.execute(
+                tx.execute(
                     "INSERT INTO journal_caisse (utilisateur_id, jtype, montant, description) VALUES (?1, 'encaissement', ?2, ?3)",
                     params![caissier_id, montant, desc],
-                );
+                ).map_err(|e| e.to_string())?;
             }
         }
     }
+
+    tx.commit().map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "id": vente_id, "numero_facture": numero_facture }))
 }

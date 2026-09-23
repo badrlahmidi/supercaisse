@@ -460,9 +460,13 @@ npx vite build     # le build de prod doit passer
 
 ---
 
-## Chantier 4 — Transactions manquantes (+2 Code Quality, +1 Production Ready)
+## ✅ Chantier 4 — Transactions manquantes (+2 Code Quality, +1 Production Ready)
 
-**Impact estimé : Code Quality 21→23, Production Ready 21→22**
+**Impact estimé : Code Quality 21→23, Production Ready 21→22** — **TERMINÉ**
+
+> 4a: add_paiement wrappé dans transaction + audit log.
+> 4b: Split payment déplacé avant tx.commit() (plus de second lock).
+> 4c: import_articles_csv wrappé dans transaction (rollback atomique).
 
 ### 4a. add_paiement — wrapper dans une transaction
 
