@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
@@ -135,7 +136,7 @@ function splitTopLevel(input: string, sep: string, angleBrackets = true): string
 function parseRustCommands(): Map<string, RustCommand> {
   const dir = join(ROOT, "src-tauri/src/commands")
   const commands = new Map<string, RustCommand>()
-  for (const file of readdirSync(dir).filter((f) => f.endsWith(".rs"))) {
+  for (const file of readdirSync(dir).filter((f: string) => f.endsWith(".rs"))) {
     const src = readFileSync(join(dir, file), "utf8")
     const re = /#\[tauri::command\]\s*pub\s+(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g
     for (const m of src.matchAll(re)) {
@@ -156,7 +157,7 @@ function parseRustCommands(): Map<string, RustCommand> {
 }
 
 function listSourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
+  return readdirSync(dir).flatMap((entry: string) => {
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) return listSourceFiles(full)
     if (!/\.(ts|tsx)$/.test(entry) || /\.test\.tsx?$/.test(entry) || entry.startsWith("tauri.")) return []

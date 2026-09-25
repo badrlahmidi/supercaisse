@@ -17,9 +17,12 @@ export interface DashboardStats {
 export interface RecentSale {
   id: number
   date: string
-  client_nom?: string
-  net_paye: number
+  client_nom?: string | null
+  montant_total: number
+  montant_remise: number
   mode_paiement: string
+  statut: string
+  dtype?: string | null
 }
 
 export function useDashboardStats() {

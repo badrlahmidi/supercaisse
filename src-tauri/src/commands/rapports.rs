@@ -16,17 +16,17 @@ pub fn get_rapport_x(db: State<DbState>, auth: State<AuthState>, token: String, 
     ).map_err(|_| "Session introuvable".to_string())?;
 
     let nb_ventes: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        concat!("SELECT COUNT(*) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
     ).unwrap_or(0);
 
     let ca_total: f64 = conn.query_row(
-        "SELECT COALESCE(SUM(montant_total - montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        concat!("SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
     ).unwrap_or(0.0);
 
     let total_remises: f64 = conn.query_row(
-        "SELECT COALESCE(SUM(montant_remise), 0) FROM ventes WHERE session_id = ?1 AND statut != 'annulee'",
+        concat!("SELECT COALESCE(SUM(v.montant_remise), 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
     ).unwrap_or(0.0);
 
@@ -36,7 +36,7 @@ pub fn get_rapport_x(db: State<DbState>, auth: State<AuthState>, token: String, 
     ).unwrap_or(0);
 
     let nb_articles_vendus: f64 = conn.query_row(
-        "SELECT COALESCE(SUM(va.quantite), 0) FROM vente_articles va JOIN ventes v ON v.id = va.vente_id WHERE v.session_id = ?1 AND v.statut != 'annulee'",
+        concat!("SELECT COALESCE(SUM(", quantite_signee!("va"), "), 0) FROM vente_articles va JOIN ventes v ON v.id = va.vente_id WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
     ).unwrap_or(0.0);
 
@@ -85,7 +85,7 @@ pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: S
         "SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0),
                 COALESCE(SUM(v.montant_remise), 0),
                 COUNT(*)
-         FROM ventes v WHERE v.statut != 'annulee' {}", wc
+         FROM ventes v WHERE {} {}", filtre_ca!(), wc
     );
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = wp.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let (ca_total, total_remises, nb_ventes): (f64, f64, i64) = conn.query_row(
@@ -100,7 +100,7 @@ pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: S
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          JOIN articles a ON a.id = va.article_id
-         WHERE v.statut != 'annulee' {}", wc2
+         WHERE {} {}", filtre_ca!(), wc2
     );
     let params_ref2: Vec<&dyn rusqlite::types::ToSql> = wp2.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let marge_brute: f64 = conn.query_row(&marge_sql, params_ref2.as_slice(), |r| r.get(0)).unwrap_or(0.0);
@@ -110,19 +110,19 @@ pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: S
         "SELECT COALESCE(SUM(COALESCE(va.montant_tva, va.quantite * va.prix_unitaire * va.tva / 100.0)), 0)
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
-         WHERE v.statut != 'annulee' {}", wc3
+         WHERE {} {}", filtre_ca!(), wc3
     );
     let params_ref3: Vec<&dyn rusqlite::types::ToSql> = wp3.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let tva_collectee: f64 = conn.query_row(&tva_sql, params_ref3.as_slice(), |r| r.get(0)).unwrap_or(0.0);
 
     let (wc4, wp4) = date_filter("v.date");
     let top_sql = format!(
-        "SELECT a.designation, SUM(va.quantite) as qty, SUM(va.total_ligne) as total
+        "SELECT a.designation, SUM(CASE WHEN v.dtype = 'avoir' THEN -va.quantite ELSE va.quantite END) as qty, SUM(va.total_ligne) as total
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          JOIN articles a ON a.id = va.article_id
-         WHERE v.statut != 'annulee' {}
-         GROUP BY va.article_id ORDER BY qty DESC LIMIT 10", wc4
+         WHERE {} {}
+         GROUP BY va.article_id ORDER BY qty DESC LIMIT 10", filtre_ca!(), wc4
     );
     let params_ref4: Vec<&dyn rusqlite::types::ToSql> = wp4.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let mut stmt = conn.prepare(&top_sql).map_err(|e| e.to_string())?;
@@ -136,12 +136,12 @@ pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: S
 
     let (wc5, wp5) = date_filter("v.date");
     let rotation_sql = format!(
-        "SELECT a.id, a.designation, a.stock, COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN va.quantite ELSE 0 END), 0) as vendu
+        "SELECT a.id, a.designation, a.stock, COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN (CASE WHEN v.dtype = 'avoir' THEN -va.quantite ELSE va.quantite END) ELSE 0 END), 0) as vendu
          FROM articles a
          LEFT JOIN vente_articles va ON va.article_id = a.id
-         LEFT JOIN ventes v ON v.id = va.vente_id AND v.statut != 'annulee' AND v.dtype IN ('facture', 'bl') {}
+         LEFT JOIN ventes v ON v.id = va.vente_id AND {} {}
          WHERE a.actif = 1
-         GROUP BY a.id ORDER BY vendu DESC LIMIT 20", wc5
+         GROUP BY a.id ORDER BY vendu DESC LIMIT 20", filtre_ca!(), wc5
     );
     let params_ref5: Vec<&dyn rusqlite::types::ToSql> = wp5.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let mut stmt2 = conn.prepare(&rotation_sql).map_err(|e| e.to_string())?;
@@ -157,8 +157,8 @@ pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: S
     let (wc6, wp6) = date_filter("v.date");
     let daily_sql = format!(
         "SELECT date(v.date) as jour, COALESCE(SUM(v.montant_total - v.montant_remise), 0) as ca, COUNT(*) as nb
-         FROM ventes v WHERE v.statut != 'annulee' {}
-         GROUP BY jour ORDER BY jour", wc6
+         FROM ventes v WHERE {} {}
+         GROUP BY jour ORDER BY jour", filtre_ca!(), wc6
     );
     let params_ref6: Vec<&dyn rusqlite::types::ToSql> = wp6.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let mut stmt3 = conn.prepare(&daily_sql).map_err(|e| e.to_string())?;
@@ -173,8 +173,8 @@ pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: S
     let (wc7, wp7) = date_filter("v.date");
     let mode_sql = format!(
         "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0) as total, COUNT(*) as nb
-         FROM ventes v WHERE v.statut != 'annulee' {}
-         GROUP BY mode_paiement", wc7
+         FROM ventes v WHERE {} {}
+         GROUP BY mode_paiement", filtre_ca!(), wc7
     );
     let params_ref7: Vec<&dyn rusqlite::types::ToSql> = wp7.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     let mut stmt4 = conn.prepare(&mode_sql).map_err(|e| e.to_string())?;

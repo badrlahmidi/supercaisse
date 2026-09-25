@@ -426,6 +426,13 @@ adjust_article_stock(&tx, *article_id, magasin_id, *ecart, true)?;
 
 ### [MAJEUR] M-6 — Rapports : devis et documents convertis comptés dans le CA
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+> - Filtre unique `filtre_ca!()` : factures et avoirs, et BL non convertis en facture, hors documents annulés. Les devis et commandes sont exclus, et un BL converti n'est plus compté deux fois. Les quantités des avoirs sont soustraites (`quantite_signee!`).
+> - Le filtre est appliqué au rapport X, au rapport détaillé, au tableau de bord et à l'écran Caisses/Trésorerie.
+> - Caisses/Trésorerie : les recettes viennent des paiements enregistrés (les paiements d'un BL sont rattachés à sa facture, `carte` compté avec `cb`), sinon du mode de paiement du document. Les remboursements d'avoirs sont déduits.
+> - Même règle côté frontend (`compteDansCA`) pour le total de l'écran Ventes et le graphique du tableau de bord.
+> - Couvert par 2 tests Rust et 2 tests Vitest.
+
 **Fichier** : `src-tauri/src/commands/rapports.rs:15-49,76-180`, `stats.rs:8-24`
 **Risque** :
 - Le filtre `statut != 'annulee'` inclut `dtype IN ('devis','commande')`.
@@ -787,6 +794,8 @@ Côté UI, utiliser `@tauri-apps/plugin-dialog` pour choisir le fichier, avec un
 - Faire valider le modèle de facture par l'expert-comptable du client, et suivre le calendrier de la facturation électronique DGI (page `VeilleDGI`).
 
 ### [MAJEUR] P-4 — CI insuffisante pour une release
+
+> **Constat ajouté pendant les corrections :** l'étape `npx tsc --noEmit` de la CI ne vérifie aucun fichier, car le `tsconfig.json` racine a `"files": []` et seulement des références. `npx tsc --noEmit -p tsconfig.app.json` remonte 56 erreurs de typage préexistantes. Il faut les corriger, puis passer la CI à `tsc -b` (ou `-p tsconfig.app.json`).
 
 **Fichier** : `.github/workflows/ci.yml`
 **Risque** : aucun `cargo clippy`, `cargo fmt --check`, test d'intégration IPC ni build `tauri build`. Les 2 tests Rust existants ne couvrent ni `create_vente`, ni la numérotation, ni la clôture de session. Tous les défauts critiques ci-dessus passent la CI au vert.

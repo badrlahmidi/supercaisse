@@ -1,3 +1,15 @@
+macro_rules! filtre_ca {
+    () => {
+        "(v.statut != 'annulee' AND (COALESCE(v.dtype, 'facture') IN ('facture', 'avoir') OR (v.dtype = 'bl' AND NOT EXISTS (SELECT 1 FROM ventes vf WHERE vf.source_vente_id = v.id AND vf.dtype = 'facture'))))"
+    };
+}
+
+macro_rules! quantite_signee {
+    ($alias:literal) => {
+        concat!("(CASE WHEN v.dtype = 'avoir' THEN -", $alias, ".quantite ELSE ", $alias, ".quantite END)")
+    };
+}
+
 mod achats;
 mod articles;
 mod audit;

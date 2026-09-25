@@ -25,6 +25,7 @@ import { format } from "date-fns"
 import { fr } from "date-fns/locale"
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
+import { compteDansCA } from "@/lib/ventes"
 
 interface Stats {
   total_ventes_30j: number
@@ -79,7 +80,7 @@ export default function Dashboard() {
       d.setDate(d.getDate() - i)
       const dateStr = d.toISOString().slice(0, 10)
       const total = ventes
-        .filter((v) => v.date && v.date.startsWith(dateStr))
+        .filter((v) => v.date && v.date.startsWith(dateStr) && compteDansCA(v))
         .reduce((s, v) => s + (v.montant_total - v.montant_remise), 0)
       days.push({
         label: format(d, "EEE dd", { locale: fr }),
