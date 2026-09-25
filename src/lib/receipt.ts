@@ -46,6 +46,16 @@ const DOC_TITLES: Record<string, string> = {
   avoir: "AVOIR",
 }
 
+const HTML_ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }
+
+export function esc(value: unknown): string {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
+}
+
+export function logoValide(logo: string | null | undefined): logo is string {
+  return !!logo && /^[A-Za-z0-9+/]+={0,2}$/.test(logo.replace(/\s/g, ""))
+}
+
 export function ventilationTva(data: Pick<ReceiptData, "items" | "montantTotal" | "netPaye">): Record<number, number> {
   const ratio = data.montantTotal !== 0 ? data.netPaye / data.montantTotal : 1
   const acc: Record<number, number> = {}
@@ -60,8 +70,8 @@ export function ventilationTva(data: Pick<ReceiptData, "items" | "montantTotal" 
 export function generateReceiptHTML(data: ReceiptData): string {
   const itemsRows = data.items.map((item) => `
     <tr>
-      <td style="padding:2px 0">${item.designation}${item.remise_ligne ? ` (-${item.remise_ligne}%)` : ""}</td>
-      <td style="text-align:center;padding:2px 0">${item.quantite}</td>
+      <td style="padding:2px 0">${esc(item.designation)}${item.remise_ligne ? ` (-${esc(item.remise_ligne)}%)` : ""}</td>
+      <td style="text-align:center;padding:2px 0">${esc(item.quantite)}</td>
       <td style="text-align:right;padding:2px 0">${formatCurrency(item.prix_unitaire)}</td>
       <td style="text-align:right;padding:2px 0">${formatCurrency(item.total_ligne)}</td>
     </tr>
@@ -71,14 +81,14 @@ export function generateReceiptHTML(data: ReceiptData): string {
   const tvaBreakdown = ventilationTva(data)
 
   const tvaRows = Object.entries(tvaBreakdown).map(([taux, montant]) => 
-    `<div class="total-line"><span>TVA ${taux}%</span><span>${formatCurrency(montant)}</span></div>`
+    `<div class="total-line"><span>TVA ${esc(taux)}%</span><span>${formatCurrency(montant)}</span></div>`
   ).join("")
 
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Ticket #${data.venteId}</title>
+  <title>Ticket #${esc(data.venteId)}</title>
   <style>
     @page { margin: 0; size: 80mm auto; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -107,24 +117,24 @@ export function generateReceiptHTML(data: ReceiptData): string {
   </style>
 </head>
 <body>
-  ${data.logoBase64 ? `<div class="center" style="margin-bottom:4px"><img src="data:image/png;base64,${data.logoBase64}" style="max-height:40px;max-width:60mm" alt="" /></div>` : ""}
-  <div class="center header">${data.shopName}</div>
+  ${logoValide(data.logoBase64) ? `<div class="center" style="margin-bottom:4px"><img src="data:image/png;base64,${data.logoBase64}" style="max-height:40px;max-width:60mm" alt="" /></div>` : ""}
+  <div class="center header">${esc(data.shopName)}</div>
   <div class="center infos">
-    ${data.shopAddress}<br>
-    ${data.shopPhone}<br>
-    ${data.shopIce ? `ICE: ${data.shopIce}` : ""}
-    ${data.shopIf ? `<br>IF: ${data.shopIf}` : ""}
-    ${data.shopRc ? `<br>RC: ${data.shopRc}` : ""}
-    ${data.shopPatente ? `<br>Patente: ${data.shopPatente}` : ""}
+    ${esc(data.shopAddress)}<br>
+    ${esc(data.shopPhone)}<br>
+    ${data.shopIce ? `ICE: ${esc(data.shopIce)}` : ""}
+    ${data.shopIf ? `<br>IF: ${esc(data.shopIf)}` : ""}
+    ${data.shopRc ? `<br>RC: ${esc(data.shopRc)}` : ""}
+    ${data.shopPatente ? `<br>Patente: ${esc(data.shopPatente)}` : ""}
   </div>
-  ${data.receiptHeader ? `<div class="center infos" style="font-style:italic;margin-top:2px">${data.receiptHeader}</div>` : ""}
+  ${data.receiptHeader ? `<div class="center infos" style="font-style:italic;margin-top:2px">${esc(data.receiptHeader)}</div>` : ""}
   <div class="divider"></div>
   <div class="infos">
-    Facture #${data.venteId}<br>
+    Facture #${esc(data.venteId)}<br>
     ${formatDateTime(data.date)}<br>
-    Caissier: ${data.caissier}<br>
-    Client: ${data.client}
-    ${data.clientIce ? `<br>ICE Client: ${data.clientIce}` : ""}
+    Caissier: ${esc(data.caissier)}<br>
+    Client: ${esc(data.client)}
+    ${data.clientIce ? `<br>ICE Client: ${esc(data.clientIce)}` : ""}
   </div>
   <div class="divider"></div>
   <table>
@@ -145,14 +155,14 @@ export function generateReceiptHTML(data: ReceiptData): string {
   ${data.montantRemise > 0 ? `<div class="total-line"><span>Remise</span><span>-${formatCurrency(data.montantRemise)}</span></div>` : ""}
   <div class="divider"></div>
   <div class="total-line net"><span>Net à payer</span><span>${formatCurrency(data.netPaye)}</span></div>
-  <div class="total-line"><span>Paiement</span><span>${data.modePaiement}</span></div>
+  <div class="total-line"><span>Paiement</span><span>${esc(data.modePaiement)}</span></div>
   ${data.monnaie > 0 ? `<div class="total-line monnaie"><span>Monnaie rendue</span><span>${formatCurrency(data.monnaie)}</span></div>` : ""}
   ${Object.keys(tvaBreakdown).length > 0 ? `
   <div class="divider"></div>
   <div class="infos" style="text-align:center;font-weight:bold;margin-bottom:2px">Ventilation TVA</div>
   ${tvaRows}
   ` : ""}
-  <div class="center footer">${data.receiptFooter}</div>
+  <div class="center footer">${esc(data.receiptFooter)}</div>
 </body>
 </html>`
 }
@@ -251,12 +261,12 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   const g = parseInt(primaryColor.slice(3, 5), 16)
   const b = parseInt(primaryColor.slice(5, 7), 16)
 
-  if (data.logoBase64) {
+  if (logoValide(data.logoBase64)) {
     try {
       doc.addImage(`data:image/png;base64,${data.logoBase64}`, "PNG", marginX, y - 4, 18, 18)
     } catch { /* skip invalid image */ }
   }
-  const logoOffset = data.logoBase64 ? 22 : 0
+  const logoOffset = logoValide(data.logoBase64) ? 22 : 0
 
   doc.setFont("helvetica", "bold")
   doc.setFontSize(16)
