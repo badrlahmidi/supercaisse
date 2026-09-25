@@ -199,13 +199,13 @@ pub fn compare_fournisseur_prices(
         JOIN achats a ON aa.achat_id = a.id
         JOIN fournisseurs f ON a.fournisseur_id = f.id
         JOIN articles art ON aa.article_id = art.id
-        WHERE a.fournisseur_id IS NOT NULL
+        WHERE a.fournisseur_id IS NOT NULL AND (?1 IS NULL OR aa.article_id = ?1)
         ORDER BY art.designation, f.nom, a.date DESC
     ";
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(rusqlite::params![article_id], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -226,12 +226,6 @@ pub fn compare_fournisseur_prices(
         std::collections::BTreeMap::new();
 
     for (aid, designation, code_barre, fid, fournisseur_nom, prix, date) in all_rows {
-        if let Some(filter_id) = article_id {
-            if aid != filter_id {
-                continue;
-            }
-        }
-
         let entry = articles_map.entry(aid).or_insert_with(|| {
             serde_json::json!({
                 "article_id": aid,

@@ -96,7 +96,28 @@ pub fn get_stats(
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
+    let mut stmt = conn
+        .prepare(concat!(
+            "SELECT date(v.date) AS jour, SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0
+             FROM ventes v
+             WHERE v.date >= date('now', '-6 days', 'localtime') AND ",
+            filtre_ca!(),
+            " GROUP BY jour ORDER BY jour"
+        ))
+        .map_err(|e| e.to_string())?;
+    let ca_7_jours = stmt
+        .query_map([], |r| {
+            Ok(serde_json::json!({
+                "jour": r.get::<_, String>(0)?,
+                "montant": r.get::<_, f64>(1)?
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+
     Ok(serde_json::json!({
+        "ca_7_jours": ca_7_jours,
         "total_ventes_30j": total_ventes_30j,
         "nb_articles": nb_articles,
         "stock_alerte": stock_alerte,

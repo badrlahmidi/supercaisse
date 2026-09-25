@@ -214,6 +214,67 @@ pub struct VenteDetail {
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export)]
+pub struct Page<T> {
+    pub lignes: Vec<T>,
+    #[ts(as = "f64")]
+    pub total: i64,
+    #[ts(as = "f64")]
+    pub page: i64,
+    #[ts(as = "f64")]
+    pub par_page: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ListeVentes {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub page: Page<VenteResume>,
+    pub chiffre_affaires: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct EcritureJournal {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    #[ts(as = "Option<f64>")]
+    pub utilisateur_id: Option<i64>,
+    pub jtype: String,
+    pub montant: f64,
+    pub description: Option<String>,
+    pub user_nom: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ListeJournal {
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub page: Page<EcritureJournal>,
+    pub total_entrees: f64,
+    pub total_sorties: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MouvementStockLigne {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    #[ts(as = "f64")]
+    pub article_id: i64,
+    pub designation: String,
+    pub quantite: f64,
+    pub mtype: String,
+    #[ts(as = "Option<f64>")]
+    pub reference_id: Option<i64>,
+    pub reference_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 pub struct SessionSupervision {
     #[ts(as = "f64")]
     pub id: i64,
@@ -302,7 +363,7 @@ mod tests {
         .is_err());
     }
 
-    const COMMANDES_NON_TYPEES_MAX: usize = 29;
+    const COMMANDES_NON_TYPEES_MAX: usize = 27;
 
     #[test]
     fn test_aucune_nouvelle_commande_non_typee() {

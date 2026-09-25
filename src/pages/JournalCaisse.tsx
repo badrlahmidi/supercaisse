@@ -1,5 +1,8 @@
 import { useState } from "react"
-import { useJournalCaisse } from "@/hooks/useJournalCaisse"
+import { useJournalCaisse, toutLeJournal, type SensJournal } from "@/hooks/useJournalCaisse"
+import { useDebounce } from "@/hooks/useDebounce"
+import Pagination from "@/components/Pagination"
+import { toast } from "sonner"
 import { Card, CardContent } from "@/ui/Card"
 import { Button } from "@/ui/Button"
 import { Input } from "@/ui/Input"
@@ -7,7 +10,7 @@ import { Badge } from "@/ui/Badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/ui/Table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
 import { Label } from "@/ui/Label"
-import { formatCurrency, formatDateTime } from "@/lib/utils"
+import { formatCurrency, formatDateTime, exportCSV } from "@/lib/utils"
 import { Search, Loader2, Wallet, CreditCard, ArrowUp, ArrowDown, Download, SearchX, Lock } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
@@ -17,21 +20,13 @@ import { useCurrentSession, useCloseSession } from "@/hooks/useSessions"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/ui/Dialog"
 import { sommeDH } from "@/lib/totaux"
 
-interface JournalEntry {
-  id: number
-  date: string
-  utilisateur_id: number | null
-  jtype: string
-  montant: number
-  description: string | null
-  user_nom: string | null
-}
-
 export default function JournalCaisse() {
   const [search, setSearch] = useState("")
   const [dateDebut, setDateDebut] = useState<string>(format(subDays(new Date(), 30), "yyyy-MM-dd"))
   const [dateFin, setDateFin] = useState<string>(format(new Date(), "yyyy-MM-dd"))
-  const [filterType, setFilterType] = useState<"all" | "entree" | "sortie">("all")
+  const [filterType, setFilterType] = useState<SensJournal>("all")
+  const [page, setPage] = useState(0)
+  const recherche = useDebounce(search.trim(), 300)
 
   const { user } = useAuth()
   const { data: session } = useCurrentSession(user?.id)
@@ -39,24 +34,26 @@ export default function JournalCaisse() {
   const [showCloseDialog, setShowCloseDialog] = useState(false)
   const [declaredCash, setDeclaredCash] = useState("")
 
-  const { data: entries, isLoading } = useJournalCaisse(dateDebut, dateFin)
+  const filtre = { dateDebut, dateFin, sens: filterType, recherche }
+  const { data: journal, isLoading } = useJournalCaisse(filtre, page)
 
-  const filtered = entries?.filter((e) => {
-    if (filterType === "entree" && e.montant < 0) return false
-    if (filterType === "sortie" && e.montant > 0) return false
-    if (search) {
-      const q = search.toLowerCase()
-      if (!e.description?.toLowerCase().includes(q) &&
-          !e.user_nom?.toLowerCase().includes(q) &&
-          !e.jtype.toLowerCase().includes(q) &&
-          !e.id.toString().includes(q)) return false
+  const filtered = journal?.lignes ?? []
+  const totalEntrees = journal?.total_entrees ?? 0
+  const totalSorties = journal?.total_sorties ?? 0
+  const solde = sommeDH([totalEntrees, -totalSorties])
+
+  const exporter = async () => {
+    try {
+      const lignes = await toutLeJournal(filtre)
+      exportCSV(
+        ["#", "Date", "Type", "Description", "Utilisateur", "Montant"],
+        lignes.map((e) => [String(e.id), formatDateTime(e.date), e.jtype, e.description || "", e.user_nom || "", formatCurrency(e.montant)]),
+        `journal_caisse_${dateDebut}_${dateFin}.csv`,
+      )
+    } catch (e) {
+      toast.error("Export impossible", { description: String(e) })
     }
-    return true
-  }) || []
-
-  const totalEntrees = sommeDH(filtered.filter(e => e.montant > 0).map(e => e.montant))
-  const totalSorties = sommeDH(filtered.filter(e => e.montant < 0).map(e => Math.abs(e.montant)))
-  const solde = totalEntrees - totalSorties
+  }
 
   return (
     <div className="space-y-6">
@@ -68,7 +65,7 @@ export default function JournalCaisse() {
               Clôturer caisse (Z)
             </Button>
           )}
-          <Button variant="outline">
+          <Button variant="outline" onClick={exporter}>
             <Download className="h-4 w-4 mr-2" />
             Exporter
           </Button>
@@ -122,7 +119,7 @@ export default function JournalCaisse() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Nombre opérations</p>
-                <p className="text-2xl font-bold">{filtered.length}</p>
+                <p className="text-2xl font-bold">{journal?.total ?? 0}</p>
               </div>
               <div className="p-3 bg-muted rounded-xl">
                 <CreditCard className="h-6 w-6 text-muted-foreground" />
@@ -140,12 +137,12 @@ export default function JournalCaisse() {
               <Input
                 placeholder="Rechercher (description, utilisateur, type, ID)..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0) }}
                 className="pl-10"
               />
             </div>
             <div className="flex gap-2">
-              <Select value={filterType} onValueChange={(v) => setFilterType(v as "all" | "entree" | "sortie")}>
+              <Select value={filterType} onValueChange={(v) => { setFilterType(v as SensJournal); setPage(0) }}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -158,11 +155,11 @@ export default function JournalCaisse() {
               <div className="flex gap-2">
                 <div className="space-y-1">
                   <Label htmlFor="dateDebut" className="text-xs text-muted-foreground">Du</Label>
-                  <Input id="dateDebut" type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} className="w-[140px] h-9" />
+                  <Input id="dateDebut" type="date" value={dateDebut} onChange={(e) => { setDateDebut(e.target.value); setPage(0) }} className="w-[140px] h-9" />
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="dateFin" className="text-xs text-muted-foreground">Au</Label>
-                  <Input id="dateFin" type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)} className="w-[140px] h-9" />
+                  <Input id="dateFin" type="date" value={dateFin} onChange={(e) => { setDateFin(e.target.value); setPage(0) }} className="w-[140px] h-9" />
                 </div>
               </div>
             </div>
@@ -215,6 +212,9 @@ export default function JournalCaisse() {
               </TableBody>
             </Table>
           </div>
+          {journal && (
+            <Pagination page={journal.page} parPage={journal.par_page} total={journal.total} onPageChange={setPage} />
+          )}
         </CardContent>
       </Card>
 

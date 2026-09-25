@@ -772,6 +772,25 @@ Toutes les commandes de `commands/` sont bien enregistrées dans `lib.rs` (97/97
 
 ### [MINEUR] M-19 — Requêtes sans pagination et troncature silencieuse
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`, sauf `get_articles`.
+>
+> - **Pagination côté serveur :**
+>   - `get_ventes`, `get_journal_caisse` et `get_mouvements_stock` renvoient une page typée (`Page<T>` : `lignes`, `total`, `page`, `par_page`), par pages de 100 par défaut et 500 au plus.
+>   - Les filtres (période, recherche, sens, article, type) et les totaux sont calculés en SQL sur **toute** la période. Le chiffre d'affaires, les entrées et sorties de caisse et le nombre de documents ne dépendent donc plus des 200 premières lignes.
+>   - Les pages Ventes, Journal de caisse et Mouvements de stock affichent « 1–50 sur 1234 » et une navigation par page.
+>   - Les exports CSV parcourent toutes les pages.
+> - **Tableau de bord :** le graphique des 7 derniers jours vient de `get_stats` (`ca_7_jours`, agrégé en SQL). Il était calculé sur les 200 dernières ventes, et les jours étaient découpés en UTC.
+> - **Comparaison de prix :** `compare_fournisseur_prices` filtre l'article en SQL.
+> - **Filtre de date de fin :** il était déjà corrigé (M-15).
+> - **Bugs trouvés en chemin, et corrigés :**
+>   - `useDebounce` renvoie une valeur, mais POS, Articles et Mouvements de stock la déstructuraient (`const [x] = …`). La recherche d'articles au POS et dans le catalogue ne portait donc que sur la **première lettre** saisie.
+>   - Les filtres « Vente », « Achat » et « Ajustement » des mouvements de stock ne correspondaient à aucun type en base (`entree`, `sortie`, `inventaire`), et les quantités s'affichaient en dirhams.
+>   - Le bouton « Exporter » du journal de caisse n'avait aucune action.
+>   - Le journal classait les sorties selon le signe du montant, alors que les sorties sont enregistrées tantôt en positif, tantôt en négatif. Il les classe maintenant par type.
+> - **Reste :** `get_articles` charge encore tout le catalogue, dont le POS a besoin pour la recherche et le scan hors ligne. Il faudra le mesurer sur un catalogue de 20 000 références lors de la recette Windows.
+>
+> Couvert par des tests Rust (pages, bornes, période, recherche, CA hors annulations, totaux du journal par type) et Vitest (navigation par page, recherche envoyée au serveur et retour à la page 1). Vérifié dans l'application (xvfb) : tableau de bord, Ventes avec recherche serveur, Journal, Caisses, et montée de version v6 → v7 d'une base existante.
+
 **Fichier** : `get_articles` (sans LIMIT), `get_transferts`, `compare_fournisseur_prices` (scan complet, filtre en Rust) ; `get_ventes`, `get_journal_caisse`, `get_mouvements_stock` (`LIMIT 200` sans indication)
 **Risque** : un supermarché avec 20 000 références charge tout le catalogue à chaque ouverture du POS. Les historiques sont tronqués à 200 lignes sans que l'utilisateur le sache. Les filtres `date <= fin` excluent la journée de fin (`'2026-09-24 10:00' > '2026-09-24'`), alors que `rapports.rs` et `audit.rs` ajoutent bien `23:59:59`.
 **Fix** : pagination `LIMIT ?/OFFSET ?` avec `total` renvoyé, filtre SQL `WHERE aa.article_id = ?` dans `compare_fournisseur_prices`, et `date < date(?, '+1 day')` partout.
@@ -1162,17 +1181,17 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 89 / 100
+## Note après corrections (25/09/2026) : 90 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86), S-3 et S-5 (→ 88), M-18 (→ 89). La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86), S-3 et S-5 (→ 88), M-18 (→ 89), M-19 (→ 90). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
 | Sécurité | 6 / 25 | **24 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), routes et menu alignés sur la table des permissions (M-10), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). Timing de connexion uniformisé (m-1) et verrouillage unique (m-2). |
 | Intégrité données | 5 / 20 | **19 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). Plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **14 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12), index (S-3), traçabilité création et modification sur les tables maîtres (S-5). Le point manquant tient à l'absence de test de montée de version sur une copie de base réelle de production. |
-| Architecture backend | 7 / 15 | **13 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), un seul système de caisse (M-18), 138 tests Rust. **Restent :** 29 commandes aux sorties non typées (M-17 en partie, entrées typées), pagination (M-19, filtre de date corrigé). |
-| Frontend | 5 / 15 | **12 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 142 tests Vitest, formulaires Clients et Paramètres réparés. **Restent :** panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 58 avertissements de lint (F-3). |
+| Architecture backend | 7 / 15 | **14 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), un seul système de caisse (M-18), pagination et totaux côté serveur (M-19), 145 tests Rust. **Restent :** 27 commandes aux sorties non typées (M-17 en partie, entrées typées), catalogue chargé en entier au POS. |
+| Frontend | 5 / 15 | **12 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 154 tests Vitest, formulaires Clients et Paramètres réparés, recherche du POS réparée (M-19). **Restent :** panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 57 avertissements de lint (F-3). |
 | Production readiness | 3 / 10 | **7 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, fichiers d'impression à nom fixe (P-6), et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
 
 **Avant la mise en production :**

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
 import type { LigneVenteSaisie } from "@/types/generated/LigneVenteSaisie"
@@ -7,6 +7,9 @@ import type { PaiementSaisi } from "@/types/generated/PaiementSaisi"
 import type { TypeDocument } from "@/types/generated/TypeDocument"
 import type { VenteCreee } from "@/types/generated/VenteCreee"
 import type { VenteResume } from "@/types/generated/VenteResume"
+import type { ListeVentes } from "@/types/generated/ListeVentes"
+
+export const VENTES_PAR_PAGE = 50
 
 export interface CreateSaleInput {
   clientId: number | null
@@ -19,20 +22,34 @@ export interface CreateSaleInput {
   magasinId?: number | null
 }
 
-export function useSalesList(dateDebut?: string, dateFin?: string) {
+export function useSalesList(dateDebut: string | undefined, dateFin: string | undefined, recherche: string, page: number) {
   return useQuery({
-    queryKey: ["ventes", dateDebut, dateFin],
-    queryFn: () => invoke<VenteResume[]>("get_ventes", { debut: dateDebut || null, fin: dateFin || null }),
+    queryKey: ["ventes", dateDebut, dateFin, recherche, page],
+    queryFn: () => invoke<ListeVentes>("get_ventes", {
+      debut: dateDebut || null,
+      fin: dateFin || null,
+      recherche: recherche || null,
+      page,
+      parPage: VENTES_PAR_PAGE,
+    }),
+    placeholderData: keepPreviousData,
     staleTime: 30000,
   })
 }
 
-export function useRecentSales() {
-  return useQuery({
-    queryKey: ["ventes", "recent"],
-    queryFn: () => invoke<VenteResume[]>("get_ventes", { debut: null, fin: null }),
-    staleTime: 30000,
-  })
+export async function toutesLesVentes(dateDebut: string | undefined, dateFin: string | undefined, recherche: string) {
+  const lignes: VenteResume[] = []
+  for (let page = 0; ; page++) {
+    const r = await invoke<ListeVentes>("get_ventes", {
+      debut: dateDebut || null,
+      fin: dateFin || null,
+      recherche: recherche || null,
+      page,
+      parPage: 500,
+    })
+    lignes.push(...r.lignes)
+    if (r.lignes.length === 0 || lignes.length >= r.total) return lignes
+  }
 }
 
 export function useCreateSale() {

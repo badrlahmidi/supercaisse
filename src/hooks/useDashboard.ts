@@ -1,3 +1,4 @@
+import type { ListeVentes } from "@/types/generated/ListeVentes"
 import { useQuery } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 
@@ -12,17 +13,7 @@ export interface DashboardStats {
   benefice_mois: number
   top_articles: Array<{ designation: string; quantite: number }>
   top_clients: Array<{ nom: string; depense: number }>
-}
-
-export interface RecentSale {
-  id: number
-  date: string
-  client_nom?: string | null
-  montant_total: number
-  montant_remise: number
-  mode_paiement: string
-  statut: string
-  dtype?: string | null
+  ca_7_jours: Array<{ jour: string; montant: number }>
 }
 
 export function useDashboardStats() {
@@ -36,7 +27,7 @@ export function useDashboardStats() {
 export function useRecentSales() {
   return useQuery({
     queryKey: ["ventes", "recent"],
-    queryFn: () => invoke<RecentSale[]>("get_ventes", { debut: null, fin: null }),
+    queryFn: () => invoke<ListeVentes>("get_ventes", { debut: null, fin: null, recherche: null, page: 0, parPage: 5 }),
     staleTime: 30000,
   })
 }

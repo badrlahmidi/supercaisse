@@ -1,20 +1,43 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
+import type { EcritureJournal } from "@/types/generated/EcritureJournal"
+import type { ListeJournal } from "@/types/generated/ListeJournal"
 
-export interface JournalEntry {
-  id: number
-  date: string
-  utilisateur_id: number | null
-  jtype: string
-  montant: number
-  description: string | null
-  user_nom: string | null
+export type JournalEntry = EcritureJournal
+export type SensJournal = "all" | "entree" | "sortie"
+
+export const JOURNAL_PAR_PAGE = 100
+
+interface FiltreJournal {
+  dateDebut?: string
+  dateFin?: string
+  sens: SensJournal
+  recherche: string
 }
 
-export function useJournalCaisse(dateDebut?: string, dateFin?: string) {
+function parametres({ dateDebut, dateFin, sens, recherche }: FiltreJournal) {
+  return {
+    debut: dateDebut || null,
+    fin: dateFin || null,
+    sens: sens === "all" ? null : sens,
+    recherche: recherche || null,
+  }
+}
+
+export function useJournalCaisse(filtre: FiltreJournal, page: number) {
   return useQuery({
-    queryKey: ["journal", dateDebut, dateFin],
-    queryFn: () => invoke<JournalEntry[]>("get_journal_caisse", { debut: dateDebut || null, fin: dateFin || null }),
+    queryKey: ["journal", filtre, page],
+    queryFn: () => invoke<ListeJournal>("get_journal_caisse", { ...parametres(filtre), page, parPage: JOURNAL_PAR_PAGE }),
+    placeholderData: keepPreviousData,
     staleTime: 30000,
   })
+}
+
+export async function toutLeJournal(filtre: FiltreJournal) {
+  const lignes: EcritureJournal[] = []
+  for (let page = 0; ; page++) {
+    const r = await invoke<ListeJournal>("get_journal_caisse", { ...parametres(filtre), page, parPage: 500 })
+    lignes.push(...r.lignes)
+    if (r.lignes.length === 0 || lignes.length >= r.total) return lignes
+  }
 }

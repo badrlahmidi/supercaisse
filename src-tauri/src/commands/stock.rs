@@ -2,59 +2,51 @@ use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
 use tauri::State;
 
+use super::contrats::{MouvementStockLigne, Page};
+
 #[tauri::command(async)]
 pub fn get_mouvements_stock(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     article_id: Option<i64>,
+    mtype: Option<String>,
     debut: Option<String>,
     fin: Option<String>,
-) -> Result<Vec<serde_json::Value>, String> {
+    page: Option<i64>,
+    par_page: Option<i64>,
+) -> Result<Page<MouvementStockLigne>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
-    let mut where_clause = String::new();
-    let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut filtre = super::Filtre::new();
     if let Some(aid) = article_id {
-        where_clause.push_str(" AND m.article_id = ?");
-        qp.push(Box::new(aid));
+        filtre.ajouter("m.article_id = ?", aid);
     }
-    if let Some(d) = &debut {
-        if !d.is_empty() {
-            where_clause.push_str(" AND m.date >= ?");
-            qp.push(Box::new(d.clone()));
-        }
+    if let Some(t) = mtype.filter(|t| !t.is_empty()) {
+        filtre.ajouter("m.mtype = ?", t);
     }
-    if let Some(f) = &fin {
-        if !f.is_empty() {
-            where_clause.push_str(" AND m.date <= ?");
-            qp.push(Box::new(super::fin_de_journee(f)));
-        }
-    }
-    let sql = format!(
-        "SELECT m.id, m.date, m.article_id, a.designation, m.quantite, m.mtype, m.reference_id, m.reference_type
-         FROM mouvements_stock m
-         JOIN articles a ON m.article_id = a.id
-         WHERE 1=1 {} ORDER BY m.date DESC LIMIT 200", where_clause
-    );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let pr: Vec<&dyn rusqlite::types::ToSql> = qp.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt
-        .query_map(pr.as_slice(), |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, String>(1)?,
-                "article_id": row.get::<_, i64>(2)?,
-                "designation": row.get::<_, String>(3)?,
-                "quantite": row.get::<_, f64>(4)?,
-                "mtype": row.get::<_, String>(5)?,
-                "reference_id": row.get::<_, Option<i64>>(6)?,
-                "reference_type": row.get::<_, Option<String>>(7)?,
-            }))
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    filtre.periode("m.date", &debut, &fin);
+    super::paginer(
+        &conn,
+        "m.id, m.date, m.article_id, a.designation, m.quantite, m.mtype, m.reference_id, m.reference_type",
+        "mouvements_stock m JOIN articles a ON m.article_id = a.id",
+        &filtre,
+        "m.date DESC, m.id DESC",
+        page,
+        par_page,
+        |row| {
+            Ok(MouvementStockLigne {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                article_id: row.get(2)?,
+                designation: row.get(3)?,
+                quantite: row.get(4)?,
+                mtype: row.get(5)?,
+                reference_id: row.get(6)?,
+                reference_type: row.get(7)?,
+            })
+        },
+    )
 }
 
 #[tauri::command(async)]

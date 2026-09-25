@@ -1,25 +1,24 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
+import type { MouvementStockLigne } from "@/types/generated/MouvementStockLigne"
+import type { Page } from "@/types/generated/Page"
 
-export interface MouvementStock {
-  id: number
-  date: string
-  article_id: number
-  designation: string
-  quantite: number
-  mtype: string
-  reference_id: number | null
-  reference_type: string | null
-}
+export type MouvementStock = MouvementStockLigne
 
-export function useMouvementsStock(articleId?: number | null, debut?: string, fin?: string) {
+export const MOUVEMENTS_PAR_PAGE = 100
+
+export function useMouvementsStock(articleId: number | null, mtype: string | null, page: number) {
   return useQuery({
-    queryKey: ["mouvements-stock", articleId, debut, fin],
-    queryFn: () => invoke<MouvementStock[]>("get_mouvements_stock", {
-      articleId: articleId || null,
-      debut: debut || null,
-      fin: fin || null,
+    queryKey: ["mouvements-stock", articleId, mtype, page],
+    queryFn: () => invoke<Page<MouvementStockLigne>>("get_mouvements_stock", {
+      articleId,
+      mtype,
+      debut: null,
+      fin: null,
+      page,
+      parPage: MOUVEMENTS_PAR_PAGE,
     }),
+    placeholderData: keepPreviousData,
     staleTime: 30000,
   })
 }

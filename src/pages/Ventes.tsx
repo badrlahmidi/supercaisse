@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
-import { useSalesList, useCancelSale } from "@/hooks/useSales"
+import { useSalesList, useCancelSale, toutesLesVentes } from "@/hooks/useSales"
+import { useDebounce } from "@/hooks/useDebounce"
+import Pagination from "@/components/Pagination"
 import { Card, CardContent } from "@/ui/Card"
 import { Button } from "@/ui/Button"
 import { Input } from "@/ui/Input"
@@ -17,10 +19,8 @@ import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import type { Settings } from "@/types"
-import { compteDansCA } from "@/lib/ventes"
 import type { VenteDetail } from "@/types/generated/VenteDetail"
 import type { VenteResume } from "@/types/generated/VenteResume"
-import { sommeDH } from "@/lib/totaux"
 import { annulationDirecte, DELAI_ANNULATION_MINUTES } from "@/lib/fiscal"
 
 type Vente = VenteResume
@@ -35,7 +35,9 @@ export default function Ventes() {
   const [cancelMotif, setCancelMotif] = useState("")
   const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null)
 
-  const { data: ventes, isLoading } = useSalesList(dateDebut, dateFin)
+  const [page, setPage] = useState(0)
+  const recherche = useDebounce(search.trim(), 300)
+  const { data: liste, isLoading } = useSalesList(dateDebut, dateFin, recherche, page)
   const cancelMutation = useCancelSale()
   const modeAnnulation = cancelConfirm ? annulationDirecte(cancelConfirm) : "libre"
   const queryClient = useQueryClient()
@@ -148,29 +150,29 @@ export default function Ventes() {
     window.open(`mailto:${vente.client_email}?subject=${subject}&body=${body}`, "_self")
   }
 
-  const filteredVentes = ventes?.filter((v) =>
-    v.client_nom?.toLowerCase().includes(search.toLowerCase()) ||
-    v.caissier_nom?.toLowerCase().includes(search.toLowerCase()) ||
-    v.numero_facture?.toLowerCase().includes(search.toLowerCase()) ||
-    v.id.toString().includes(search) ||
-    v.mode_paiement.toLowerCase().includes(search.toLowerCase())
-  ) || []
+  const filteredVentes = liste?.lignes ?? []
+  const totalVentes = liste?.chiffre_affaires ?? 0
+  const nbVentes = liste?.total ?? 0
 
-  const totalVentes = sommeDH(filteredVentes.filter(compteDansCA).map((v) => sommeDH([v.montant_total, -v.montant_remise])))
-  const nbVentes = filteredVentes.length
+  const exporter = async () => {
+    try {
+      const ventes = await toutesLesVentes(dateDebut, dateFin, recherche)
+      const headers = ["Référence", "Type", "Date", "Client", "Caissier", "Total", "Remise", "Mode paiement", "Statut"]
+      const rows = ventes.map((v) => [
+        v.numero_facture || String(v.id), v.dtype, formatDateTime(v.date), v.client_nom || "Client de passage",
+        v.caissier_nom || "", formatCurrency(v.montant_total), formatCurrency(v.montant_remise),
+        v.mode_paiement, v.statut,
+      ])
+      exportCSV(headers, rows, `documents_${dateDebut}_${dateFin}.csv`)
+    } catch (e) {
+      toast.error("Export impossible", { description: String(e) })
+    }
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader title="Documents de Vente" description="Historique des factures, BL et devis">
-        <Button variant="outline" onClick={() => {
-          const headers = ["Référence", "Type", "Date", "Client", "Caissier", "Total", "Remise", "Mode paiement", "Statut"]
-          const rows = filteredVentes.map((v) => [
-            v.numero_facture || String(v.id), v.dtype, formatDateTime(v.date), v.client_nom || "Client de passage",
-            v.caissier_nom || "", formatCurrency(v.montant_total), formatCurrency(v.montant_remise),
-            v.mode_paiement, v.statut,
-          ])
-          exportCSV(headers, rows, `documents_${dateDebut}_${dateFin}.csv`)
-        }}>
+        <Button variant="outline" onClick={exporter}>
           <Download className="h-4 w-4 mr-2" />
           Exporter
         </Button>
@@ -182,7 +184,7 @@ export default function Ventes() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Total ventes</p>
+                <p className="text-sm text-muted-foreground">Chiffre d'affaires</p>
                 <p className="text-2xl font-bold">{formatCurrency(totalVentes)}</p>
               </div>
               <div className="p-3 bg-primary/10 rounded-xl">
@@ -195,7 +197,7 @@ export default function Ventes() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Nombre de ventes</p>
+                <p className="text-sm text-muted-foreground">Nombre de documents</p>
                 <p className="text-2xl font-bold">{nbVentes}</p>
               </div>
               <div className="p-3 bg-success/10 rounded-xl">
@@ -212,7 +214,7 @@ export default function Ventes() {
                 id="dateDebut"
                 type="date"
                 value={dateDebut}
-                onChange={(e) => setDateDebut(e.target.value)}
+                onChange={(e) => { setDateDebut(e.target.value); setPage(0) }}
                 className="w-full"
               />
             </div>
@@ -226,7 +228,7 @@ export default function Ventes() {
                 id="dateFin"
                 type="date"
                 value={dateFin}
-                onChange={(e) => setDateFin(e.target.value)}
+                onChange={(e) => { setDateFin(e.target.value); setPage(0) }}
                 className="w-full"
               />
             </div>
@@ -242,7 +244,7 @@ export default function Ventes() {
               <Input
                 placeholder="Rechercher (client, caissier, mode paiement, ID)..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0) }}
                 className="pl-10"
               />
             </div>
@@ -337,6 +339,9 @@ export default function Ventes() {
               </TableBody>
             </Table>
           </div>
+          {liste && (
+            <Pagination page={liste.page} parPage={liste.par_page} total={liste.total} onPageChange={setPage} />
+          )}
         </CardContent>
       </Card>
 

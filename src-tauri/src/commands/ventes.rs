@@ -4,12 +4,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
 use super::calcul::{
-    calculer_ligne, round2, somme_dh, totaliser, valider_pourcentage, LigneCalculee,
+    calculer_ligne, en_dh, round2, somme_dh, totaliser, valider_pourcentage, LigneCalculee,
     TOLERANCE_MONTANT,
 };
 use super::contrats::{
-    LigneVenteDetail, LigneVenteSaisie, ModePaiement, PaiementSaisi, TypeDocument, VenteCreee,
-    VenteDetail, VenteEntete, VenteResume,
+    LigneVenteDetail, LigneVenteSaisie, ListeVentes, ModePaiement, PaiementSaisi, TypeDocument,
+    VenteCreee, VenteDetail, VenteEntete, VenteResume,
 };
 use super::mouvements::{inverser_lots, mouvement_ligne, proprietaire_lots, LigneStock, Sens};
 use super::{
@@ -721,38 +721,64 @@ pub fn get_ventes(
     token: String,
     debut: Option<String>,
     fin: Option<String>,
-) -> Result<Vec<VenteResume>, String> {
+    recherche: Option<String>,
+    page: Option<i64>,
+    par_page: Option<i64>,
+) -> Result<ListeVentes, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
-    let mut where_clause = String::new();
-    let mut query_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    if let Some(d) = &debut {
-        if !d.is_empty() {
-            where_clause.push_str(" AND v.date >= ?");
-            query_params.push(Box::new(d.clone()));
-        }
-    }
-    if let Some(f) = &fin {
-        if !f.is_empty() {
-            where_clause.push_str(" AND v.date <= ?");
-            query_params.push(Box::new(super::fin_de_journee(f)));
-        }
-    }
-    let sql = format!(
-        "SELECT v.id, v.date, v.client_id, v.caissier_id, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.numero_facture,
-                c.nom as client_nom, u.nom as caissier_nom, v.dtype, c.telephone as client_telephone, c.email as client_email
-         FROM ventes v
+    lister_ventes(&conn, &debut, &fin, &recherche, page, par_page)
+}
+
+const SOURCE_VENTES: &str = "ventes v
          LEFT JOIN clients c ON v.client_id = c.id
-         LEFT JOIN utilisateurs u ON v.caissier_id = u.id
-         WHERE 1=1 {}
-         ORDER BY v.date DESC
-         LIMIT 200", where_clause
-    );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        query_params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt
-        .query_map(params_refs.as_slice(), |row| {
+         LEFT JOIN utilisateurs u ON v.caissier_id = u.id";
+
+pub(crate) fn lister_ventes(
+    conn: &Connection,
+    debut: &Option<String>,
+    fin: &Option<String>,
+    recherche: &Option<String>,
+    page: Option<i64>,
+    par_page: Option<i64>,
+) -> Result<ListeVentes, String> {
+    let mut filtre = super::Filtre::new();
+    filtre.periode("v.date", debut, fin);
+    if let Some(r) = recherche
+        .as_ref()
+        .map(|r| r.trim())
+        .filter(|r| !r.is_empty())
+    {
+        let n = filtre.valeurs.len() + 1;
+        filtre.ajouter(
+            &format!("(c.nom LIKE ?{n} OR u.nom LIKE ?{n} OR v.numero_facture LIKE ?{n} OR v.mode_paiement LIKE ?{n} OR CAST(v.id AS TEXT) LIKE ?{n})"),
+            format!("%{}%", r),
+        );
+    }
+    let valeurs: Vec<&dyn rusqlite::types::ToSql> =
+        filtre.valeurs.iter().map(|v| v.as_ref()).collect();
+    let ca_centimes: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT COALESCE(SUM(ROUND((v.montant_total - v.montant_remise) * 100)), 0) FROM {} WHERE {} {}",
+                SOURCE_VENTES,
+                filtre_ca!(),
+                filtre.clause
+            ),
+            valeurs.as_slice(),
+            |r| r.get::<_, f64>(0),
+        )
+        .map_err(|e| e.to_string())? as i64;
+    let page = super::paginer(
+        conn,
+        "v.id, v.date, v.client_id, v.caissier_id, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.numero_facture,
+         c.nom as client_nom, u.nom as caissier_nom, v.dtype, c.telephone as client_telephone, c.email as client_email",
+        SOURCE_VENTES,
+        &filtre,
+        "v.date DESC, v.id DESC",
+        page,
+        par_page,
+        |row| {
             Ok(VenteResume {
                 id: row.get(0)?,
                 date: row.get(1)?,
@@ -769,10 +795,12 @@ pub fn get_ventes(
                 client_telephone: row.get(12)?,
                 client_email: row.get(13)?,
             })
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        },
+    )?;
+    Ok(ListeVentes {
+        page,
+        chiffre_affaires: en_dh(ca_centimes),
+    })
 }
 
 #[tauri::command(async)]
@@ -1195,6 +1223,76 @@ mod tests {
     fn montants(conn: &Connection, id: i64) -> (f64, f64, f64, f64) {
         conn.query_row("SELECT montant_total, montant_remise, montant_ht, montant_tva FROM ventes WHERE id = ?1", params![id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap()
+    }
+
+    #[test]
+    fn test_liste_des_ventes_paginee() {
+        let mut conn = setup();
+        for _ in 0..5 {
+            vendre(
+                &mut conn,
+                None,
+                json!([{ "article_id": 2, "quantite": 1 }]),
+                None,
+                json!([{ "mode": "especes", "montant": 10 }]),
+                "bl",
+                None,
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "UPDATE ventes SET date = '2026-01-10 09:00:00' WHERE id IN (1, 2)",
+            [],
+        )
+        .unwrap();
+
+        let p0 = lister_ventes(&conn, &None, &None, &None, Some(0), Some(2))
+            .unwrap()
+            .page;
+        assert_eq!(
+            (p0.total, p0.page, p0.par_page, p0.lignes.len()),
+            (5, 0, 2, 2)
+        );
+        assert_eq!(p0.lignes[0].id, 5);
+        let p2 = lister_ventes(&conn, &None, &None, &None, Some(2), Some(2)).unwrap();
+        assert_eq!(
+            p2.page.lignes.iter().map(|v| v.id).collect::<Vec<_>>(),
+            vec![1]
+        );
+
+        let janvier = lister_ventes(
+            &conn,
+            &Some("2026-01-10".into()),
+            &Some("2026-01-10".into()),
+            &None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(janvier.page.total, 2);
+        assert_eq!(janvier.chiffre_affaires, 20.0);
+        conn.execute("UPDATE ventes SET statut = 'annulee' WHERE id = 3", [])
+            .unwrap();
+        let tout = lister_ventes(&conn, &None, &None, &None, Some(0), Some(2)).unwrap();
+        assert_eq!((tout.page.total, tout.chiffre_affaires), (5, 40.0));
+        let recherche =
+            lister_ventes(&conn, &None, &None, &Some(" 4 ".into()), None, None).unwrap();
+        assert_eq!(
+            recherche
+                .page
+                .lignes
+                .iter()
+                .map(|v| v.id)
+                .collect::<Vec<_>>(),
+            vec![4]
+        );
+        assert_eq!(janvier.page.par_page, crate::commands::PAR_PAGE_DEFAUT);
+
+        let borne = lister_ventes(&conn, &None, &None, &None, Some(-3), Some(100_000)).unwrap();
+        assert_eq!(
+            (borne.page.page, borne.page.par_page),
+            (0, crate::commands::PAR_PAGE_MAX)
+        );
     }
 
     #[test]

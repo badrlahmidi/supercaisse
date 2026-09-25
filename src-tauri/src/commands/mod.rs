@@ -244,6 +244,86 @@ pub(crate) fn erreur_suppression(erreur: rusqlite::Error, element: &str) -> Stri
     }
 }
 
+pub(crate) const PAR_PAGE_DEFAUT: i64 = 100;
+pub(crate) const PAR_PAGE_MAX: i64 = 500;
+
+pub(crate) struct Filtre {
+    pub clause: String,
+    pub valeurs: Vec<Box<dyn rusqlite::types::ToSql>>,
+}
+
+impl Filtre {
+    pub fn new() -> Self {
+        Filtre {
+            clause: String::new(),
+            valeurs: Vec::new(),
+        }
+    }
+
+    pub fn ajouter<V: rusqlite::types::ToSql + 'static>(&mut self, condition: &str, valeur: V) {
+        self.clause.push_str(" AND ");
+        self.clause.push_str(condition);
+        self.valeurs.push(Box::new(valeur));
+    }
+
+    pub fn periode(&mut self, colonne: &str, debut: &Option<String>, fin: &Option<String>) {
+        if let Some(d) = debut.as_ref().filter(|d| !d.is_empty()) {
+            self.ajouter(&format!("{} >= ?", colonne), d.clone());
+        }
+        if let Some(f) = fin.as_ref().filter(|f| !f.is_empty()) {
+            self.ajouter(&format!("{} <= ?", colonne), fin_de_journee(f));
+        }
+    }
+}
+
+pub(crate) fn paginer<T>(
+    conn: &rusqlite::Connection,
+    selection: &str,
+    source: &str,
+    filtre: &Filtre,
+    ordre: &str,
+    page: Option<i64>,
+    par_page: Option<i64>,
+    lire: impl FnMut(&rusqlite::Row) -> rusqlite::Result<T>,
+) -> Result<contrats::Page<T>, String> {
+    let par_page = par_page.unwrap_or(PAR_PAGE_DEFAUT).clamp(1, PAR_PAGE_MAX);
+    let page = page.unwrap_or(0).max(0);
+    let valeurs: Vec<&dyn rusqlite::types::ToSql> =
+        filtre.valeurs.iter().map(|v| v.as_ref()).collect();
+    let total: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM {} WHERE 1=1 {}",
+                source, filtre.clause
+            ),
+            valeurs.as_slice(),
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {} FROM {} WHERE 1=1 {} ORDER BY {} LIMIT {} OFFSET {}",
+            selection,
+            source,
+            filtre.clause,
+            ordre,
+            par_page,
+            page * par_page
+        ))
+        .map_err(|e| e.to_string())?;
+    let lignes = stmt
+        .query_map(valeurs.as_slice(), lire)
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(contrats::Page {
+        lignes,
+        total,
+        page,
+        par_page,
+    })
+}
+
 pub(crate) fn fin_de_journee(fin: &str) -> String {
     if fin.len() == 10 {
         format!("{} 23:59:59", fin)

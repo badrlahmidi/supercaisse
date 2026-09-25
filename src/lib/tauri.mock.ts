@@ -166,7 +166,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
 
   create_vente: () => { nextId++; return { id: nextId, numero_facture: `FA-2026-${String(nextId).padStart(5, "0")}` } },
-  get_ventes: () => [],
+  get_ventes: () => ({ lignes: [], total: 0, page: 0, par_page: 50, chiffre_affaires: 0 }),
   get_vente_details: () => ({ vente: { id: 1, date: new Date().toISOString(), montant_total: 0, montant_remise: 0, mode_paiement: "especes", statut: "validee", numero_facture: "FA-2026-00001", client_nom: "Client", caissier_nom: "Admin", dtype: "facture", source_vente_id: null, source_dtype: null, source_numero: null }, lignes: [] }),
   convert_document: () => { nextId++; return nextId },
 
@@ -201,11 +201,12 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     stock_alerte: 0,
     credit_total: 0,
     nb_clients: mockClients.length,
+    ca_7_jours: [],
   }),
 
   get_articles_stock_alerte: () => [] as { id: number; designation: string; stock: number; stock_alerte: number; categorie_nom: string | null; fournisseur_nom: string | null; fournisseur_id: number | null; prix_achat: number; suggestion_qte: number }[],
 
-  get_journal_caisse: () => [],
+  get_journal_caisse: () => ({ lignes: [], total: 0, page: 0, par_page: 100, total_entrees: 0, total_sorties: 0 }),
   add_journal_caisse: () => { nextId++; return nextId },
 
   get_utilisateurs: () => [...mockUsers],
@@ -240,7 +241,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     mois: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
   }),
 
-  get_mouvements_stock: () => [],
+  get_mouvements_stock: () => ({ lignes: [], total: 0, page: 0, par_page: 100 }),
 
   compare_fournisseur_prices: () => [],
 

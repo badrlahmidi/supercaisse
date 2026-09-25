@@ -61,7 +61,7 @@ type ArticleForm = z.infer<typeof articleSchema>
 
 export default function Articles() {
   const [search, setSearch] = useState("")
-  const [debouncedSearch] = useDebounce(search, 300)
+  const debouncedSearch = useDebounce(search, 300)
   const [editingArticle, setEditingArticle] = useState<Article | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [importing, setImporting] = useState(false)

@@ -67,7 +67,7 @@ export default function POS() {
   const { data: tables = [], isLoading: tablesLoading } = useTables()
   const updateTableMutation = useUpdateTable()
 
-  const [debouncedSearch] = useDebounce(search, 300)
+  const debouncedSearch = useDebounce(search, 300)
   const [activeCategory, setActiveCategory] = useState<number | "all">("all")
   const [processing, setProcessing] = useState(false)
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null)
