@@ -171,6 +171,8 @@ std::fs::write(&printer_path, &bytes).map_err(|e| format!("Erreur impression: {e
 
 ### [MAJEUR] M-9 — PIN : brute-force illimité, collisions, coût O(n × Argon2)
 
+> **Statut : non corrigé**, hormis deux points : les permissions sont rechargées après `loginAs`, et le hachage Argon2 ne tourne plus sur le thread principal (M-15). **Restent :** limite de tentatives sur `login_pin`, unicité des PIN, et identifiant ou PIN plus long.
+
 **Fichier** : `src-tauri/src/commands/auth.rs:47-67`, `src/components/IdleLock.tsx:62`
 **Risque** :
 - `login_pin` n'applique aucune limite de tentatives. Un PIN à 4 chiffres, soit 10 000 possibilités, se brute-force en quelques minutes par IPC.
@@ -343,6 +345,8 @@ fn round2(x: f64) -> f64 { (x * 100.0).round() / 100.0 }
 ```
 
 ### [MAJEUR] M-2 — Prix, remises, points et splits entièrement fournis par le client
+
+> **Statut : corrigé en partie** sur `claude/hopeful-clarke-4uflms` (avec C-8). Côté serveur : prix et TVA relus en base, somme des règlements contrôlée par rapport au net recalculé, points dépensés plafonnés au solde, points gagnés calculés d'après les paramètres de fidélité, paiement fidélité cohérent avec les points utilisés. **Reste :** plafonner les remises selon le rôle (permission `ventes/remise`).
 
 **Fichier** : `src-tauri/src/commands/ventes.rs:39-43,60-66,116-134,139-146,182-194`
 **Risque** :
@@ -708,6 +712,8 @@ Toutes les commandes de `commands/` sont bien enregistrées dans `lib.rs` (97/97
 
 ### [CRITIQUE] C-1 — `invoke()` remplace toute erreur backend par une réponse mock
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms` (avec C-2) : `invoke()` propage toute erreur du backend, et les mocks ne sont chargés qu'en développement hors Tauri (`import.meta.env.DEV`). Le bundle de production ne les embarque plus.
+
 **Fichier** : `src/lib/tauri.ts:320-333`
 **Risque** : le `try/catch` englobe **l'appel Tauri lui-même**. Toute erreur Rust est donc rattrapée, et si un mock existe pour la commande, une fausse réponse de succès est renvoyée. Exemples : plafond de crédit, erreur SQL, numérotation 2027, argument manquant.
 
@@ -769,6 +775,8 @@ if (isTauri()) return tauriInvoke<T>(cmd, camelizeTopLevel(args))
 Ajouter aussi un test de contrat Vitest qui parse les signatures `#[tauri::command]` des fichiers Rust et vérifie que chaque appel `invoke` fournit les clés requises. À terme, passer à `tauri-specta` (M-17).
 
 ### [MAJEUR] M-10 — Rôle et permissions de l'UI modifiables par l'utilisateur
+
+> **Statut : corrigé en partie.** Depuis C-5, chaque commande contrôle la permission du module côté serveur, en relisant le rôle en base à chaque appel. Modifier le rôle ou les permissions dans l'interface ne donne donc plus accès aux données. Le tableau de bord est réservé aux admins et managers. **Reste :** le routeur filtre encore par rôle et non par la table `permissions`, si bien qu'une page interdite s'ouvre (vide, avec des erreurs d'autorisation).
 
 **Fichier** : `src/context/AuthContext.tsx:58-62,110-113,119-128`, `src/routes/router.tsx`
 **Risque** :
@@ -1073,7 +1081,28 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note finale : 33 / 100
+## Note après corrections (25/09/2026) : 78 / 100
+
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`. La note initiale de 33/100 est conservée plus bas pour mémoire.
+
+| Axe | Avant | Après | Justification |
+|-----|-------|-------|---------------|
+| Sécurité | 6 / 25 | **19 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** brute-force et collisions du PIN (M-9, majeur), routeur non aligné sur les permissions (M-10, UI seulement), énumération par timing (m-1), double verrouillage (m-2). |
+| Intégrité données | 5 / 20 | **18 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). **Reste :** plafond de remise par rôle (M-2). |
+| Schéma BDD | 7 / 15 | **12 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12). **Restent :** index manquants (S-3), traçabilité `created_at` / `updated_by` (S-5). |
+| Architecture backend | 7 / 15 | **11 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** JSON non typé (M-17), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |
+| Frontend | 5 / 15 | **11 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 142 tests Vitest, formulaires Clients et Paramètres réparés. **Restent :** routeur par rôle (M-10), panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 58 avertissements de lint (F-3). |
+| Production readiness | 3 / 10 | **7 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, fichiers d'impression à nom fixe (P-6), et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
+
+**Avant la mise en production :**
+1. Corriger M-9 (PIN).
+2. Faire une recette complète sur un poste Windows réel : installation, impression ESC/POS et PowerShell, chemins `AppData`, mise à jour signée.
+3. Créer la clé de signature (voir `docs/RELEASE.md`).
+4. Faire valider la facture par l'expert-comptable.
+
+Les points mineurs restants ne bloquent pas la mise en production.
+
+## Note initiale (24/09/2026) : 33 / 100
 
 | Axe | Note | Justification |
 |-----|------|---------------|
