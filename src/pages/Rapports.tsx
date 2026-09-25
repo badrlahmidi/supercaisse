@@ -41,6 +41,7 @@ export default function Rapports() {
   const { data: rapport, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["rapport_detaille", debut, fin],
     queryFn: () => invoke<RapportDetaille>("get_rapport_detaille", { debut, fin }),
+    meta: { erreurGeree: true },
   })
 
   const maxVente = rapport?.ventes_par_jour?.length

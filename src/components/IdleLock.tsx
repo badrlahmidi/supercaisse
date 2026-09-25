@@ -30,7 +30,7 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
     queryKey: ["comptes-pin"],
     queryFn: () => invoke<ComptePin[]>("get_comptes_pin"),
     enabled: locked,
-    retry: false,
+    meta: { erreurGeree: true },
   })
   const loginPin = compte || user?.login || ""
   const choix = user && !comptes.some((c) => c.login === user.login)

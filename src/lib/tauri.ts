@@ -10,6 +10,10 @@ export function setSessionToken(token: string | null) {
   sessionToken = token
 }
 
+export function estErreurSession(err: unknown): boolean {
+  return String(err).startsWith(ERREUR_SESSION)
+}
+
 export function getSessionToken(): string | null {
   return sessionToken
 }
@@ -44,7 +48,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     try {
       return await tauriInvoke<T>(cmd, camelizeArgs(withToken(cmd, args)))
     } catch (err) {
-      if (String(err).startsWith(ERREUR_SESSION)) {
+      if (estErreurSession(err)) {
         sessionToken = null
         sessionExpiredListeners.forEach((listener) => listener())
       }
