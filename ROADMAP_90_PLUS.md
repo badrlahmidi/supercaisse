@@ -185,7 +185,7 @@ get_permissions, update_permission
 
 **`commands/caisses.rs`**
 ```
-get_caisses, open_caisse, close_caisse, get_tresorerie, compare_fournisseur_prices
+get_caisses, get_tresorerie, compare_fournisseur_prices
 ```
 
 ### Étapes d'implémentation

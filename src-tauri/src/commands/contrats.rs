@@ -214,6 +214,30 @@ pub struct VenteDetail {
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export)]
+pub struct SessionSupervision {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub caissier_id: i64,
+    pub caissier_nom: Option<String>,
+    pub magasin_nom: Option<String>,
+    pub statut: String,
+    pub date_ouverture: String,
+    pub date_cloture: Option<String>,
+    pub fond_initial: f64,
+    pub recettes_especes: f64,
+    pub recettes_cb: f64,
+    pub recettes_cheque: f64,
+    pub recettes_virement: f64,
+    pub sorties: f64,
+    pub entrees: f64,
+    pub especes_attendu: Option<f64>,
+    pub especes_declare: Option<f64>,
+    pub ecart: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 pub struct SessionCaisse {
     #[ts(as = "f64")]
     pub id: i64,
@@ -278,7 +302,7 @@ mod tests {
         .is_err());
     }
 
-    const COMMANDES_NON_TYPEES_MAX: usize = 30;
+    const COMMANDES_NON_TYPEES_MAX: usize = 29;
 
     #[test]
     fn test_aucune_nouvelle_commande_non_typee() {

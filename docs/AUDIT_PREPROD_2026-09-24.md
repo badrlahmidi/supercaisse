@@ -745,6 +745,18 @@ Générer ensuite les types TS avec `ts-rs` ou `specta` (et `tauri-specta` pour 
 
 ### [MINEUR] M-18 — Code mort et doublons
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+>
+> - **Code mort et logique dupliquée :** `authenticate` avait déjà été supprimée. La sortie de stock passe par une seule fonction, `mouvement_ligne` (M-4), et la numérotation par `next_numero_document` (C-3).
+> - **Un seul système de caisse :** `sessions_caisse`, celui du point de vente. Les commandes `open_caisse` et `close_caisse` sont supprimées. Elles ouvraient des « caisses » sans lien avec les ventes, et `close_caisse` calculait les recettes de **tout** le magasin depuis l'heure d'ouverture.
+> - **Page Caisses :** elle supervise désormais les sessions ouvertes par les caissiers.
+>   - Par session : caissier, magasin, recettes par mode (tirées de `vente_paiements.session_id`), entrées et sorties, espèces attendues, déclarées et écart.
+>   - Un responsable disposant du droit `journal/modifier` peut clôturer la session d'un caissier absent. La clôture passe par `close_session`, avec le même calcul que la clôture Z.
+> - **Ancienne table `caisses` :** elle est conservée telle quelle en archive. Elle n'est plus ni lue ni écrite.
+> - **M-17 :** `get_caisses` renvoie le type `SessionSupervision`, et le cliquet passe à 29 commandes non typées.
+>
+> Couvert par un test Rust (recettes par mode, vente annulée exclue, entrées et sorties, écart après clôture) et par un test Vitest (liste, puis clôture avec le montant compté).
+
 **Fichier** : `src-tauri/src/db.rs:710-739`, `commands/caisses.rs` vs `commands/sessions.rs`, `ventes.rs` (bloc numérotation dupliqué, et bloc « stock kit/variante/simple » dupliqué 3 fois)
 **Risque** :
 - `authenticate()` est inutilisé.
@@ -1150,16 +1162,16 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 88 / 100
+## Note après corrections (25/09/2026) : 89 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86), S-3 et S-5 (→ 88). La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86), S-3 et S-5 (→ 88), M-18 (→ 89). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
 | Sécurité | 6 / 25 | **24 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), routes et menu alignés sur la table des permissions (M-10), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). Timing de connexion uniformisé (m-1) et verrouillage unique (m-2). |
 | Intégrité données | 5 / 20 | **19 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). Plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **14 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12), index (S-3), traçabilité création et modification sur les tables maîtres (S-5). Le point manquant tient à l'absence de test de montée de version sur une copie de base réelle de production. |
-| Architecture backend | 7 / 15 | **12 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** 30 commandes aux sorties non typées (M-17 en partie, entrées typées), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |
+| Architecture backend | 7 / 15 | **13 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), un seul système de caisse (M-18), 138 tests Rust. **Restent :** 29 commandes aux sorties non typées (M-17 en partie, entrées typées), pagination (M-19, filtre de date corrigé). |
 | Frontend | 5 / 15 | **12 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 142 tests Vitest, formulaires Clients et Paramètres réparés. **Restent :** panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 58 avertissements de lint (F-3). |
 | Production readiness | 3 / 10 | **7 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, fichiers d'impression à nom fixe (P-6), et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
 

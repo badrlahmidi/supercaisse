@@ -1,24 +1,6 @@
 import type { User, Article, ArticleComposant, ArticleLot, ArticleVariante, Client, Fournisseur, Category, Settings, TableResto, Magasin } from "@/types"
 import type { SessionCaisse } from "@/types/generated/SessionCaisse"
 
-interface MockCaisse {
-  id: number
-  nom: string
-  utilisateur_id: number | null
-  statut: string
-  ouverture_date: string | null
-  fermeture_date: string | null
-  fond_initial: number
-  recettes_especes: number
-  recettes_cb: number
-  recettes_cheque: number
-  recettes_virement: number
-  depenses: number
-  ecart: number
-  note: string | null
-  utilisateur_nom: string | null
-}
-
 const mockUsers: User[] = [
   { id: 1, login: "admin", nom: "Administrateur", role: "admin" },
   { id: 2, login: "manager", nom: "Gestionnaire", role: "manager" },
@@ -82,8 +64,6 @@ const mockSettings: Settings = {
   receipt_header: null,
   doc_primary_color: null,
 }
-
-const mockCaisses: MockCaisse[] = []
 
 let nextId = 100
 let mockCurrentSession: SessionCaisse | null = null
@@ -253,36 +233,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_permissions: () => [],
   update_permission: () => {},
 
-  get_caisses: () => mockCaisses,
-  open_caisse: ({ nom, fond_initial, utilisateur_id }) => {
-    nextId++
-    mockCaisses.push({
-      id: nextId,
-      nom: nom as string,
-      utilisateur_id: (utilisateur_id as number) || null,
-      statut: "ouverte",
-      ouverture_date: new Date().toISOString().replace("T", " ").slice(0, 19),
-      fermeture_date: null,
-      fond_initial: (fond_initial as number) || 0,
-      recettes_especes: 0,
-      recettes_cb: 0,
-      recettes_cheque: 0,
-      recettes_virement: 0,
-      depenses: 0,
-      ecart: 0,
-      note: null,
-      utilisateur_nom: null,
-    })
-    return nextId
-  },
-  close_caisse: ({ id, note }) => {
-    const c = mockCaisses.find(c => c.id === id)
-    if (c) {
-      c.statut = "fermee"
-      c.fermeture_date = new Date().toISOString().replace("T", " ").slice(0, 19)
-      c.note = (note as string) || null
-    }
-  },
+  get_caisses: () => [],
   get_tresorerie: () => ({
     jour: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },
     semaine: { especes: 0, cb: 0, cheque: 0, virement: 0, total: 0 },

@@ -164,8 +164,6 @@ pub fn run() {
             commands::get_permissions,
             commands::update_permission,
             commands::get_caisses,
-            commands::open_caisse,
-            commands::close_caisse,
             commands::get_tresorerie,
             commands::compare_fournisseur_prices,
         ])

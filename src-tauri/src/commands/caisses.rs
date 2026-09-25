@@ -1,4 +1,4 @@
-use super::calcul::{montant_positif, round2};
+use super::calcul::{en_dh, round2};
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::{params, Connection};
@@ -54,43 +54,58 @@ pub(crate) fn recettes_depuis(conn: &Connection, depuis: &str) -> Result<Recette
     })
 }
 
-#[tauri::command(async)]
-pub fn get_caisses(
-    db: State<DbState>,
-    auth: State<AuthState>,
-    token: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.lecture()?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "voir"))?;
+pub(crate) fn lister_sessions_caisse(
+    conn: &Connection,
+) -> Result<Vec<super::contrats::SessionSupervision>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT c.id, c.nom, c.utilisateur_id, c.statut, c.ouverture_date, c.fermeture_date,
-                c.fond_initial, c.recettes_especes, c.recettes_cb, c.recettes_cheque,
-                c.recettes_virement, c.depenses, c.ecart, c.note, u.nom AS utilisateur_nom
-         FROM caisses c
-         LEFT JOIN utilisateurs u ON c.utilisateur_id = u.id
-         ORDER BY c.id DESC",
+            "SELECT s.id, s.caissier_id, u.nom, m.nom, s.statut, s.date_ouverture, s.date_cloture,
+                s.fond_initial,
+                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                          WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode = 'especes'), 0),
+                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                          WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode IN ('carte', 'cb')), 0),
+                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                          WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode = 'cheque'), 0),
+                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                          WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode = 'virement'), 0),
+                COALESCE((SELECT SUM(ROUND(ABS(j.montant) * 100)) FROM journal_caisse j
+                          WHERE j.session_id = s.id AND j.jtype = 'sortie'), 0),
+                COALESCE((SELECT SUM(ROUND(j.montant * 100)) FROM journal_caisse j
+                          WHERE j.session_id = s.id AND j.jtype = 'entree'), 0),
+                s.total_especes_attendu, s.total_especes_declare, s.ecart
+             FROM sessions_caisse s
+             LEFT JOIN utilisateurs u ON u.id = s.caissier_id
+             LEFT JOIN magasins m ON m.id = s.magasin_id
+             ORDER BY (s.statut = 'ouverte') DESC, s.id DESC
+             LIMIT 200",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "nom": row.get::<_, String>(1)?,
-                "utilisateur_id": row.get::<_, Option<i64>>(2)?,
-                "statut": row.get::<_, String>(3)?,
-                "ouverture_date": row.get::<_, Option<String>>(4)?,
-                "fermeture_date": row.get::<_, Option<String>>(5)?,
-                "fond_initial": row.get::<_, f64>(6)?,
-                "recettes_especes": row.get::<_, f64>(7)?,
-                "recettes_cb": row.get::<_, f64>(8)?,
-                "recettes_cheque": row.get::<_, f64>(9)?,
-                "recettes_virement": row.get::<_, f64>(10)?,
-                "depenses": row.get::<_, f64>(11)?,
-                "ecart": row.get::<_, f64>(12)?,
-                "note": row.get::<_, Option<String>>(13)?,
-                "utilisateur_nom": row.get::<_, Option<String>>(14)?,
-            }))
+            let cloturee = row.get::<_, String>(4)? != "ouverte";
+            let centimes = |i: usize| -> rusqlite::Result<f64> {
+                Ok(en_dh(row.get::<_, f64>(i)?.round() as i64))
+            };
+            Ok(super::contrats::SessionSupervision {
+                id: row.get(0)?,
+                caissier_id: row.get(1)?,
+                caissier_nom: row.get(2)?,
+                magasin_nom: row.get(3)?,
+                statut: row.get(4)?,
+                date_ouverture: row.get(5)?,
+                date_cloture: row.get(6)?,
+                fond_initial: row.get(7)?,
+                recettes_especes: centimes(8)?,
+                recettes_cb: centimes(9)?,
+                recettes_cheque: centimes(10)?,
+                recettes_virement: centimes(11)?,
+                sorties: centimes(12)?,
+                entrees: centimes(13)?,
+                especes_attendu: if cloturee { row.get(14)? } else { None },
+                especes_declare: if cloturee { row.get(15)? } else { None },
+                ecart: if cloturee { row.get(16)? } else { None },
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -98,59 +113,14 @@ pub fn get_caisses(
 }
 
 #[tauri::command(async)]
-pub fn open_caisse(
+pub fn get_caisses(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-    nom: String,
-    fond_initial: f64,
-    utilisateur_id: Option<i64>,
-) -> Result<i64, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "creer"))?;
-    let fond_initial = montant_positif("Fond de caisse", fond_initial)?;
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    conn.execute(
-        "INSERT INTO caisses (nom, utilisateur_id, statut, ouverture_date, fond_initial) VALUES (?1, ?2, 'ouverte', ?3, ?4)",
-        params![nom, utilisateur_id, now, fond_initial],
-    ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
-}
-
-#[tauri::command(async)]
-pub fn close_caisse(
-    db: State<DbState>,
-    auth: State<AuthState>,
-    token: String,
-    id: i64,
-    note: Option<String>,
-) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "modifier"))?;
-
-    let ouverture_date: String = conn
-        .query_row(
-            "SELECT ouverture_date FROM caisses WHERE id = ?1 AND statut = 'ouverte'",
-            params![id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "Caisse introuvable ou déjà fermée".to_string())?;
-
-    let Recettes {
-        especes: recettes_especes,
-        cb: recettes_cb,
-        cheque: recettes_cheque,
-        virement: recettes_virement,
-    } = recettes_depuis(&conn, &ouverture_date)?;
-
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-
-    conn.execute(
-        "UPDATE caisses SET statut = 'fermee', fermeture_date = ?1, recettes_especes = ?2, recettes_cb = ?3, recettes_cheque = ?4, recettes_virement = ?5, note = ?6 WHERE id = ?7",
-        params![now, recettes_especes, recettes_cb, recettes_cheque, recettes_virement, note, id],
-    ).map_err(|e| e.to_string())?;
-
-    Ok(())
+) -> Result<Vec<super::contrats::SessionSupervision>, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "voir"))?;
+    lister_sessions_caisse(&conn)
 }
 
 #[tauri::command(async)]
@@ -288,5 +258,72 @@ mod tests {
                 virement: 0.0
             }
         );
+    }
+
+    #[test]
+    fn test_supervision_des_sessions() {
+        let mut conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Huile', 100, 20);
+            INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES (1, 1, 100);
+            UPDATE articles SET stock = 100;
+            UPDATE settings SET value = 'false' WHERE key = 'fidelite_actif';
+            INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (1, 1, 200, 'ouverte', 1);
+            INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'caisse2', 'x', 'Caisse 2', 'caissier');
+            INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (2, 2, 50, 'ouverte', 1);
+        ",
+        )
+        .unwrap();
+        let vendre = |conn: &mut Connection, paiements: serde_json::Value, caissier: i64| {
+            crate::commands::ventes::vendre_json(
+                conn,
+                None,
+                Some(caissier),
+                vec![json!({ "article_id": 1, "quantite": 1 })],
+                None,
+                "especes".into(),
+                Some(paiements.as_array().unwrap().clone()),
+                Some("facture".into()),
+                None,
+                Some(1),
+            )
+            .unwrap()
+            .id
+        };
+        vendre(
+            &mut conn,
+            json!([{ "mode": "especes", "montant": 70 }, { "mode": "carte", "montant": 50 }]),
+            1,
+        );
+        let annulee = vendre(&mut conn, json!([{ "mode": "especes", "montant": 120 }]), 1);
+        conn.execute(
+            "UPDATE ventes SET statut = 'annulee' WHERE id = ?1",
+            params![annulee],
+        )
+        .unwrap();
+        vendre(&mut conn, json!([{ "mode": "cheque", "montant": 120 }]), 2);
+        conn.execute(
+            "INSERT INTO journal_caisse (jtype, montant, session_id) VALUES ('sortie', -15, 1), ('entree', 10, 1)",
+            [],
+        )
+        .unwrap();
+        crate::commands::sessions::close_session_impl(&mut conn, 1, 250.0, None).unwrap();
+
+        let sessions = lister_sessions_caisse(&conn).unwrap();
+        assert_eq!(sessions.len(), 2);
+        let ouverte = &sessions[0];
+        assert_eq!((ouverte.id, ouverte.statut.as_str()), (2, "ouverte"));
+        assert_eq!(ouverte.recettes_cheque, 120.0);
+        assert_eq!(ouverte.ecart, None);
+        let close = &sessions[1];
+        assert_eq!(close.recettes_especes, 70.0);
+        assert_eq!(close.recettes_cb, 50.0);
+        assert_eq!(close.sorties, 15.0);
+        assert_eq!(close.entrees, 10.0);
+        assert_eq!(close.especes_attendu, Some(265.0));
+        assert_eq!(close.especes_declare, Some(250.0));
+        assert_eq!(close.ecart, Some(-15.0));
+        assert!(close.date_cloture.is_some());
     }
 }
