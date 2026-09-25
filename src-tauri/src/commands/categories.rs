@@ -5,13 +5,13 @@ use tauri::State;
 
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_categories(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<Category>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
         .prepare("SELECT id, nom, description FROM categories ORDER BY nom")
@@ -29,7 +29,7 @@ pub fn get_categories(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_category(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -47,7 +47,7 @@ pub fn add_category(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_category(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -71,7 +71,7 @@ pub fn update_category(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_category(
     db: State<DbState>,
     auth: State<AuthState>,

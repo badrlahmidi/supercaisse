@@ -6,7 +6,7 @@ use tauri::State;
 use super::default_magasin_id;
 use super::mouvements::ajuster_stock_variante;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_article_variante(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -35,14 +35,14 @@ pub fn add_article_variante(
     Ok(id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_article_variantes(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     article_id: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn.prepare(
         "SELECT id, taille, couleur, code_barre, stock_dedie FROM article_variantes WHERE article_id = ?1 ORDER BY taille, couleur"
@@ -62,7 +62,7 @@ pub fn get_article_variantes(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_article_variante(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -82,7 +82,7 @@ pub fn update_article_variante(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn adjust_article_variante_stock(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -111,7 +111,7 @@ pub fn adjust_article_variante_stock(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_article_variante(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -130,14 +130,14 @@ pub fn delete_article_variante(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn find_variante_by_barcode(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     code_barre: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     conn.query_row(
         "SELECT v.id, v.article_id, v.taille, v.couleur, v.stock_dedie,

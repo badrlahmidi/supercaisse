@@ -6,13 +6,13 @@ use tauri::State;
 use super::auth::valider_nouveau_mot_de_passe;
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_utilisateurs(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<Utilisateur>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let mut stmt = conn
         .prepare("SELECT id, login, nom, role, must_change_password FROM utilisateurs ORDER BY nom")
@@ -32,7 +32,7 @@ pub fn get_utilisateurs(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_utilisateur(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -63,7 +63,7 @@ pub fn add_utilisateur(
     Ok(id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_utilisateur(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -156,7 +156,7 @@ pub(crate) fn update_utilisateur_impl(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_utilisateur(
     db: State<DbState>,
     auth: State<AuthState>,

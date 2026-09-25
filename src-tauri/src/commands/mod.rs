@@ -121,6 +121,14 @@ pub(crate) fn log_audit(
     );
 }
 
+pub(crate) fn fin_de_journee(fin: &str) -> String {
+    if fin.len() == 10 {
+        format!("{} 23:59:59", fin)
+    } else {
+        fin.to_string()
+    }
+}
+
 pub(crate) fn tracer<T>(operation: &str, resultat: Result<T, String>) -> Result<T, String> {
     match &resultat {
         Ok(_) => log::info!("{} : réussi", operation),
@@ -161,6 +169,13 @@ pub use ventes::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_fin_de_journee_inclut_toute_la_journee() {
+        assert_eq!(fin_de_journee("2026-09-25"), "2026-09-25 23:59:59");
+        assert_eq!(fin_de_journee("2026-09-25 12:00:00"), "2026-09-25 12:00:00");
+        assert!("2026-09-25 11:03:53" <= fin_de_journee("2026-09-25").as_str());
+    }
     use rusqlite::Connection;
 
     fn setup_test_db() -> Connection {

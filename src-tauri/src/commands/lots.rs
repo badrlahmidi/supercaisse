@@ -6,7 +6,7 @@ use tauri::State;
 use super::mouvements::retirer_stock;
 use super::{adjust_article_stock, default_magasin_id};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_article_lot(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -36,14 +36,14 @@ pub fn add_article_lot(
     Ok(lot_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_article_lots(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     article_id: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn
         .prepare(
@@ -67,14 +67,14 @@ pub fn get_article_lots(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_lots_peremption_proche(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     jours: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn
         .prepare(
@@ -102,7 +102,7 @@ pub fn get_lots_peremption_proche(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn discard_article_lot(
     db: State<DbState>,
     auth: State<AuthState>,

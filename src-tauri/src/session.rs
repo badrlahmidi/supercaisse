@@ -282,9 +282,11 @@ mod tests {
         let dossier = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
         let mut commandes = 0;
         let mut fautives = Vec::new();
+        let mut synchrones = Vec::new();
         for entree in std::fs::read_dir(dossier).unwrap() {
             let source = std::fs::read_to_string(entree.unwrap().path()).unwrap();
-            for bloc in source.split("#[tauri::command]").skip(1) {
+            for bloc in source.split("#[tauri::command").skip(1) {
+                let (attribut, bloc) = bloc.split_once(']').unwrap();
                 let nom = bloc
                     .trim_start()
                     .trim_start_matches("pub fn ")
@@ -293,6 +295,9 @@ mod tests {
                     .unwrap()
                     .to_string();
                 commandes += 1;
+                if attribut != "(async)" {
+                    synchrones.push(nom.clone());
+                }
                 if publiques.contains(&nom.as_str()) {
                     continue;
                 }
@@ -317,6 +322,11 @@ mod tests {
             fautives.is_empty(),
             "commandes sans contrôle de session : {:?}",
             fautives
+        );
+        assert!(
+            synchrones.is_empty(),
+            "commandes exécutées sur le thread principal (ajouter `(async)`) : {:?}",
+            synchrones
         );
     }
 }

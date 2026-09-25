@@ -5,7 +5,7 @@ use tauri::State;
 
 use super::{adjust_article_stock, log_audit};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_inventaire(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -63,14 +63,14 @@ pub(crate) fn create_inventaire_impl(
     Ok(serde_json::json!({ "id": inv_id, "nb_articles": nb }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_inventaire(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     inventaire_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "voir"))?;
 
     let (date_debut, statut, magasin_id): (String, String, i64) = conn
@@ -113,13 +113,13 @@ pub fn get_inventaire(
     }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_inventaires(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT i.id, i.date_debut, i.date_fin, i.statut, i.magasin_id, m.nom, u.nom,
@@ -149,7 +149,7 @@ pub fn get_inventaires(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_inventaire_ligne(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -195,7 +195,7 @@ pub(crate) fn update_inventaire_ligne_impl(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn valider_inventaire(
     db: State<DbState>,
     auth: State<AuthState>,

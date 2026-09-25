@@ -6,13 +6,13 @@ use tauri::State;
 use super::mouvements::retirer_stock;
 use super::{adjust_article_stock, log_audit};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_magasins(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
         .prepare("SELECT id, nom, adresse FROM magasins ORDER BY id")
@@ -30,7 +30,7 @@ pub fn get_magasins(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_magasin(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -48,7 +48,7 @@ pub fn add_magasin(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_magasin(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -67,7 +67,7 @@ pub fn update_magasin(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_magasin(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -108,13 +108,13 @@ pub fn delete_magasin(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_transferts(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT t.id, t.date, t.statut, ms.nom AS source_nom, md.nom AS dest_nom, u.nom AS utilisateur_nom
@@ -140,14 +140,14 @@ pub fn get_transferts(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_stock_par_magasin(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     magasin_id: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT a.id, a.designation, a.code_barre, COALESCE(s.quantite, 0) AS stock, a.stock_alerte
@@ -171,7 +171,7 @@ pub fn get_stock_par_magasin(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_transfert(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -253,7 +253,7 @@ pub(crate) fn create_transfert_impl(
     Ok(transfert_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn validate_transfert(
     db: State<DbState>,
     auth: State<AuthState>,

@@ -3,7 +3,7 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_article_composant(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -25,14 +25,14 @@ pub fn add_article_composant(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_article_composants(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     article_id: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
         .prepare(
@@ -57,7 +57,7 @@ pub fn get_article_composants(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_article_composant_quantite(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -75,7 +75,7 @@ pub fn update_article_composant_quantite(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_article_composant(
     db: State<DbState>,
     auth: State<AuthState>,

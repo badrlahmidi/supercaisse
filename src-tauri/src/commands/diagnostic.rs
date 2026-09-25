@@ -13,7 +13,7 @@ pub(crate) fn tronquer(message: &str) -> String {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn journaliser_frontend(niveau: String, message: String) -> Result<(), String> {
     let message = tronquer(&message);
     match niveau.as_str() {

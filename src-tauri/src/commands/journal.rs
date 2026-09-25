@@ -5,7 +5,7 @@ use tauri::State;
 
 use super::calcul::montant_saisi;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_journal_caisse(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -13,7 +13,7 @@ pub fn get_journal_caisse(
     debut: Option<String>,
     fin: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "voir"))?;
     let mut where_clause = String::new();
     let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -26,7 +26,7 @@ pub fn get_journal_caisse(
     if let Some(f) = &fin {
         if !f.is_empty() {
             where_clause.push_str(" AND j.date <= ?");
-            qp.push(Box::new(f.clone()));
+            qp.push(Box::new(super::fin_de_journee(f)));
         }
     }
     let sql = format!(
@@ -53,7 +53,7 @@ pub fn get_journal_caisse(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_journal_caisse(
     db: State<DbState>,
     auth: State<AuthState>,

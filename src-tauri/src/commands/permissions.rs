@@ -5,14 +5,14 @@ use tauri::State;
 
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_permissions(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     role: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     if role != me.role && !me.est_admin() {
         return Err("Accès refusé : permissions d'un autre rôle".to_string());
@@ -34,7 +34,7 @@ pub fn get_permissions(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_permission(
     db: State<DbState>,
     auth: State<AuthState>,

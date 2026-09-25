@@ -2,7 +2,7 @@ use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_mouvements_stock(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -11,7 +11,7 @@ pub fn get_mouvements_stock(
     debut: Option<String>,
     fin: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut where_clause = String::new();
     let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -28,7 +28,7 @@ pub fn get_mouvements_stock(
     if let Some(f) = &fin {
         if !f.is_empty() {
             where_clause.push_str(" AND m.date <= ?");
-            qp.push(Box::new(f.clone()));
+            qp.push(Box::new(super::fin_de_journee(f)));
         }
     }
     let sql = format!(
@@ -57,13 +57,13 @@ pub fn get_mouvements_stock(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_articles_stock_alerte(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("reappro", "voir"))?;
     let mut stmt = conn
         .prepare(

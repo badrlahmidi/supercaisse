@@ -138,7 +138,7 @@ function parseRustCommands(): Map<string, RustCommand> {
   const commands = new Map<string, RustCommand>()
   for (const file of readdirSync(dir).filter((f: string) => f.endsWith(".rs"))) {
     const src = readFileSync(join(dir, file), "utf8")
-    const re = /#\[tauri::command\]\s*pub\s+(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g
+    const re = /#\[tauri::command(?:\(async\))?\]\s*pub\s+(?:async\s+)?fn\s+(\w+)\s*\(([\s\S]*?)\)\s*->/g
     for (const m of src.matchAll(re)) {
       const required: string[] = []
       const all: string[] = []

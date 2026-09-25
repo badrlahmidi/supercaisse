@@ -5,13 +5,13 @@ use tauri::State;
 
 use super::calcul::montant_positif;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_cheques(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT c.id, c.numero, c.banque, c.tireur, c.montant, c.date_emission, c.date_echeance, c.statut, c.ctype, c.client_id, c.fournisseur_id,
@@ -44,7 +44,7 @@ pub fn get_cheques(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_cheque(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -70,7 +70,7 @@ pub fn add_cheque(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_cheque_status(
     db: State<DbState>,
     auth: State<AuthState>,

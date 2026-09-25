@@ -6,14 +6,14 @@ use tauri::State;
 use super::mouvements::retirer_stock;
 use super::{adjust_article_stock, default_magasin_id, log_audit};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_articles(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     recherche: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let image_col = "a.image_url";
     let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match recherche {
@@ -76,7 +76,7 @@ pub fn get_articles(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_article(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -123,7 +123,7 @@ pub fn add_article(
     Ok(article_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_article(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -182,7 +182,7 @@ pub fn update_article(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_article(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -211,7 +211,7 @@ pub fn delete_article(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_article_stock(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -240,7 +240,7 @@ pub fn update_article_stock(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_articles_csv(
     db: State<DbState>,
     auth: State<AuthState>,

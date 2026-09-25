@@ -6,7 +6,7 @@ use tauri::State;
 use super::calcul::{montant_saisi, round2, somme_dh};
 use super::{adjust_article_stock, default_magasin_id};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_achat(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -65,13 +65,13 @@ pub fn create_achat(
     Ok(achat_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_achats(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT a.id, a.date, a.fournisseur_id, a.reference, a.montant_total, a.statut, f.nom as fournisseur_nom, a.statut_livraison, a.statut_paiement
@@ -97,7 +97,7 @@ pub fn get_achats(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_achat_status(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -159,14 +159,14 @@ pub fn update_achat_status(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn compare_fournisseur_prices(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     article_id: Option<i64>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
 
     let sql = "

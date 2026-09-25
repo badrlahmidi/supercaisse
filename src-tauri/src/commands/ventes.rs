@@ -141,7 +141,7 @@ fn lire_setting(tx: &Connection, key: &str) -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_vente(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -506,7 +506,7 @@ fn ajuster_credit(tx: &Connection, client_id: i64, delta: f64) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn annuler_vente(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -666,7 +666,7 @@ pub(crate) fn annuler_vente_impl(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_ventes(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -674,7 +674,7 @@ pub fn get_ventes(
     debut: Option<String>,
     fin: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
     let mut where_clause = String::new();
     let mut query_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -687,7 +687,7 @@ pub fn get_ventes(
     if let Some(f) = &fin {
         if !f.is_empty() {
             where_clause.push_str(" AND v.date <= ?");
-            query_params.push(Box::new(f.clone()));
+            query_params.push(Box::new(super::fin_de_journee(f)));
         }
     }
     let sql = format!(
@@ -727,14 +727,14 @@ pub fn get_ventes(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_vente_details(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     vente_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
     let vente = conn.query_row(
         "SELECT v.id, v.date, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.numero_facture,
@@ -797,7 +797,7 @@ pub fn get_vente_details(
     Ok(serde_json::json!({ "vente": vente, "lignes": lignes }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn convert_document(
     db: State<DbState>,
     auth: State<AuthState>,

@@ -5,13 +5,13 @@ use tauri::State;
 
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_fournisseurs(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<Fournisseur>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("fournisseurs", "voir"))?;
     let mut stmt = conn
         .prepare("SELECT id, nom, adresse, telephone, ice, email FROM fournisseurs ORDER BY nom")
@@ -32,7 +32,7 @@ pub fn get_fournisseurs(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_fournisseur(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -52,7 +52,7 @@ pub fn add_fournisseur(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_fournisseur(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -79,7 +79,7 @@ pub fn update_fournisseur(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_fournisseur(
     db: State<DbState>,
     auth: State<AuthState>,

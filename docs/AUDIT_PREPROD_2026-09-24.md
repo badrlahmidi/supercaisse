@@ -565,6 +565,16 @@ CREATE INDEX IF NOT EXISTS idx_article_stocks_mag  ON article_stocks(magasin_id)
 
 ### [MAJEUR] M-15 — Commandes synchrones exécutées sur le thread principal
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+>
+> - **Hors du thread principal :** les 101 commandes sont déclarées `#[tauri::command(async)]`. Tauri les exécute alors sur son pool de threads au lieu du thread principal, sans changer leur signature. L'interface ne se fige donc plus pendant un hachage Argon2, un rapport, une impression ou une sauvegarde. Le test de contrôle de session échoue si une commande reste synchrone.
+> - **Lectures parallèles :** `DbState` ajoute un pool de 3 connexions en lecture seule (`SQLITE_OPEN_READ_ONLY` + `query_only`) sur la même base WAL. Les 39 commandes qui ne font que lire l'utilisent via `db.lecture()` : listes, rapports, statistiques, trésorerie, journal, audit, sauvegarde et export. Elles ne sont plus bloquées par une écriture en cours et ne la bloquent pas. Les sauvegardes copient un instantané cohérent depuis un lecteur.
+> - **Écritures :** elles restent sérialisées sur la connexion principale, avec `busy_timeout` à 5 s.
+>
+> Couvert par des tests Rust : lecteurs actifs pendant une écriture, écriture refusée sur un lecteur, restauration et sauvegarde avec des lecteurs ouverts. Vérifié dans l'application (xvfb) : connexion, tableau de bord et pages de liste.
+>
+> Au passage, un bug de filtre a été corrigé : `get_ventes`, `get_journal_caisse` et `get_mouvements_stock` comparaient la date de fin sans l'heure. Les opérations du dernier jour étaient donc exclues, et la page Ventes n'affichait pas les ventes du jour. La fonction commune `fin_de_journee` est maintenant utilisée partout.
+
 **Fichier** : toutes les commandes (`pub fn`, non `async`)
 **Risque** : dans Tauri v2, une commande non `async` s'exécute sur le thread principal. Argon2 (environ 50 à 100 ms par hash, multiplié par le nombre d'utilisateurs dans `login_pin`), les rapports sans `LIMIT` (`get_articles`, `get_rapport_detaille`, `compare_fournisseur_prices`, `get_transferts`) et les sauvegardes figent l'UI. Le Mutex global sérialise toutes les lectures derrière la moindre écriture.
 **Fix** : déclarer les commandes `async` et exécuter le travail bloquant avec `tauri::async_runtime::spawn_blocking`. Ouvrir une connexion en lecture séparée (WAL autorise les lectures concurrentes), ou utiliser `r2d2_sqlite` avec un pool d'une connexion en écriture et N en lecture.

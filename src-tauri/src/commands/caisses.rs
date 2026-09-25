@@ -54,13 +54,13 @@ pub(crate) fn recettes_depuis(conn: &Connection, depuis: &str) -> Result<Recette
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_caisses(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "voir"))?;
     let mut stmt = conn
         .prepare(
@@ -97,7 +97,7 @@ pub fn get_caisses(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_caisse(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -117,7 +117,7 @@ pub fn open_caisse(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn close_caisse(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -153,13 +153,13 @@ pub fn close_caisse(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_tresorerie(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
     let today_start = chrono::Local::now().format("%Y-%m-%d 00:00:00").to_string();

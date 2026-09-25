@@ -8,7 +8,6 @@ mod session;
 use db::{init_db, DbState};
 use paths::{legacy_database_candidates, prepare_database, AppDirs};
 use session::AuthState;
-use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
@@ -59,9 +58,7 @@ pub fn run() {
                 Ok(None) => {}
                 Err(e) => log::error!("Sauvegarde automatique impossible : {}", e),
             }
-            app.manage(DbState {
-                conn: Arc::new(Mutex::new(conn)),
-            });
+            app.manage(DbState::avec_lecteurs(conn, &db_path, db::LECTEURS)?);
             app.manage(dirs);
             Ok(())
         })

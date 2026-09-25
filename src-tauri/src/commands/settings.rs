@@ -5,13 +5,13 @@ use tauri::State;
 
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_settings(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Settings, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
         .prepare("SELECT key, value FROM settings")
@@ -63,7 +63,7 @@ pub fn get_settings(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_settings(
     db: State<DbState>,
     auth: State<AuthState>,

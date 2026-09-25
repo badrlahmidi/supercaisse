@@ -2,13 +2,13 @@ use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_stats(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
     let total_ventes_30j: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= datetime('now','-30 days','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);

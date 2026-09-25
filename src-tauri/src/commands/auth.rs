@@ -117,7 +117,7 @@ fn ouvrir_session(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn login(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -128,7 +128,7 @@ pub fn login(
     ouvrir_session(&auth, login_impl(&conn, &login, &password)?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn logout(auth: State<AuthState>, token: String) -> Result<(), String> {
     auth.fermer(&token)
 }
@@ -179,7 +179,7 @@ pub(crate) fn change_password_impl(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn change_password(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -197,7 +197,7 @@ pub fn change_password(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn login_pin(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -239,7 +239,7 @@ pub(crate) fn login_pin_impl(conn: &Connection, pin: &str) -> Result<Option<Util
     Ok(None)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_user_pin(
     db: State<DbState>,
     auth: State<AuthState>,

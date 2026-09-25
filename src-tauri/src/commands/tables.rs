@@ -3,13 +3,13 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_tables(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
         .prepare("SELECT id, nom, statut, ticket_id FROM tables_resto ORDER BY id")
@@ -29,7 +29,7 @@ pub fn get_tables(
     Ok(tables)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_table_status(
     db: State<DbState>,
     auth: State<AuthState>,

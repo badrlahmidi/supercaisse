@@ -6,13 +6,13 @@ use tauri::State;
 use super::calcul::montant_positif;
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_clients(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<Client>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "voir"))?;
     let mut stmt = conn.prepare("SELECT id, code, nom, adresse, telephone, email, credit_plafond, credit_actuel, ice, segment FROM clients ORDER BY nom")
         .map_err(|e| e.to_string())?;
@@ -36,7 +36,7 @@ pub fn get_clients(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_client(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -62,7 +62,7 @@ pub fn add_client(
     Ok(conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_client(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -89,7 +89,7 @@ pub fn update_client(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_client(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -116,14 +116,14 @@ pub fn delete_client(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_releve_client(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     client_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "voir"))?;
 
     let (nom, credit_actuel, credit_plafond): (String, f64, f64) = conn.query_row(
@@ -185,14 +185,14 @@ pub fn get_releve_client(
     }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_mouvements_fidelite(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     client_id: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT mf.id, mf.client_id, mf.vente_id, mf.points, mf.mtype, mf.date, v.numero_facture

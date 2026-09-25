@@ -6,14 +6,14 @@ use tauri::State;
 use super::calcul::montant_positif;
 use super::log_audit;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_paiements(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     client_id: Option<i64>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "voir"))?;
     let (sql, params_vec) = match client_id {
         Some(cid) => (
@@ -47,7 +47,7 @@ pub fn get_paiements(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_paiement(
     db: State<DbState>,
     auth: State<AuthState>,

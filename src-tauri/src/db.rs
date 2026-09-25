@@ -1,8 +1,11 @@
 use argon2::password_hash::{rand_core::OsRng, SaltString};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use rusqlite::{params, Connection, OptionalExtension, Result};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Category {
@@ -72,6 +75,62 @@ pub struct Settings {
 
 pub struct DbState {
     pub conn: Arc<Mutex<Connection>>,
+    lecteurs: Vec<Mutex<Connection>>,
+    prochain_lecteur: AtomicUsize,
+}
+
+pub const LECTEURS: usize = 3;
+
+impl DbState {
+    pub fn new(conn: Connection) -> Self {
+        DbState {
+            conn: Arc::new(Mutex::new(conn)),
+            lecteurs: Vec::new(),
+            prochain_lecteur: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn avec_lecteurs(
+        conn: Connection,
+        chemin: &Path,
+        nombre: usize,
+    ) -> std::result::Result<Self, String> {
+        let mut etat = DbState::new(conn);
+        for _ in 0..nombre {
+            etat.lecteurs.push(Mutex::new(ouvrir_lecteur(chemin)?));
+        }
+        Ok(etat)
+    }
+
+    pub fn lecture(&self) -> std::result::Result<MutexGuard<'_, Connection>, String> {
+        if self.lecteurs.is_empty() {
+            return self.conn.lock().map_err(|e| e.to_string());
+        }
+        for lecteur in &self.lecteurs {
+            match lecteur.try_lock() {
+                Ok(garde) => return Ok(garde),
+                Err(TryLockError::WouldBlock) => continue,
+                Err(TryLockError::Poisoned(e)) => return Err(e.to_string()),
+            }
+        }
+        let index = self.prochain_lecteur.fetch_add(1, Ordering::Relaxed) % self.lecteurs.len();
+        self.lecteurs[index].lock().map_err(|e| e.to_string())
+    }
+}
+
+pub(crate) fn ouvrir_lecteur(chemin: &Path) -> std::result::Result<Connection, String> {
+    let conn = Connection::open_with_flags(
+        chemin,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|e| format!("Connexion en lecture impossible : {}", e))?;
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA query_only = ON;")
+        .map_err(|e| e.to_string())?;
+    Ok(conn)
 }
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -83,6 +142,8 @@ const MIGRATIONS: &[Migration] = &[migration_001_base, migration_002_montants_au
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
     let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .map_err(|e| e.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5))
         .map_err(|e| e.to_string())?;
     migrer(&mut conn)?;
     let version = version_schema(&conn).map_err(|e| e.to_string())?;
@@ -991,6 +1052,48 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_lecteurs_paralleles_a_l_ecriture() {
+        let dossier = std::env::temp_dir().join(format!("sc_lecteurs_{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let chemin = dossier.join("base.db");
+        let conn = super::init_db(chemin.to_str().unwrap()).unwrap();
+        let etat = super::DbState::avec_lecteurs(conn, &chemin, super::LECTEURS).unwrap();
+        {
+            let ecriture = etat.conn.lock().unwrap();
+            ecriture
+                .execute("INSERT INTO clients (nom) VALUES ('Visible')", [])
+                .unwrap();
+            let gardes: Vec<_> = (0..super::LECTEURS)
+                .map(|_| etat.lecture().unwrap())
+                .collect();
+            let n: i64 = gardes[0]
+                .query_row(
+                    "SELECT COUNT(*) FROM clients WHERE nom = 'Visible'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1);
+            let refus = gardes[1].execute("INSERT INTO clients (nom) VALUES ('X')", []);
+            assert!(refus.is_err());
+        }
+        drop(etat.lecture().unwrap());
+        drop(etat);
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
+
+    #[test]
+    fn test_lecture_sans_lecteurs_utilise_la_connexion_principale() {
+        let etat = super::DbState::new(super::init_db(":memory:").unwrap());
+        let n: i64 = etat
+            .lecture()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
     #[test]
     fn test_migration_arrondit_les_montants_au_centime() {
         let mut conn = super::Connection::open_in_memory().unwrap();

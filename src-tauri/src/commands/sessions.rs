@@ -6,13 +6,13 @@ use tauri::State;
 use super::calcul::{en_dh, montant_positif, vers_centimes};
 use super::{default_magasin_id, log_audit};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_current_session(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let caissier_id = me.user_id;
     let mut stmt = conn
@@ -43,7 +43,7 @@ pub fn get_current_session(
     Ok(None)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_session(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -128,7 +128,7 @@ pub(crate) fn totaux_especes_session(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn close_session(
     db: State<DbState>,
     auth: State<AuthState>,

@@ -5,7 +5,7 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn print_ticket(auth: State<AuthState>, token: String, texte: String) -> Result<(), String> {
     let _me = auth.session(&token)?;
     let path = std::env::temp_dir().join("ticket_impression.txt");
@@ -85,7 +85,7 @@ pub(crate) fn valider_imprimante(nom: &str) -> Result<CibleImpression, String> {
     Err(invalide())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn print_escpos(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -142,7 +142,7 @@ fn imprimer_escpos(db: &DbState, base64_data: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_cash_drawer(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -153,7 +153,7 @@ pub fn open_cash_drawer(
     imprimer_escpos(&db, general_purpose::STANDARD.encode(&drawer_kick))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn print_receipt(auth: State<AuthState>, token: String, data: String) -> Result<(), String> {
     let _me = auth.session(&token)?;
     let path = std::env::temp_dir().join("ticket_impression.html");
@@ -179,7 +179,7 @@ pub fn print_receipt(auth: State<AuthState>, token: String, data: String) -> Res
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_document_pdf(
     dirs: State<AppDirs>,
     auth: State<AuthState>,

@@ -3,14 +3,14 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_rapport_x(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
     session_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     super::sessions::verifier_session_propre(&conn, &me, session_id, "voir")?;
 
@@ -89,7 +89,7 @@ pub fn get_rapport_x(
     }))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_rapport_detaille(
     db: State<DbState>,
     auth: State<AuthState>,
@@ -97,7 +97,7 @@ pub fn get_rapport_detaille(
     debut: Option<String>,
     fin: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
     let date_filter = |col: &str| -> (String, Vec<String>) {
@@ -112,7 +112,7 @@ pub fn get_rapport_detaille(
         if let Some(f) = &fin {
             if !f.is_empty() {
                 clause.push_str(&format!(" AND {} <= ?", col));
-                params.push(format!("{} 23:59:59", f));
+                params.push(super::fin_de_journee(f));
             }
         }
         (clause, params)

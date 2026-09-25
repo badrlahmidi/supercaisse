@@ -189,27 +189,27 @@ pub(crate) fn restaurer(
     Ok(securite)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn backup_database(
     db: State<DbState>,
     dirs: State<AppDirs>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<String, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("settings", "exporter"))?;
     let chemin = super::tracer("Sauvegarde manuelle", sauvegarder(&conn, &dirs, ""))?;
     Ok(chemin.to_string_lossy().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_database(
     db: State<DbState>,
     dirs: State<AppDirs>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<String, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("settings", "exporter"))?;
     let chemin = dirs
         .exports()
@@ -218,14 +218,14 @@ pub fn export_database(
     Ok(chemin.to_string_lossy().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_backups(
     db: State<DbState>,
     dirs: State<AppDirs>,
     auth: State<AuthState>,
     token: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let mut fichiers = Vec::new();
     for dossier in [dirs.backups(), dirs.exports()] {
@@ -254,7 +254,7 @@ pub fn list_backups(
     Ok(fichiers)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_database(
     db: State<DbState>,
     dirs: State<AppDirs>,
@@ -333,6 +333,43 @@ mod tests {
         assert!(detail.contains("sauvegarde préalable"));
         let copie = Connection::open(&securite).unwrap();
         assert_eq!(nb_clients(&copie), 2);
+        std::fs::remove_dir_all(&r).unwrap();
+    }
+
+    #[test]
+    fn test_restauration_et_sauvegarde_avec_lecteurs_ouverts() {
+        let r = racine("lecteurs");
+        let d = dirs(&r);
+        let source = r.join("source.db");
+        {
+            let ancienne = init_db(source.to_str().unwrap()).unwrap();
+            ancienne
+                .execute("INSERT INTO clients (nom) VALUES ('Restauré')", [])
+                .unwrap();
+        }
+        let courante = r.join("courante.db");
+        let etat = crate::db::DbState::avec_lecteurs(
+            init_db(courante.to_str().unwrap()).unwrap(),
+            &courante,
+            2,
+        )
+        .unwrap();
+        etat.conn
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO clients (nom) VALUES ('Ancien')", [])
+            .unwrap();
+        let copie = sauvegarder(&etat.lecture().unwrap(), &d, "").unwrap();
+        assert_eq!(nb_clients(&Connection::open(&copie).unwrap()), 1);
+        assert_eq!(nb_clients(&etat.lecture().unwrap()), 1);
+        restaurer(&mut etat.conn.lock().unwrap(), &d, &source, None).unwrap();
+        let nom: String = etat
+            .lecture()
+            .unwrap()
+            .query_row("SELECT nom FROM clients", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(nom, "Restauré");
+        drop(etat);
         std::fs::remove_dir_all(&r).unwrap();
     }
 
