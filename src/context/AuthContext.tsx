@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useLocation } from "react-router-dom"
 import { invoke, onSessionExpired, setSessionToken, getSessionToken } from "@/lib/tauri"
 import { toast } from "sonner"
 import ChangePasswordRequired from "@/components/ChangePasswordRequired"
+import { accesAutorise, routeAccueil } from "@/routes/acces"
 
 export interface User {
   id: number
@@ -165,8 +166,8 @@ export function useAuth() {
   return context
 }
 
-export function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
-  const { user, isLoading } = useAuth()
+export function ProtectedRoute({ children, chemin }: { children: ReactNode; chemin?: string }) {
+  const { user, isLoading, hasModulePermission } = useAuth()
   const location = useLocation()
 
   if (isLoading) return null
@@ -179,9 +180,22 @@ export function ProtectedRoute({ children, allowedRoles }: { children: ReactNode
     return <ChangePasswordRequired />
   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/pos" replace />
+  const habilitations = { role: user.role, aLaPermission: hasModulePermission }
+  if (!chemin || !accesAutorise(chemin, habilitations)) {
+    const accueil = routeAccueil(habilitations)
+    if (accueil && accueil !== chemin) return <Navigate to={accueil} replace />
+    return <AccesRefuse />
   }
 
   return <>{children}</>
 }
+
+function AccesRefuse() {
+  return (
+    <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
+      <p className="text-lg font-semibold">Accès non autorisé</p>
+      <p className="text-sm text-muted-foreground">Aucune page n'est ouverte à votre rôle. Contactez un administrateur.</p>
+    </div>
+  )
+}
+

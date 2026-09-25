@@ -808,7 +808,18 @@ Ajouter aussi un test de contrat Vitest qui parse les signatures `#[tauri::comma
 
 ### [MAJEUR] M-10 — Rôle et permissions de l'UI modifiables par l'utilisateur
 
-> **Statut : corrigé en partie.** Depuis C-5, chaque commande contrôle la permission du module côté serveur, en relisant le rôle en base à chaque appel. Modifier le rôle ou les permissions dans l'interface ne donne donc plus accès aux données. Le tableau de bord est réservé aux admins et managers. **Reste :** le routeur filtre encore par rôle et non par la table `permissions`, si bien qu'une page interdite s'ouvre (vide, avec des erreurs d'autorisation).
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+>
+> - **Côté serveur (depuis C-5) :** chaque commande contrôle la permission du module en relisant le rôle en base à chaque appel.
+> - **Côté interface :** `src/routes/acces.ts` associe chaque route à la permission exigée par les commandes qu'elle appelle (par exemple `/ventes` → `ventes/voir`, `/pos` → `ventes/creer`, `/stock/*` → `stock/voir`, `/caisses` → `journal/voir`). Les pages purement administratives restent réservées à l'admin.
+>   - Le routeur (`ProtectedRoute chemin=…`) et le menu utilisent tous deux cette table via `hasModulePermission`, qui lit la table `permissions` rechargée à chaque connexion.
+>   - Une page non autorisée redirige vers la première page autorisée : POS, tableau de bord, ventes, clients, cuisine, dans cet ordre. Si aucune ne l'est, un message « Accès non autorisé » s'affiche.
+>   - Une route sans règle est réservée à l'admin, et un test vérifie que chaque route du routeur en déclare une.
+> - **Changement visible :** le caissier voit désormais les pages que ses permissions par défaut autorisent (Ventes, Clients, Paiements). Le menu lui proposait le tableau de bord, que la route refusait ; ce n'est plus le cas.
+>
+> Couvert par des tests Vitest (règles d'accès, page d'accueil, couverture des routes, redirection d'un manager privé d'`articles/voir`).
+>
+> Vérifié dans l'application : menu du caissier conforme à ses permissions, avec redirection du tableau de bord vers le POS. Après retrait de `clients/voir` au rôle caissier, Clients et Paiements disparaissent de son menu à la connexion suivante.
 
 **Fichier** : `src/context/AuthContext.tsx:58-62,110-113,119-128`, `src/routes/router.tsx`
 **Risque** :
@@ -1113,17 +1124,17 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 82 / 100
+## Note après corrections (25/09/2026) : 84 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82). La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
-| Sécurité | 6 / 25 | **22 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** routeur non aligné sur les permissions (M-10, UI seulement), énumération par timing (m-1), double verrouillage (m-2). |
+| Sécurité | 6 / 25 | **23 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), routes et menu alignés sur la table des permissions (M-10), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** énumération par timing (m-1), double verrouillage (m-2). |
 | Intégrité données | 5 / 20 | **18 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). **Reste :** plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **12 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12). **Restent :** index manquants (S-3), traçabilité `created_at` / `updated_by` (S-5). |
 | Architecture backend | 7 / 15 | **12 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** 30 commandes aux sorties non typées (M-17 en partie, entrées typées), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |
-| Frontend | 5 / 15 | **11 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 142 tests Vitest, formulaires Clients et Paramètres réparés. **Restent :** routeur par rôle (M-10), panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 58 avertissements de lint (F-3). |
+| Frontend | 5 / 15 | **12 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 142 tests Vitest, formulaires Clients et Paramètres réparés. **Restent :** panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 58 avertissements de lint (F-3). |
 | Production readiness | 3 / 10 | **7 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, fichiers d'impression à nom fixe (P-6), et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
 
 **Avant la mise en production :**

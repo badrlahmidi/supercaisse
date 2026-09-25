@@ -34,7 +34,7 @@ function renderProtected(user: SessionUser) {
       <MemoryRouter>
         <AuthProvider>
           <Connexion user={user}>
-            <ProtectedRoute>
+            <ProtectedRoute chemin="/pos">
               <div data-testid="page">Page protégée</div>
             </ProtectedRoute>
           </Connexion>

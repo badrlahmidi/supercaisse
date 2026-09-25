@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
-import { AuthProvider, useAuth } from "../context/AuthContext"
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom"
+import { AuthProvider, ProtectedRoute, useAuth } from "../context/AuthContext"
 import { getSessionToken, invoke, setSessionToken } from "@/lib/tauri"
 
 const tauriInvoke = vi.hoisted(() => vi.fn())
@@ -102,5 +102,42 @@ describe("AuthProvider", () => {
     tauriInvoke.mockRejectedValue("Session invalide ou expirée : veuillez vous reconnecter")
     await expect(invoke("get_categories")).rejects.toBeTruthy()
     await waitFor(() => expect(screen.getByTestId("username")).toHaveTextContent("anonyme"))
+  })
+
+  it("routes according to the permissions table", async () => {
+    tauriInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "get_permissions"
+        ? [
+            { module: "ventes", action: "voir", allowed: true },
+            { module: "ventes", action: "creer", allowed: false },
+            { module: "articles", action: "voir", allowed: false },
+          ]
+        : null),
+    )
+
+    function Connexion() {
+      const { user, loginAs } = useAuth()
+      const navigate = useNavigate()
+      return user
+        ? <button onClick={() => navigate("/articles")}>articles</button>
+        : <button onClick={() => loginAs({ id: 5, login: "gerant", nom: "Gérant", role: "manager", token: "tok-3" })}>login</button>
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <AuthProvider>
+          <Connexion />
+          <Routes>
+            <Route path="/articles" element={<ProtectedRoute chemin="/articles"><p>Page articles</p></ProtectedRoute>} />
+            <Route path="/ventes" element={<ProtectedRoute chemin="/ventes"><p>Page ventes</p></ProtectedRoute>} />
+            <Route path="/login" element={<p>Page login</p>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    )
+    fireEvent.click(await screen.findByText("login"))
+    fireEvent.click(await screen.findByText("articles"))
+    expect(await screen.findByText("Page ventes")).toBeInTheDocument()
+    expect(screen.queryByText("Page articles")).not.toBeInTheDocument()
   })
 })
