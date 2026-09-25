@@ -6,6 +6,64 @@ use base64::Engine;
 use rusqlite::OptionalExtension;
 use tauri::State;
 
+const DUREE_CONSERVATION_TICKETS: std::time::Duration = std::time::Duration::from_secs(3600);
+
+fn dossier_impression() -> std::path::PathBuf {
+    std::env::temp_dir().join("supercaisse-impression")
+}
+
+fn nettoyer_anciens_tickets(dossier: &std::path::Path, age_max: std::time::Duration) {
+    let Ok(entrees) = std::fs::read_dir(dossier) else {
+        return;
+    };
+    for entree in entrees.flatten() {
+        let ancien = entree
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|date| date.elapsed().ok())
+            .is_some_and(|age| age > age_max);
+        if ancien {
+            if let Err(e) = std::fs::remove_file(entree.path()) {
+                log::warn!(
+                    "Suppression du ticket temporaire {} impossible : {}",
+                    entree.path().display(),
+                    e
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn fichier_ticket(extension: &str) -> Result<std::path::PathBuf, String> {
+    static COMPTEUR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dossier = dossier_impression();
+    ensure_dir(&dossier)?;
+    nettoyer_anciens_tickets(&dossier, DUREE_CONSERVATION_TICKETS);
+    let horodatage = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let numero = COMPTEUR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Ok(dossier.join(format!(
+        "ticket_{}_{}_{}.{}",
+        std::process::id(),
+        horodatage,
+        numero,
+        extension
+    )))
+}
+
+fn supprimer_ticket(path: &std::path::Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        log::warn!(
+            "Suppression du ticket temporaire {} impossible : {}",
+            path.display(),
+            e
+        );
+    }
+}
+
 fn lancer(commande: &mut std::process::Command, action: &str) -> Result<(), String> {
     let sortie = commande
         .output()
@@ -25,10 +83,10 @@ fn lancer(commande: &mut std::process::Command, action: &str) -> Result<(), Stri
 #[tauri::command(async)]
 pub fn print_ticket(auth: State<AuthState>, token: String, texte: String) -> Result<(), String> {
     let _me = auth.session(&token)?;
-    let path = std::env::temp_dir().join("ticket_impression.txt");
+    let path = fichier_ticket("txt")?;
     std::fs::write(&path, &texte).map_err(|e| format!("Erreur écriture ticket: {}", e))?;
 
-    if cfg!(target_os = "windows") {
+    let resultat = if cfg!(target_os = "windows") {
         let path_str = path.to_string_lossy().replace("'", "''");
         let ps = format!(
             "Start-Process -FilePath 'notepad.exe' -ArgumentList '/p', '{}' -WindowStyle Hidden -Wait",
@@ -37,14 +95,15 @@ pub fn print_ticket(auth: State<AuthState>, token: String, texte: String) -> Res
         lancer(
             std::process::Command::new("powershell").args(["-NonInteractive", "-Command", &ps]),
             "Impression",
-        )?;
+        )
     } else {
         lancer(
-            std::process::Command::new("lp").arg(path.to_string_lossy().as_ref()),
+            std::process::Command::new("lp").arg("--").arg(&path),
             "Impression",
-        )?;
-    }
-    Ok(())
+        )
+    };
+    supprimer_ticket(&path);
+    resultat
 }
 
 #[derive(Debug, PartialEq)]
@@ -139,8 +198,7 @@ fn imprimer_escpos(db: &DbState, base64_data: String) -> Result<(), String> {
                 .map_err(|e| format!("Erreur d'impression ESC/POS vers {}: {}", chemin, e))?;
         }
         CibleImpression::Cups(nom) => {
-            let path =
-                std::env::temp_dir().join(format!("ticket_escpos_{}.bin", std::process::id()));
+            let path = fichier_ticket("bin")?;
             std::fs::write(&path, &bytes)
                 .map_err(|e| format!("Erreur d'écriture du flux binaire: {}", e))?;
             let output = std::process::Command::new("lp")
@@ -151,8 +209,9 @@ fn imprimer_escpos(db: &DbState, base64_data: String) -> Result<(), String> {
                 .arg("--")
                 .arg(&path)
                 .output()
-                .map_err(|e| format!("Erreur lp: {}", e))?;
-            let _ = std::fs::remove_file(&path);
+                .map_err(|e| format!("Erreur lp: {}", e));
+            supprimer_ticket(&path);
+            let output = output?;
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
                 return Err(format!("Erreur d'impression ESC/POS: {}", err));
@@ -177,7 +236,7 @@ pub fn open_cash_drawer(
 #[tauri::command(async)]
 pub fn print_receipt(auth: State<AuthState>, token: String, data: String) -> Result<(), String> {
     let _me = auth.session(&token)?;
-    let path = std::env::temp_dir().join("ticket_impression.html");
+    let path = fichier_ticket("html")?;
     std::fs::write(&path, &data).map_err(|e| format!("Erreur écriture ticket: {}", e))?;
 
     if cfg!(target_os = "windows") {
@@ -241,6 +300,27 @@ pub fn save_document_pdf(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_fichiers_de_ticket_uniques_et_nettoyes() {
+        let a = fichier_ticket("txt").unwrap();
+        let b = fichier_ticket("txt").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(a.parent(), Some(dossier_impression().as_path()));
+
+        let dossier = std::env::temp_dir().join(format!("sc_nettoyage_{}", std::process::id()));
+        std::fs::create_dir_all(&dossier).unwrap();
+        let vieux = dossier.join("ticket_vieux.html");
+        std::fs::write(&vieux, "x").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        nettoyer_anciens_tickets(&dossier, std::time::Duration::from_millis(5));
+        assert!(!vieux.exists());
+        let recent = dossier.join("ticket_recent.html");
+        std::fs::write(&recent, "x").unwrap();
+        nettoyer_anciens_tickets(&dossier, std::time::Duration::from_secs(3600));
+        assert!(recent.exists());
+        std::fs::remove_dir_all(&dossier).unwrap();
+    }
 
     #[test]
     fn test_noms_valides() {
