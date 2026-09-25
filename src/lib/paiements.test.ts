@@ -23,4 +23,16 @@ describe("buildPaiements", () => {
   it("never records a negative amount", () => {
     expect(buildPaiements([], "credit", -5)).toEqual([{ mode: "credit", montant: 0 }])
   })
+
+  it("adds the loyalty points as a fidelite payment", () => {
+    expect(buildPaiements([], "especes", 100, 20)).toEqual([
+      { mode: "especes", montant: 100 },
+      { mode: "fidelite", montant: 20 },
+    ])
+    expect(buildPaiements([{ mode: "carte", amount: 60 }, { mode: "especes", amount: 50 }], "especes", 100, 20)).toEqual([
+      { mode: "carte", montant: 60 },
+      { mode: "especes", montant: 40 },
+      { mode: "fidelite", montant: 20 },
+    ])
+  })
 })

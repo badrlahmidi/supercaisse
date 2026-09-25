@@ -1,5 +1,6 @@
 import { formatCurrency, formatDateTime } from "@/lib/utils"
 import { EscPosBuilder } from "./escpos"
+import { round2 } from "./totaux"
 import { jsPDF } from "jspdf"
 
 export interface ReceiptData {
@@ -27,6 +28,7 @@ export interface ReceiptData {
     prix_unitaire: number
     tva: number
     total_ligne: number
+    montant_tva?: number | null
     remise_ligne?: number
   }>
   montantTotal: number
@@ -44,6 +46,17 @@ const DOC_TITLES: Record<string, string> = {
   avoir: "AVOIR",
 }
 
+export function ventilationTva(data: Pick<ReceiptData, "items" | "montantTotal" | "netPaye">): Record<number, number> {
+  const ratio = data.montantTotal !== 0 ? data.netPaye / data.montantTotal : 1
+  const acc: Record<number, number> = {}
+  for (const item of data.items) {
+    if (item.tva <= 0) continue
+    const montant = item.montant_tva ?? (item.total_ligne - item.total_ligne / (1 + item.tva / 100)) * ratio
+    acc[item.tva] = round2((acc[item.tva] ?? 0) + montant)
+  }
+  return acc
+}
+
 export function generateReceiptHTML(data: ReceiptData): string {
   const itemsRows = data.items.map((item) => `
     <tr>
@@ -55,14 +68,7 @@ export function generateReceiptHTML(data: ReceiptData): string {
   `).join("")
 
   // Calcul ventilation TVA
-  const tvaBreakdown = data.items.reduce((acc, item) => {
-    if (item.tva > 0) {
-      const baseLigne = item.total_ligne / (1 + item.tva / 100)
-      const montantTva = item.total_ligne - baseLigne
-      acc[item.tva] = (acc[item.tva] || 0) + montantTva
-    }
-    return acc
-  }, {} as Record<number, number>)
+  const tvaBreakdown = ventilationTva(data)
 
   const tvaRows = Object.entries(tvaBreakdown).map(([taux, montant]) => 
     `<div class="total-line"><span>TVA ${taux}%</span><span>${formatCurrency(montant)}</span></div>`
@@ -216,14 +222,7 @@ export function generateReceiptEscPos(data: ReceiptData): string {
   }
 
   // TVA
-  const tvaBreakdown = data.items.reduce((acc, item) => {
-    if (item.tva > 0) {
-      const baseLigne = item.total_ligne / (1 + item.tva / 100)
-      const montantTva = item.total_ligne - baseLigne
-      acc[item.tva] = (acc[item.tva] || 0) + montantTva
-    }
-    return acc
-  }, {} as Record<number, number>)
+  const tvaBreakdown = ventilationTva(data)
 
   if (Object.keys(tvaBreakdown).length > 0) {
     builder.line("--------------------------------")
@@ -348,13 +347,7 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   doc.text(formatCurrency(data.netPaye), totalsX, y, { align: "right" })
   y += 8
 
-  const tvaBreakdown = data.items.reduce((acc, item) => {
-    if (item.tva > 0) {
-      const baseLigne = item.total_ligne / (1 + item.tva / 100)
-      acc[item.tva] = (acc[item.tva] || 0) + (item.total_ligne - baseLigne)
-    }
-    return acc
-  }, {} as Record<number, number>)
+  const tvaBreakdown = ventilationTva(data)
 
   if (Object.keys(tvaBreakdown).length > 0) {
     doc.setFont("helvetica", "bold")

@@ -139,8 +139,8 @@ mod tests {
     }
 
     fn vendre(conn: &mut Connection, dtype: &str, paiements: serde_json::Value) -> Result<i64, String> {
-        let r = create_vente_impl(conn, None, Some(1), ligne(), 0.0, "especes".into(),
-            Some(paiements.as_array().unwrap().clone()), Some(dtype.into()), None, None, Some(1))?;
+        let r = create_vente_impl(conn, None, Some(1), ligne(), None, "especes".into(),
+            Some(paiements.as_array().unwrap().clone()), Some(dtype.into()), None, Some(1))?;
         Ok(r["id"].as_i64().unwrap())
     }
 
@@ -183,31 +183,31 @@ mod tests {
         let mut conn = setup();
         conn.execute("INSERT INTO utilisateurs (id, login, password_hash, nom) VALUES (2, 'c2', 'x', 'Caissier 2')", []).unwrap();
         conn.execute("INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (2, 2, 0, 'ouverte', 1)", []).unwrap();
-        create_vente_impl(&mut conn, None, Some(2), ligne(), 0.0, "especes".into(),
-            Some(vec![json!({ "mode": "especes", "montant": 500 })]), Some("facture".into()), None, None, Some(1)).unwrap();
+        create_vente_impl(&mut conn, None, Some(2), ligne(), None, "especes".into(),
+            Some(vec![json!({ "mode": "especes", "montant": 120 })]), Some("facture".into()), None, Some(1)).unwrap();
         assert_eq!(totaux_especes_session(&conn, 1).unwrap().ventes_especes, 0.0);
-        assert_eq!(totaux_especes_session(&conn, 2).unwrap().ventes_especes, 500.0);
+        assert_eq!(totaux_especes_session(&conn, 2).unwrap().ventes_especes, 120.0);
     }
 
     #[test]
     fn test_paiement_sans_detail_utilise_le_ttc() {
         let mut conn = setup();
-        create_vente_impl(&mut conn, None, Some(1), ligne(), 10.0, "especes".into(),
-            None, Some("facture".into()), None, None, Some(1)).unwrap();
-        assert_eq!(totaux_especes_session(&conn, 1).unwrap().ventes_especes, 110.0);
+        create_vente_impl(&mut conn, None, Some(1), ligne(), Some(10.0), "especes".into(),
+            None, Some("facture".into()), None, Some(1)).unwrap();
+        assert_eq!(totaux_especes_session(&conn, 1).unwrap().ventes_especes, 108.0);
     }
 
     #[test]
     fn test_credit_en_paiement_fractionne_respecte_le_plafond() {
         let mut conn = setup();
         conn.execute("INSERT INTO clients (id, nom, credit_plafond, credit_actuel) VALUES (1, 'Client', 100, 0)", []).unwrap();
-        let depasse = create_vente_impl(&mut conn, Some(1), Some(1), ligne(), 0.0, "especes+credit".into(),
-            Some(vec![json!({ "mode": "especes", "montant": 20 }), json!({ "mode": "credit", "montant": 150 })]),
-            Some("facture".into()), None, None, Some(1));
+        let depasse = create_vente_impl(&mut conn, Some(1), Some(1), ligne(), None, "especes+credit".into(),
+            Some(vec![json!({ "mode": "especes", "montant": 10 }), json!({ "mode": "credit", "montant": 110 })]),
+            Some("facture".into()), None, Some(1));
         assert!(depasse.unwrap_err().contains("Plafond"));
-        create_vente_impl(&mut conn, Some(1), Some(1), ligne(), 0.0, "especes+credit".into(),
+        create_vente_impl(&mut conn, Some(1), Some(1), ligne(), None, "especes+credit".into(),
             Some(vec![json!({ "mode": "especes", "montant": 40 }), json!({ "mode": "credit", "montant": 80 })]),
-            Some("facture".into()), None, None, Some(1)).unwrap();
+            Some("facture".into()), None, Some(1)).unwrap();
         let credit: f64 = conn.query_row("SELECT credit_actuel FROM clients WHERE id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(credit, 80.0);
         assert_eq!(totaux_especes_session(&conn, 1).unwrap().ventes_especes, 40.0);

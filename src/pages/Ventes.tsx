@@ -37,6 +37,8 @@ interface Vente {
   source_vente_id?: number | null
   source_dtype?: string | null
   source_numero?: string | null
+  montant_ht?: number | null
+  montant_tva?: number | null
 }
 
 interface VenteDetail {
@@ -49,6 +51,7 @@ interface VenteDetail {
     prix_unitaire: number
     tva: number
     total_ligne: number
+    montant_tva?: number | null
     remise_ligne?: number | null
   }>
 }
@@ -126,6 +129,7 @@ export default function Ventes() {
           prix_unitaire: l.prix_unitaire,
           tva: l.tva,
           total_ligne: l.total_ligne,
+          montant_tva: l.montant_tva ?? null,
           remise_ligne: l.remise_ligne || 0,
         })),
         montantTotal: detail.vente.montant_total,
@@ -435,6 +439,12 @@ export default function Ventes() {
                   <span>Net payé</span>
                   <span>{formatCurrency(selectedVente.vente.montant_total - selectedVente.vente.montant_remise)}</span>
                 </div>
+                {selectedVente.vente.montant_ht != null && selectedVente.vente.montant_tva != null && (
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>dont HT / TVA</span>
+                    <span>{formatCurrency(selectedVente.vente.montant_ht)} / {formatCurrency(selectedVente.vente.montant_tva)}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

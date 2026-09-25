@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@/lib/tauri"
 import { buildPaiements } from "@/lib/paiements"
+import { calculerTotaux, round2 } from "@/lib/totaux"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/context/AuthContext"
 import { usePOSProducts } from "@/hooks/useProducts"
@@ -129,27 +130,23 @@ export default function POS() {
     searchRef.current?.focus()
   }, [])
 
-  const subtotal = cart.reduce((s, i) => s + i.quantite * i.prix_unitaire, 0)
-  const totalTVA = cart.reduce((s, i) => s + i.quantite * i.prix_unitaire * (i.tva / 100), 0)
-  const totalTTC = subtotal + totalTVA
   const discount = parseFloat(discountPercent) || 0
-  const discountAmount = totalTTC * (discount / 100)
-  
-  // -- Fidélité --
+  const totaux = calculerTotaux(cart, discount)
+  const subtotal = totaux.sousTotalHT
+  const totalTVA = totaux.totalTVABrut
+  const discountAmount = totaux.montantRemise
+
   const activeClient = clients.find(c => c.id === selectedClient)
   const isLoyaltyActive = settings.fidelite_actif === "true"
   const ptsValueDH = parseFloat(settings.fidelite_valeur_1_point) || 1
   const ptsFor1DH = parseFloat(settings.fidelite_dh_pour_1_point) || 100
-  
-  // Points que le client va gagner avec ce panier
-  const ptsEarned = isLoyaltyActive ? Math.floor((totalTTC - discountAmount) / ptsFor1DH) : 0
-  
-  // Points que le client va utiliser
-  const maxPtsUsable = Math.floor((totalTTC - discountAmount) / ptsValueDH) // Ne pas rendre d'argent sur les points
-  const ptsToUse = (useLoyaltyPoints && activeClient) ? Math.min(activeClient.points_fidelite, maxPtsUsable) : 0
-  const loyaltyDiscount = ptsToUse * ptsValueDH
 
-  const netAmount = Math.max(0, totalTTC - discountAmount - loyaltyDiscount)
+  const maxPtsUsable = Math.floor(totaux.netTTC / ptsValueDH)
+  const ptsToUse = (useLoyaltyPoints && activeClient) ? Math.min(activeClient.points_fidelite, maxPtsUsable) : 0
+  const loyaltyDiscount = round2(ptsToUse * ptsValueDH)
+
+  const netAmount = Math.max(0, round2(totaux.netTTC - loyaltyDiscount))
+  const ptsEarned = isLoyaltyActive && activeClient ? Math.floor(netAmount / ptsFor1DH) : 0
   const cashAmount = parseFloat(cashGiven) || 0
   const change = paymentMode === "especes" ? Math.max(0, cashAmount - netAmount) : 0
   const itemCount = cart.reduce((s, i) => s + i.quantite, 0)
@@ -405,12 +402,11 @@ export default function POS() {
         clientId: selectedClient,
         caissierId: user?.id ?? 0,
         articles: items,
-        montantRemise: discountAmount,
+        remiseGlobalePct: discount,
         modePaiement: isSplit ? paymentSplits.map((s) => s.mode).join("+") : paymentMode,
-        splits: buildPaiements(paymentSplits, paymentMode, netAmount),
+        splits: buildPaiements(paymentSplits, paymentMode, netAmount, loyaltyDiscount),
         dtype: documentType,
-        points_utilises: ptsToUse,
-        points_gagnes: ptsEarned,
+        pointsUtilises: ptsToUse,
         magasinId: currentSession?.magasin_id ?? null,
       })
     },
@@ -438,22 +434,21 @@ export default function POS() {
         caissier: user?.nom || "",
         client: clientName,
         clientIce,
-        items: cart.map((i) => {
-          const baseTotal = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
-          const remiseLigne = baseTotal * ((i.remise_ligne || 0) / 100)
-          return {
-            designation: i.designation,
-            quantite: i.quantite,
-            prix_unitaire: i.prix_unitaire,
-            tva: i.tva,
-            total_ligne: baseTotal - remiseLigne,
-            remise_ligne: i.remise_ligne || 0,
-          }
-        }),
-        montantTotal: subtotal,
-        montantRemise: discountAmount + loyaltyDiscount,
-        netPaye: netAmount,
-        modePaiement: isSplit ? paymentSplits.map((s) => `${s.mode} ${formatCurrency(s.amount)}`).join(" + ") : paymentMode,
+        items: cart.map((i, idx) => ({
+          designation: i.designation,
+          quantite: i.quantite,
+          prix_unitaire: i.prix_unitaire,
+          tva: i.tva,
+          total_ligne: totaux.lignes[idx].total_ligne,
+          montant_tva: totaux.lignes[idx].montant_tva,
+          remise_ligne: i.remise_ligne || 0,
+        })),
+        montantTotal: totaux.montantTotal,
+        montantRemise: totaux.montantRemise,
+        netPaye: totaux.netTTC,
+        modePaiement: buildPaiements(paymentSplits, paymentMode, netAmount, loyaltyDiscount)
+          .map((p) => (isSplit || loyaltyDiscount > 0 ? `${p.mode} ${formatCurrency(p.montant)}` : p.mode))
+          .join(" + "),
         monnaie: change,
       })
 

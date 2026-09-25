@@ -8,10 +8,13 @@ export type { Sale, SaleLine }
 export interface CreateSaleInput {
   clientId: number | null
   caissierId: number
-  articles: Array<{ article_id: number; quantite: number; prix_unitaire: number; tva: number }>
-  montantRemise: number
+  articles: Array<{ article_id: number; variante_id?: number | null; quantite: number; remise_ligne?: number; prix_type?: "public" | "grossiste"; note?: string | null }>
+  remiseGlobalePct?: number
   modePaiement: string
+  splits?: Array<{ mode: string; montant: number }>
   dtype: string
+  pointsUtilises?: number
+  magasinId?: number | null
 }
 
 export function useSalesList(dateDebut?: string, dateFin?: string) {

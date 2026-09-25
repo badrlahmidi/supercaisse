@@ -1,7 +1,8 @@
 use crate::db::*;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
+use super::calcul::{calculer_ligne, round2, totaliser, valider_pourcentage, LigneCalculee, TOLERANCE_MONTANT};
 use super::{default_magasin_id, adjust_article_stock, log_audit, document_prefixe, next_numero_document, annee_courante};
 
 fn get_composants(tx: &Connection, article_id: i64) -> Result<Vec<(i64, f64)>, String> {
@@ -13,7 +14,7 @@ fn get_composants(tx: &Connection, article_id: i64) -> Result<Vec<(i64, f64)>, S
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
 }
 
-const MODES_PAIEMENT: [&str; 6] = ["especes", "carte", "cb", "cheque", "virement", "credit"];
+const MODES_PAIEMENT: [&str; 7] = ["especes", "carte", "cb", "cheque", "virement", "credit", "fidelite"];
 
 pub(crate) fn normaliser_paiements(mode_paiement: &str, splits: Option<&[serde_json::Value]>, montant_par_defaut: f64) -> Result<Vec<(String, f64)>, String> {
     let paiements: Vec<(String, f64)> = match splits {
@@ -38,24 +39,74 @@ pub(crate) fn normaliser_paiements(mode_paiement: &str, splits: Option<&[serde_j
     Ok(paiements)
 }
 
+struct LigneVente {
+    article_id: i64,
+    variante_id: Option<i64>,
+    quantite: f64,
+    prix_unitaire: f64,
+    tva: f64,
+    remise_ligne: f64,
+    note: Option<String>,
+    prix_type: String,
+    calcul: LigneCalculee,
+}
+
+fn preparer_lignes(tx: &Connection, articles: &[serde_json::Value], remise_globale: f64) -> Result<Vec<LigneVente>, String> {
+    if articles.is_empty() {
+        return Err("Le document ne contient aucun article".to_string());
+    }
+    articles.iter().map(|a| {
+        let article_id = a["article_id"].as_i64().ok_or("article_id manquant ou invalide dans la ligne")?;
+        let quantite = a["quantite"].as_f64().ok_or_else(|| format!("Quantité manquante (article {})", article_id))?;
+        if !quantite.is_finite() || quantite <= 0.0 {
+            return Err(format!("Quantité invalide (article {}) : {}", article_id, quantite));
+        }
+        let remise_ligne = valider_pourcentage("Remise ligne", a["remise_ligne"].as_f64().unwrap_or(0.0))?;
+        let prix_type = match a["prix_type"].as_str().unwrap_or("public") {
+            "grossiste" => "grossiste",
+            _ => "public",
+        }.to_string();
+        let (prix_vente, prix_grossiste, tva): (f64, Option<f64>, f64) = tx.query_row(
+            "SELECT prix_vente, prix_grossiste, tva FROM articles WHERE id = ?1",
+            params![article_id],
+            |r| Ok((r.get::<_, Option<f64>>(0)?.unwrap_or(0.0), r.get(1)?, r.get::<_, Option<f64>>(2)?.unwrap_or(0.0))),
+        ).optional().map_err(|e| e.to_string())?.ok_or_else(|| format!("Article {} introuvable", article_id))?;
+        let prix_unitaire = if prix_type == "grossiste" { prix_grossiste.unwrap_or(prix_vente) } else { prix_vente };
+        Ok(LigneVente {
+            article_id,
+            variante_id: a["variante_id"].as_i64(),
+            quantite,
+            prix_unitaire,
+            tva,
+            remise_ligne,
+            note: a["note"].as_str().map(|s| s.to_string()),
+            prix_type,
+            calcul: calculer_ligne(quantite, prix_unitaire, tva, remise_ligne, remise_globale),
+        })
+    }).collect()
+}
+
+fn lire_setting(tx: &Connection, key: &str) -> Result<Option<String>, String> {
+    tx.query_row("SELECT value FROM settings WHERE key = ?1", params![key], |r| r.get(0))
+        .optional().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Option<i64>,
-    articles: Vec<serde_json::Value>, montant_remise: f64, mode_paiement: String,
+    articles: Vec<serde_json::Value>, remise_globale_pct: Option<f64>, mode_paiement: String,
     splits: Option<Vec<serde_json::Value>>, dtype: Option<String>,
-    points_utilises: Option<f64>, points_gagnes: Option<f64>,
-    magasin_id: Option<i64>
+    points_utilises: Option<f64>, magasin_id: Option<i64>
 ) -> Result<serde_json::Value, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-    create_vente_impl(&mut conn, client_id, caissier_id, articles, montant_remise, mode_paiement,
-        splits, dtype, points_utilises, points_gagnes, magasin_id)
+    create_vente_impl(&mut conn, client_id, caissier_id, articles, remise_globale_pct, mode_paiement,
+        splits, dtype, points_utilises, magasin_id)
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, caissier_id: Option<i64>,
-    articles: Vec<serde_json::Value>, montant_remise: f64, mode_paiement: String,
+    articles: Vec<serde_json::Value>, remise_globale_pct: Option<f64>, mode_paiement: String,
     splits: Option<Vec<serde_json::Value>>, dtype: Option<String>,
-    points_utilises: Option<f64>, points_gagnes: Option<f64>,
-    magasin_id: Option<i64>
+    points_utilises: Option<f64>, magasin_id: Option<i64>
 ) -> Result<serde_json::Value, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = match magasin_id {
@@ -71,24 +122,53 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
             }
         }
     };
-    let mut montant_total = 0.0;
-    let mut total_ttc_lignes = 0.0;
-    for a in &articles {
-        let qte = a["quantite"].as_f64().unwrap_or(0.0);
-        let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
-        let tva = a["tva"].as_f64().unwrap_or(0.0);
-        let remise_ligne = a["remise_ligne"].as_f64().unwrap_or(0.0);
-        montant_total += qte * pu;
-        total_ttc_lignes += qte * pu * (1.0 + tva / 100.0) * (1.0 - remise_ligne / 100.0);
-    }
 
     let document_type = dtype.unwrap_or_else(|| "facture".to_string());
-
     document_prefixe(&document_type)?;
+    let encaisse = matches!(document_type.as_str(), "facture" | "bl");
 
-    let paiements = normaliser_paiements(&mode_paiement, splits.as_deref(), total_ttc_lignes - montant_remise)?;
+    let remise_globale = valider_pourcentage("Remise document", remise_globale_pct.unwrap_or(0.0))?;
+    let lignes = preparer_lignes(&tx, &articles, remise_globale)?;
+    let calculs: Vec<LigneCalculee> = lignes.iter().map(|l| l.calcul).collect();
+    let totaux = totaliser(&calculs);
+
+    let paiements = normaliser_paiements(&mode_paiement, splits.as_deref(), totaux.net_ttc)?;
+
+    let fidelite_actif = lire_setting(&tx, "fidelite_actif")?.as_deref() == Some("true");
+    let valeur_point: f64 = lire_setting(&tx, "fidelite_valeur_1_point")?.and_then(|v| v.parse().ok()).filter(|v: &f64| *v > 0.0).unwrap_or(1.0);
+    let dh_pour_1_point: f64 = lire_setting(&tx, "fidelite_dh_pour_1_point")?.and_then(|v| v.parse().ok()).filter(|v: &f64| *v > 0.0).unwrap_or(100.0);
+    let pts_utilises = if encaisse { points_utilises.unwrap_or(0.0) } else { 0.0 };
+    let paiement_fidelite: f64 = paiements.iter().filter(|(m, _)| m == "fidelite").map(|(_, montant)| montant).sum();
+
+    if encaisse {
+        let total_paye: f64 = paiements.iter().map(|(_, montant)| montant).sum();
+        if (total_paye - totaux.net_ttc).abs() > TOLERANCE_MONTANT {
+            return Err(format!(
+                "Montant encaissé ({:.2} DH) différent du net à payer recalculé ({:.2} DH). Rechargez les articles et réessayez.",
+                total_paye, totaux.net_ttc
+            ));
+        }
+        if !pts_utilises.is_finite() || pts_utilises < 0.0 || pts_utilises.fract() != 0.0 {
+            return Err(format!("Nombre de points invalide : {}", pts_utilises));
+        }
+        if (paiement_fidelite - round2(pts_utilises * valeur_point)).abs() > TOLERANCE_MONTANT {
+            return Err(format!(
+                "Paiement fidélité ({:.2} DH) incohérent avec les points utilisés ({} × {:.2} DH)",
+                paiement_fidelite, pts_utilises, valeur_point
+            ));
+        }
+        if pts_utilises > 0.0 {
+            let cid = client_id.ok_or("Un client doit être sélectionné pour utiliser des points")?;
+            let solde: f64 = tx.query_row(
+                "SELECT COALESCE(points_fidelite, 0) FROM clients WHERE id = ?1", params![cid], |r| r.get(0),
+            ).map_err(|e| e.to_string())?;
+            if pts_utilises > solde {
+                return Err(format!("Points insuffisants : {} demandés, {} disponibles", pts_utilises, solde));
+            }
+        }
+    }
+
     let credit_demandé: f64 = paiements.iter().filter(|(m, _)| m == "credit").map(|(_, montant)| montant).sum();
-
     if credit_demandé > 0.0 {
         if let Some(cid) = client_id {
             let (actuel, plafond): (f64, Option<f64>) = tx.query_row(
@@ -103,13 +183,18 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
                 }
             }
 
-            if document_type == "facture" || document_type == "bl" {
+            if encaisse {
                 tx.execute("UPDATE clients SET credit_actuel = credit_actuel + ?1 WHERE id = ?2", params![credit_demandé, cid]).map_err(|e| e.to_string())?;
             }
         } else {
             return Err("Un client doit être sélectionné pour payer à crédit.".to_string());
         }
     }
+
+    let pts_gagnes = match client_id {
+        Some(_) if encaisse && fidelite_actif => (round2(totaux.net_ttc - paiement_fidelite) / dh_pour_1_point).floor().max(0.0),
+        _ => 0.0,
+    };
 
     let numero_facture = next_numero_document(&tx, &document_type, annee_courante())?;
 
@@ -121,44 +206,33 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
         ).ok()
     } else { None };
 
-    let pts_utilises = points_utilises.unwrap_or(0.0);
-    let pts_gagnes = points_gagnes.unwrap_or(0.0);
-
     tx.execute(
-        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, dtype, session_id, points_utilises, points_gagnes, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, document_type, current_session_id, pts_utilises, pts_gagnes, magasin_id],
+        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, montant_ht, montant_tva, mode_paiement, numero_facture, dtype, session_id, points_utilises, points_gagnes, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![client_id, caissier_id, totaux.montant_total, totaux.montant_remise, totaux.montant_ht, totaux.montant_tva, mode_paiement, numero_facture, document_type, current_session_id, pts_utilises, pts_gagnes, magasin_id],
     ).map_err(|e| e.to_string())?;
     let vente_id = tx.last_insert_rowid();
 
     if let Some(cid) = client_id {
         if pts_utilises > 0.0 {
-            tx.execute("UPDATE clients SET points_fidelite = MAX(0, points_fidelite - ?1) WHERE id = ?2", params![pts_utilises, cid]).ok();
-            tx.execute("INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, 'depense')", params![cid, vente_id, pts_utilises]).ok();
+            tx.execute("UPDATE clients SET points_fidelite = points_fidelite - ?1 WHERE id = ?2", params![pts_utilises, cid]).map_err(|e| e.to_string())?;
+            tx.execute("INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, 'depense')", params![cid, vente_id, pts_utilises]).map_err(|e| e.to_string())?;
         }
         if pts_gagnes > 0.0 {
-            tx.execute("UPDATE clients SET points_fidelite = points_fidelite + ?1 WHERE id = ?2", params![pts_gagnes, cid]).ok();
-            tx.execute("INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, 'gain')", params![cid, vente_id, pts_gagnes]).ok();
+            tx.execute("UPDATE clients SET points_fidelite = COALESCE(points_fidelite, 0) + ?1 WHERE id = ?2", params![pts_gagnes, cid]).map_err(|e| e.to_string())?;
+            tx.execute("INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, 'gain')", params![cid, vente_id, pts_gagnes]).map_err(|e| e.to_string())?;
         }
     }
 
-    for a in &articles {
-        let article_id = a["article_id"].as_i64().ok_or("article_id manquant ou invalide dans la ligne")?;
-        let variante_id = a["variante_id"].as_i64();
-        let qte = a["quantite"].as_f64().unwrap_or(0.0);
-        let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
-        let tva = a["tva"].as_f64().unwrap_or(0.0);
-        let remise_ligne = a["remise_ligne"].as_f64().unwrap_or(0.0);
-        let note_ligne = a["note"].as_str().map(|s| s.to_string());
-        let prix_type = a["prix_type"].as_str().unwrap_or("public").to_string();
-        let ligne_base = qte * pu * (1.0 + tva / 100.0);
-        let total_ligne = ligne_base * (1.0 - remise_ligne / 100.0);
+    for l in &lignes {
+        let article_id = l.article_id;
+        let qte = l.quantite;
         tx.execute(
-            "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![vente_id, article_id, qte, pu, tva, total_ligne, remise_ligne, note_ligne, variante_id, prix_type],
+            "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, montant_ht, montant_tva, remise_ligne, note, variante_id, prix_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![vente_id, article_id, qte, l.prix_unitaire, l.tva, l.calcul.total_ligne, l.calcul.montant_ht, l.calcul.montant_tva, l.remise_ligne, l.note, l.variante_id, l.prix_type],
         ).map_err(|e| e.to_string())?;
 
-        if document_type == "facture" || document_type == "bl" {
-            if let Some(vid) = variante_id {
+        if encaisse {
+            if let Some(vid) = l.variante_id {
                 tx.execute("UPDATE article_variantes SET stock_dedie = stock_dedie - ?1 WHERE id = ?2", params![qte, vid])
                     .map_err(|e| e.to_string())?;
                 tx.execute(
@@ -187,7 +261,7 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
         }
     }
 
-    if matches!(document_type.as_str(), "facture" | "bl") {
+    if encaisse {
         for (mode, montant) in &paiements {
             tx.execute(
                 "INSERT INTO vente_paiements (vente_id, session_id, mode, montant) VALUES (?1, ?2, ?3, ?4)",
@@ -205,12 +279,21 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
     }
 
     log_audit(&tx, caissier_id, "creer_vente",
-        &format!("Vente #{} - {} DH ({}) - {}", vente_id, montant_total, document_type, mode_paiement),
+        &format!("Vente #{} - {:.2} DH TTC ({}) - {}", vente_id, totaux.net_ttc, document_type, mode_paiement),
         Some("vente"), Some(vente_id));
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({ "id": vente_id, "numero_facture": numero_facture }))
+    Ok(serde_json::json!({
+        "id": vente_id,
+        "numero_facture": numero_facture,
+        "montant_total": totaux.montant_total,
+        "montant_remise": totaux.montant_remise,
+        "montant_ht": totaux.montant_ht,
+        "montant_tva": totaux.montant_tva,
+        "net_ttc": totaux.net_ttc,
+        "points_gagnes": pts_gagnes,
+    }))
 }
 
 #[tauri::command]
@@ -350,7 +433,8 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
     let vente = conn.query_row(
         "SELECT v.id, v.date, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.numero_facture,
                 c.nom as client_nom, c.telephone as client_tel, u.nom as caissier_nom, v.dtype, c.ice as client_ice,
-                v.source_vente_id, src.dtype as source_dtype, src.numero_facture as source_numero
+                v.source_vente_id, src.dtype as source_dtype, src.numero_facture as source_numero,
+                v.montant_ht, v.montant_tva
          FROM ventes v
          LEFT JOIN clients c ON v.client_id = c.id
          LEFT JOIN utilisateurs u ON v.caissier_id = u.id
@@ -374,11 +458,13 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
                 "source_vente_id": row.get::<_, Option<i64>>(12)?,
                 "source_dtype": row.get::<_, Option<String>>(13)?,
                 "source_numero": row.get::<_, Option<String>>(14)?,
+                "montant_ht": row.get::<_, Option<f64>>(15)?,
+                "montant_tva": row.get::<_, Option<f64>>(16)?,
             }))
         }
     ).map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT va.id, va.article_id, a.designation, va.quantite, va.prix_unitaire, va.tva, va.total_ligne, va.remise_ligne
+        "SELECT va.id, va.article_id, a.designation, va.quantite, va.prix_unitaire, va.tva, va.total_ligne, va.remise_ligne, va.montant_ht, va.montant_tva
          FROM vente_articles va
          JOIN articles a ON va.article_id = a.id
          WHERE va.vente_id = ?1"
@@ -393,6 +479,8 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
             "tva": row.get::<_, f64>(5)?,
             "total_ligne": row.get::<_, f64>(6)?,
             "remise_ligne": row.get::<_, Option<f64>>(7)?,
+            "montant_ht": row.get::<_, Option<f64>>(8)?,
+            "montant_tva": row.get::<_, Option<f64>>(9)?,
         }))
     }).map_err(|e| e.to_string())?;
     let lignes: Vec<_> = lignes.collect::<Result<_, _>>().map_err(|e| e.to_string())?;
@@ -402,12 +490,16 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
 #[tauri::command]
 pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    convert_document_impl(&mut conn, vente_id, target_type)
+}
+
+pub(crate) fn convert_document_impl(conn: &mut Connection, vente_id: i64, target_type: String) -> Result<i64, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let (source_dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture_src, source_magasin_id): (String, Option<i64>, Option<i64>, f64, f64, String, String, Option<String>, Option<i64>) = tx.query_row(
-        "SELECT dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture, magasin_id FROM ventes WHERE id = ?1",
+    let (source_dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture_src, source_magasin_id, montant_ht, montant_tva): (String, Option<i64>, Option<i64>, f64, f64, String, String, Option<String>, Option<i64>, Option<f64>, Option<f64>) = tx.query_row(
+        "SELECT dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture, magasin_id, montant_ht, montant_tva FROM ventes WHERE id = ?1",
         params![vente_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?)),
     ).map_err(|_| "Document source introuvable".to_string())?;
 
     if statut == "annulee" {
@@ -434,12 +526,13 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
     }
 
     let mut stmt = tx.prepare(
-        "SELECT article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type FROM vente_articles WHERE vente_id = ?1"
+        "SELECT article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type, montant_ht, montant_tva FROM vente_articles WHERE vente_id = ?1"
     ).map_err(|e| e.to_string())?;
-    let lignes: Vec<(i64, f64, f64, f64, f64, Option<f64>, Option<String>, Option<i64>, Option<String>)> = stmt.query_map(params![vente_id], |row| {
+    #[allow(clippy::type_complexity)]
+    let lignes: Vec<(i64, f64, f64, f64, f64, Option<f64>, Option<String>, Option<i64>, Option<String>, Option<f64>, Option<f64>)> = stmt.query_map(params![vente_id], |row| {
         Ok((
             row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
-            row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?,
+            row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?,
         ))
     }).map_err(|e| e.to_string())?
       .collect::<rusqlite::Result<Vec<_>>>()
@@ -450,20 +543,23 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
 
     let new_montant_total = if target_type == "avoir" { -montant_total.abs() } else { montant_total };
     let new_montant_remise = if target_type == "avoir" { -montant_remise.abs() } else { montant_remise };
+    let signe = |v: Option<f64>| v.map(|x| if target_type == "avoir" { -x.abs() } else { x });
+    let (new_montant_ht, new_montant_tva) = (signe(montant_ht), signe(montant_tva));
 
     let magasin_id = source_magasin_id.map_or_else(|| default_magasin_id(&tx), Ok)?;
 
     tx.execute(
-        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, mode_paiement, numero_facture, dtype, source_vente_id, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![client_id, caissier_id, new_montant_total, new_montant_remise, mode_paiement, numero_facture, target_type, vente_id, magasin_id],
+        "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, montant_ht, montant_tva, mode_paiement, numero_facture, dtype, source_vente_id, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![client_id, caissier_id, new_montant_total, new_montant_remise, new_montant_ht, new_montant_tva, mode_paiement, numero_facture, target_type, vente_id, magasin_id],
     ).map_err(|e| e.to_string())?;
     let new_vente_id = tx.last_insert_rowid();
 
-    for (article_id, qte, pu, tva, total_ligne, remise_ligne, note, variante_id, prix_type) in &lignes {
+    for (article_id, qte, pu, tva, total_ligne, remise_ligne, note, variante_id, prix_type, ligne_ht, ligne_tva) in &lignes {
         let new_total_ligne = if target_type == "avoir" { -total_ligne.abs() } else { *total_ligne };
+        let (new_ligne_ht, new_ligne_tva) = (signe(*ligne_ht), signe(*ligne_tva));
         tx.execute(
-            "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![new_vente_id, article_id, qte, pu, tva, new_total_ligne, remise_ligne, note, variante_id, prix_type],
+            "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, montant_ht, montant_tva, remise_ligne, note, variante_id, prix_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![new_vente_id, article_id, qte, pu, tva, new_total_ligne, new_ligne_ht, new_ligne_tva, remise_ligne, note, variante_id, prix_type],
         ).map_err(|e| e.to_string())?;
 
         if target_type == "avoir" {
@@ -557,4 +653,178 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(new_vente_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn setup() -> Connection {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute_batch("
+            INSERT INTO articles (id, designation, prix_vente, prix_grossiste, tva) VALUES (1, 'Huile', 100, 80, 20);
+            INSERT INTO articles (id, designation, prix_vente, tva) VALUES (2, 'Pain', 10, 0);
+            INSERT INTO clients (id, nom, points_fidelite) VALUES (1, 'Client', 50);
+            UPDATE settings SET value = '1' WHERE key = 'fidelite_valeur_1_point';
+            UPDATE settings SET value = '100' WHERE key = 'fidelite_dh_pour_1_point';
+            UPDATE settings SET value = 'true' WHERE key = 'fidelite_actif';
+        ").unwrap();
+        conn
+    }
+
+    fn vendre(conn: &mut Connection, client: Option<i64>, lignes: serde_json::Value, remise: Option<f64>,
+        paiements: serde_json::Value, dtype: &str, points: Option<f64>) -> Result<serde_json::Value, String> {
+        create_vente_impl(conn, client, Some(1), lignes.as_array().unwrap().clone(), remise, "especes".into(),
+            Some(paiements.as_array().unwrap().clone()), Some(dtype.into()), points, None)
+    }
+
+    fn montants(conn: &Connection, id: i64) -> (f64, f64, f64, f64) {
+        conn.query_row("SELECT montant_total, montant_remise, montant_ht, montant_tva FROM ventes WHERE id = ?1", params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap()
+    }
+
+    #[test]
+    fn test_prix_et_tva_lus_depuis_le_catalogue() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, None,
+            json!([{ "article_id": 1, "quantite": 2, "prix_unitaire": 1, "tva": 0 }]), None,
+            json!([{ "mode": "especes", "montant": 240 }]), "facture", None).unwrap();
+        assert_eq!(r["net_ttc"], json!(240.0));
+        let id = r["id"].as_i64().unwrap();
+        assert_eq!(montants(&conn, id), (240.0, 0.0, 200.0, 40.0));
+        let (pu, tva, total): (f64, f64, f64) = conn.query_row(
+            "SELECT prix_unitaire, tva, total_ligne FROM vente_articles WHERE vente_id = ?1", params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((pu, tva, total), (100.0, 20.0, 240.0));
+    }
+
+    #[test]
+    fn test_remises_ligne_et_document() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, None,
+            json!([
+                { "article_id": 1, "quantite": 1, "remise_ligne": 10 },
+                { "article_id": 2, "quantite": 3 }
+            ]), Some(10.0),
+            json!([{ "mode": "especes", "montant": 124.2 }]), "facture", None).unwrap();
+        let id = r["id"].as_i64().unwrap();
+        let (total, remise, ht, tva) = montants(&conn, id);
+        assert_eq!((total, ht, tva), (138.0, 108.0, 16.2));
+        assert_eq!(remise, 13.8);
+        assert_eq!(round2(total - remise), round2(ht + tva));
+        let somme_tva: f64 = conn.query_row("SELECT SUM(montant_tva) FROM vente_articles WHERE vente_id = ?1", params![id], |r| r.get(0)).unwrap();
+        assert_eq!(somme_tva, tva);
+    }
+
+    #[test]
+    fn test_montant_encaisse_incoherent_refuse() {
+        let mut conn = setup();
+        let err = vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 100 }]), "facture", None).unwrap_err();
+        assert!(err.contains("net à payer"));
+        let nb: i64 = conn.query_row("SELECT COUNT(*) FROM ventes", [], |r| r.get(0)).unwrap();
+        assert_eq!(nb, 0);
+    }
+
+    #[test]
+    fn test_prix_grossiste() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 1, "prix_type": "grossiste" }]), None,
+            json!([{ "mode": "carte", "montant": 96 }]), "facture", None).unwrap();
+        assert_eq!(r["net_ttc"], json!(96.0));
+    }
+
+    #[test]
+    fn test_devis_sans_controle_d_encaissement() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 1 }]), "devis", None).unwrap();
+        assert_eq!(r["points_gagnes"], json!(0.0));
+        let nb: i64 = conn.query_row("SELECT COUNT(*) FROM vente_paiements", [], |r| r.get(0)).unwrap();
+        assert_eq!(nb, 0);
+    }
+
+    #[test]
+    fn test_points_fidelite() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 100 }, { "mode": "fidelite", "montant": 20 }]), "facture", Some(20.0)).unwrap();
+        assert_eq!(r["points_gagnes"], json!(1.0));
+        let points: f64 = conn.query_row("SELECT points_fidelite FROM clients WHERE id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(points, 31.0);
+        let tva: f64 = conn.query_row("SELECT montant_tva FROM ventes WHERE id = ?1", params![r["id"].as_i64().unwrap()], |r| r.get(0)).unwrap();
+        assert_eq!(tva, 20.0);
+    }
+
+    #[test]
+    fn test_points_fidelite_controles() {
+        let mut conn = setup();
+        let trop = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 60 }, { "mode": "fidelite", "montant": 60 }]), "facture", Some(60.0));
+        assert!(trop.unwrap_err().contains("Points insuffisants"));
+        let incoherent = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 90 }, { "mode": "fidelite", "montant": 30 }]), "facture", Some(10.0));
+        assert!(incoherent.unwrap_err().contains("fidélité"));
+        let sans_points = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 100 }, { "mode": "fidelite", "montant": 20 }]), "facture", None);
+        assert!(sans_points.is_err());
+        let sans_client = vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "especes", "montant": 110 }, { "mode": "fidelite", "montant": 10 }]), "facture", Some(10.0));
+        assert!(sans_client.is_err());
+    }
+
+    #[test]
+    fn test_lignes_invalides() {
+        let mut conn = setup();
+        let paiement = json!([{ "mode": "especes", "montant": 120 }]);
+        assert!(vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 0 }]), None, paiement.clone(), "facture", None).is_err());
+        assert!(vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 1, "remise_ligne": 150 }]), None, paiement.clone(), "facture", None).is_err());
+        assert!(vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 1 }]), Some(-5.0), paiement.clone(), "facture", None).is_err());
+        assert!(vendre(&mut conn, None, json!([{ "article_id": 99, "quantite": 1 }]), None, paiement.clone(), "facture", None).is_err());
+        assert!(vendre(&mut conn, None, json!([]), None, paiement, "facture", None).is_err());
+    }
+
+    #[test]
+    fn test_avoir_reprend_les_montants_en_negatif() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, None, json!([{ "article_id": 1, "quantite": 1 }]), Some(10.0),
+            json!([{ "mode": "especes", "montant": 108 }]), "facture", None).unwrap();
+        let facture = r["id"].as_i64().unwrap();
+        let avoir = convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
+        assert_eq!(montants(&conn, avoir), (-120.0, -12.0, -90.0, -18.0));
+        let (ht, tva): (f64, f64) = conn.query_row("SELECT montant_ht, montant_tva FROM vente_articles WHERE vente_id = ?1", params![avoir], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((ht, tva), (-90.0, -18.0));
+        assert!(avoir > facture);
+    }
+
+    #[test]
+    fn test_migration_des_ventes_historiques() {
+        let path = std::env::temp_dir().join(format!(
+            "supercaisse_test_c8_{}_{}.db",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let path_str = path.to_string_lossy().to_string();
+        {
+            let conn = crate::db::init_db(&path_str).unwrap();
+            conn.execute_batch("
+                INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Huile', 100, 20);
+                INSERT INTO ventes (id, montant_total, montant_remise, mode_paiement, dtype) VALUES (1, 100, 12, 'especes', 'facture');
+                INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne) VALUES (1, 1, 1, 100, 20, 120);
+                INSERT INTO ventes (id, montant_total, montant_remise, mode_paiement, dtype) VALUES (2, -100, -12, 'especes', 'avoir');
+                INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne) VALUES (2, 1, 1, 100, 20, -120);
+            ").unwrap();
+        }
+        let conn = crate::db::init_db(&path_str).unwrap();
+        assert_eq!(montants(&conn, 1), (120.0, 12.0, 90.0, 18.0));
+        assert_eq!(montants(&conn, 2), (-120.0, -12.0, -90.0, -18.0));
+        drop(conn);
+        let conn = crate::db::init_db(&path_str).unwrap();
+        assert_eq!(montants(&conn, 1), (120.0, 12.0, 90.0, 18.0));
+        drop(conn);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{}", path_str, suffix));
+        }
+    }
 }

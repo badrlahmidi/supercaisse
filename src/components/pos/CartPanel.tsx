@@ -7,6 +7,7 @@ import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
 import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
 import type { Article, Client } from "@/types"
+import { calculerLigne, round2 } from "@/lib/totaux"
 
 interface ReceiptData {
   shopName: string
@@ -103,6 +104,10 @@ export default function CartPanel({
   const activeClient = clients.find(c => c.id === selectedClient)
 
   const isSplit = paymentSplits.length > 0
+  const totalRemisesLignes = round2(cart.reduce(
+    (s, i) => s + calculerLigne({ ...i, remise_ligne: 0 }).total_ligne - calculerLigne(i).total_ligne,
+    0,
+  ))
   const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
   const splitRemaining = Math.max(0, netAmount - splitsTotal)
   const cashSplit = paymentSplits.find((p) => p.mode === "especes")
@@ -183,9 +188,9 @@ export default function CartPanel({
           cart.map((item) => {
             const article = articles.find((a) => a.id === item.article_id)
             const maxStock = item.variante_id ? item.stock_max : article?.stock
-            const lineTotalBase = item.quantite * item.prix_unitaire * (1 + item.tva / 100)
-            const lineDiscountAmount = lineTotalBase * (item.remise_ligne / 100)
-            const lineTotal = lineTotalBase - lineDiscountAmount
+            const lineTotalBase = calculerLigne({ ...item, remise_ligne: 0 }).total_ligne
+            const lineTotal = calculerLigne(item).total_ligne
+            const lineDiscountAmount = round2(lineTotalBase - lineTotal)
             return (
               <div
                 key={`${item.article_id}-${item.variante_id ?? "x"}`}
@@ -288,17 +293,10 @@ export default function CartPanel({
       <div className="flex-shrink-0 border-t border-border">
         {/* Summary */}
         <div className="p-4 space-y-1.5 bg-muted/20">
-          {cart.reduce((s, i) => {
-            const base = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
-            const remiseLigne = base * ((i.remise_ligne || 0) / 100)
-            return s + remiseLigne
-          }, 0) > 0 && (
+          {totalRemisesLignes > 0 && (
             <div className="flex justify-between text-sm text-success">
-              <span>Remises lignes</span>
-              <span>-{formatCurrency(cart.reduce((s, i) => {
-                const base = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
-                return s + base * ((i.remise_ligne || 0) / 100)
-              }, 0))}</span>
+              <span>Remises lignes (incluses)</span>
+              <span>-{formatCurrency(totalRemisesLignes)}</span>
             </div>
           )}
           <div className="flex justify-between text-sm">

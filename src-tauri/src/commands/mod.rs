@@ -4,6 +4,7 @@ mod audit;
 mod auth;
 mod backup;
 mod caisses;
+mod calcul;
 mod categories;
 mod cheques;
 mod clients;

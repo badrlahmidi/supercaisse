@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Connection, OptionalExtension, Result, params};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
@@ -654,12 +654,18 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         INSERT OR IGNORE INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero)
         SELECT ntype, annee, prefixe, dernier_numero FROM numerotation;
     ")?;
+    let vente_paiements_sql: Option<String> = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vente_paiements'", [], |r| r.get(0),
+    ).optional()?;
+    if vente_paiements_sql.is_some_and(|sql| !sql.contains("'fidelite'")) {
+        conn.execute_batch("ALTER TABLE vente_paiements RENAME TO vente_paiements_old;")?;
+    }
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS vente_paiements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vente_id INTEGER NOT NULL,
             session_id INTEGER,
-            mode TEXT NOT NULL CHECK (mode IN ('especes','carte','cb','cheque','virement','credit')),
+            mode TEXT NOT NULL CHECK (mode IN ('especes','carte','cb','cheque','virement','credit','fidelite')),
             montant REAL NOT NULL CHECK (montant >= 0),
             FOREIGN KEY (vente_id) REFERENCES ventes(id),
             FOREIGN KEY (session_id) REFERENCES sessions_caisse(id)
@@ -678,6 +684,45 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
           AND v.mode_paiement IN ('especes','carte','cb','cheque','virement','credit')
           AND NOT EXISTS (SELECT 1 FROM vente_paiements vp WHERE vp.vente_id = v.id);
     ")?;
+    let vente_paiements_old: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vente_paiements_old'", [], |r| r.get(0),
+    )?;
+    if vente_paiements_old > 0 {
+        conn.execute_batch("
+            BEGIN;
+            INSERT OR IGNORE INTO vente_paiements (id, vente_id, session_id, mode, montant)
+            SELECT id, vente_id, session_id, mode, montant FROM vente_paiements_old;
+            DROP TABLE vente_paiements_old;
+            COMMIT;
+        ")?;
+    }
+
+    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN montant_ht REAL", []);
+    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN montant_tva REAL", []);
+    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN montant_ht REAL", []);
+    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN montant_tva REAL", []);
+    conn.execute_batch("
+        BEGIN;
+        UPDATE ventes
+        SET montant_total = (SELECT ROUND(SUM(va.total_ligne), 2) FROM vente_articles va WHERE va.vente_id = ventes.id)
+        WHERE montant_ht IS NULL AND EXISTS (SELECT 1 FROM vente_articles va WHERE va.vente_id = ventes.id);
+
+        UPDATE vente_articles
+        SET montant_ht = ROUND(
+                quantite * prix_unitaire * (1 - COALESCE(remise_ligne, 0) / 100.0)
+                * (CASE WHEN total_ligne < 0 THEN -1 ELSE 1 END)
+                * (SELECT CASE WHEN v.montant_total != 0 THEN (v.montant_total - v.montant_remise) / v.montant_total ELSE 1 END
+                   FROM ventes v WHERE v.id = vente_articles.vente_id), 2)
+        WHERE montant_ht IS NULL;
+        UPDATE vente_articles SET montant_tva = ROUND(montant_ht * COALESCE(tva, 0) / 100.0, 2) WHERE montant_tva IS NULL;
+
+        UPDATE ventes
+        SET montant_ht = (SELECT ROUND(SUM(va.montant_ht), 2) FROM vente_articles va WHERE va.vente_id = ventes.id),
+            montant_tva = (SELECT ROUND(SUM(va.montant_tva), 2) FROM vente_articles va WHERE va.vente_id = ventes.id)
+        WHERE montant_ht IS NULL AND EXISTS (SELECT 1 FROM vente_articles va WHERE va.vente_id = ventes.id);
+        COMMIT;
+    ")?;
+
     if let Err(e) = conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ventes_numero_facture_unique ON ventes(numero_facture) WHERE numero_facture IS NOT NULL",
         [],

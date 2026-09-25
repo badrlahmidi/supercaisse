@@ -14,14 +14,16 @@ pub fn get_stats(db: State<DbState>) -> Result<serde_json::Value, String> {
     let ca_jour: f64 = conn.query_row("SELECT COALESCE(SUM(montant_total - montant_remise),0) FROM ventes WHERE date >= date('now','localtime') AND statut != 'annulee'", [], |r| r.get(0)).unwrap_or(0.0);
     let ca_mois: f64 = conn.query_row("SELECT COALESCE(SUM(montant_total - montant_remise),0) FROM ventes WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND statut != 'annulee'", [], |r| r.get(0)).unwrap_or(0.0);
 
+    let ht_mois: f64 = conn.query_row("SELECT COALESCE(SUM(COALESCE(montant_ht, montant_total - montant_remise)),0) FROM ventes WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND statut != 'annulee'", [], |r| r.get(0)).unwrap_or(0.0);
+
     let cout_achats_mois: f64 = conn.query_row("
-        SELECT COALESCE(SUM(vl.quantite * a.prix_achat), 0)
+        SELECT COALESCE(SUM(vl.quantite * a.prix_achat * (CASE WHEN vl.total_ligne < 0 THEN -1 ELSE 1 END)), 0)
         FROM vente_articles vl
         JOIN ventes v ON v.id = vl.vente_id
         JOIN articles a ON a.id = vl.article_id
         WHERE strftime('%Y-%m', v.date) = strftime('%Y-%m', 'now', 'localtime') AND v.statut != 'annulee'
     ", [], |r| r.get(0)).unwrap_or(0.0);
-    let benefice_mois = ca_mois - cout_achats_mois;
+    let benefice_mois = ht_mois - cout_achats_mois;
 
     let mut stmt = conn.prepare("
         SELECT a.designation, SUM(vl.quantite) as qte_vendue

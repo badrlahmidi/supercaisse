@@ -91,7 +91,8 @@ pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Opti
 
     let (wc2, wp2) = date_filter("v.date");
     let marge_sql = format!(
-        "SELECT COALESCE(SUM(va.quantite * (va.prix_unitaire - a.prix_achat)), 0)
+        "SELECT COALESCE(SUM(COALESCE(va.montant_ht, va.quantite * va.prix_unitaire)
+                    - va.quantite * a.prix_achat * (CASE WHEN va.total_ligne < 0 THEN -1 ELSE 1 END)), 0)
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          JOIN articles a ON a.id = va.article_id
@@ -102,7 +103,7 @@ pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Opti
 
     let (wc3, wp3) = date_filter("v.date");
     let tva_sql = format!(
-        "SELECT COALESCE(SUM(va.quantite * va.prix_unitaire * va.tva / 100.0), 0)
+        "SELECT COALESCE(SUM(COALESCE(va.montant_tva, va.quantite * va.prix_unitaire * va.tva / 100.0)), 0)
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          WHERE v.statut != 'annulee' {}", wc3

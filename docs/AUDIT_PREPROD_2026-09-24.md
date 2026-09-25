@@ -268,6 +268,17 @@ let ventes_especes: i64 = tx.query_row(
 
 ### [CRITIQUE] C-8 — Montants HT/TTC mélangés : CA, caisse et TVA incohérents
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms` (couvre aussi une partie de M-2).
+> - `create_vente` relit prix et TVA dans le catalogue (public ou grossiste), valide remises et quantités, et calcule par ligne (arrondi au centime) : `total_ligne` TTC après remise ligne, `montant_ht`/`montant_tva` nets après remise document.
+> - Le document stocke `montant_total` (TTC brut), `montant_remise`, `montant_ht` et `montant_tva`. `montant_total - montant_remise` vaut donc partout le net TTC.
+> - Une facture ou un BL est refusé si les paiements ne totalisent pas le net recalculé.
+> - Les points fidélité deviennent un mode de paiement `fidelite`, contrôlé contre le solde du client ; les points gagnés sont calculés côté serveur.
+> - Le POS utilise le même calcul (`src/lib/totaux.ts`), avec un test de parité au centime avec `commands/calcul.rs`. Les remises ligne étaient affichées mais non déduites du net.
+> - Tickets et PDF : ventilation TVA par taux sur les montants nets stockés.
+> - Rapports : TVA collectée et marge sur les montants HT/TVA stockés.
+> - Les ventes existantes sont recalculées une fois au démarrage.
+> - Couvert par 16 tests Rust et 6 tests Vitest ; migration vérifiée en lançant l'application.
+
 **Fichier** : `src-tauri/src/commands/ventes.rs:38-46,145-146`, `src/pages/POS.tsx:131-151`, `commands/caisses.rs`, `commands/rapports.rs`, `commands/stats.rs`
 **Risque** :
 - Le POS traite `prix_vente` comme **HT** et ajoute la TVA (`totalTTC = subtotal + totalTVA`). La remise globale est calculée sur le **TTC**.
