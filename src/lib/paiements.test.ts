@@ -20,6 +20,21 @@ describe("buildPaiements", () => {
     ])
   })
 
+  it("keeps exact cents when the split parts sum to the net amount", () => {
+    const splits = [
+      { mode: "especes", amount: 33.33 },
+      { mode: "cb", amount: 33.33 },
+      { mode: "cheque", amount: 33.34 },
+    ]
+    const p = buildPaiements(splits, "especes", 100)
+    expect(p.map((x) => x.montant)).toEqual([33.33, 33.33, 33.34])
+  })
+
+  it("computes the change to the cent", () => {
+    const p = buildPaiements([{ mode: "cb", amount: 0.1 }, { mode: "especes", amount: 0.3 }], "especes", 0.3)
+    expect(p).toEqual([{ mode: "cb", montant: 0.1 }, { mode: "especes", montant: 0.2 }])
+  })
+
   it("never records a negative amount", () => {
     expect(buildPaiements([], "credit", -5)).toEqual([{ mode: "credit", montant: 0 }])
   })

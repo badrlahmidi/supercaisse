@@ -3,6 +3,8 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::calcul::montant_saisi;
+
 #[tauri::command]
 pub fn get_journal_caisse(
     db: State<DbState>,
@@ -62,6 +64,7 @@ pub fn add_journal_caisse(
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("journal", "creer"))?;
+    let montant = montant_saisi("Montant", montant)?;
     let utilisateur_id = Some(me.user_id);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 

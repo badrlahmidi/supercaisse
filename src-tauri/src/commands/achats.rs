@@ -3,6 +3,7 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::calcul::{montant_saisi, round2, somme_dh};
 use super::{adjust_article_stock, default_magasin_id};
 
 #[tauri::command]
@@ -20,12 +21,13 @@ pub fn create_achat(
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "creer"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
-    let mut montant_total = 0.0;
+    let mut totaux_lignes = Vec::with_capacity(articles.len());
     for a in &articles {
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
         let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
-        montant_total += qte * pu;
+        totaux_lignes.push(montant_saisi("Total de ligne d'achat", qte * pu)?);
     }
+    let montant_total = somme_dh(totaux_lignes);
     let sl = statut_livraison.unwrap_or_else(|| "recu".to_string());
     let sp = statut_paiement.unwrap_or_else(|| "non_paye".to_string());
 
@@ -40,7 +42,7 @@ pub fn create_achat(
             .ok_or("article_id manquant ou invalide dans la ligne")?;
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
         let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
-        let total_ligne = qte * pu;
+        let total_ligne = round2(qte * pu);
         tx.execute(
             "INSERT INTO achat_articles (achat_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![achat_id, article_id, qte, pu, total_ligne],

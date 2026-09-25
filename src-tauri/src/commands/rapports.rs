@@ -34,12 +34,12 @@ pub fn get_rapport_x(
         .unwrap_or(0);
 
     let ca_total: f64 = conn.query_row(
-        concat!("SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
+        concat!("SELECT COALESCE(SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0, 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
     ).unwrap_or(0.0);
 
     let total_remises: f64 = conn.query_row(
-        concat!("SELECT COALESCE(SUM(v.montant_remise), 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
+        concat!("SELECT COALESCE(SUM(ROUND((v.montant_remise) * 100)) / 100.0, 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
     ).unwrap_or(0.0);
 
@@ -58,7 +58,7 @@ pub fn get_rapport_x(
 
     let mut stmt = conn
         .prepare(
-            "SELECT vp.mode, COALESCE(SUM(vp.montant), 0), COUNT(DISTINCT vp.vente_id)
+            "SELECT vp.mode, COALESCE(SUM(ROUND((vp.montant) * 100)) / 100.0, 0), COUNT(DISTINCT vp.vente_id)
          FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
          WHERE vp.session_id = ?1 AND v.statut != 'annulee'
          GROUP BY vp.mode ORDER BY vp.mode",
@@ -120,8 +120,8 @@ pub fn get_rapport_detaille(
 
     let (wc, wp) = date_filter("v.date");
     let base_sql = format!(
-        "SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0),
-                COALESCE(SUM(v.montant_remise), 0),
+        "SELECT COALESCE(SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0, 0),
+                COALESCE(SUM(ROUND((v.montant_remise) * 100)) / 100.0, 0),
                 COUNT(*)
          FROM ventes v WHERE {} {}",
         filtre_ca!(),
@@ -139,8 +139,8 @@ pub fn get_rapport_detaille(
 
     let (wc2, wp2) = date_filter("v.date");
     let marge_sql = format!(
-        "SELECT COALESCE(SUM(COALESCE(va.montant_ht, va.quantite * va.prix_unitaire)
-                    - va.quantite * a.prix_achat * (CASE WHEN va.total_ligne < 0 THEN -1 ELSE 1 END)), 0)
+        "SELECT COALESCE(SUM(ROUND((COALESCE(va.montant_ht, va.quantite * va.prix_unitaire)
+                    - va.quantite * a.prix_achat * (CASE WHEN va.total_ligne < 0 THEN -1 ELSE 1 END)) * 100)) / 100.0, 0)
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          JOIN articles a ON a.id = va.article_id
@@ -156,7 +156,7 @@ pub fn get_rapport_detaille(
 
     let (wc3, wp3) = date_filter("v.date");
     let tva_sql = format!(
-        "SELECT COALESCE(SUM(COALESCE(va.montant_tva, va.quantite * va.prix_unitaire * va.tva / 100.0)), 0)
+        "SELECT COALESCE(SUM(ROUND((COALESCE(va.montant_tva, va.quantite * va.prix_unitaire * va.tva / 100.0)) * 100)) / 100.0, 0)
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          WHERE {} {}", filtre_ca!(), wc3
@@ -171,7 +171,7 @@ pub fn get_rapport_detaille(
 
     let (wc4, wp4) = date_filter("v.date");
     let top_sql = format!(
-        "SELECT a.designation, SUM(CASE WHEN v.dtype = 'avoir' THEN -va.quantite ELSE va.quantite END) as qty, SUM(va.total_ligne) as total
+        "SELECT a.designation, SUM(CASE WHEN v.dtype = 'avoir' THEN -va.quantite ELSE va.quantite END) as qty, SUM(ROUND((va.total_ligne) * 100)) / 100.0 as total
          FROM vente_articles va
          JOIN ventes v ON v.id = va.vente_id
          JOIN articles a ON a.id = va.article_id
@@ -224,7 +224,7 @@ pub fn get_rapport_detaille(
 
     let (wc6, wp6) = date_filter("v.date");
     let daily_sql = format!(
-        "SELECT date(v.date) as jour, COALESCE(SUM(v.montant_total - v.montant_remise), 0) as ca, COUNT(*) as nb
+        "SELECT date(v.date) as jour, COALESCE(SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0, 0) as ca, COUNT(*) as nb
          FROM ventes v WHERE {} {}
          GROUP BY jour ORDER BY jour", filtre_ca!(), wc6
     );
@@ -247,7 +247,7 @@ pub fn get_rapport_detaille(
 
     let (wc7, wp7) = date_filter("v.date");
     let mode_sql = format!(
-        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0) as total, COUNT(*) as nb
+        "SELECT mode_paiement, COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0, 0) as total, COUNT(*) as nb
          FROM ventes v WHERE {} {}
          GROUP BY mode_paiement", filtre_ca!(), wc7
     );

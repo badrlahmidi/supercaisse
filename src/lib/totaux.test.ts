@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { calculerLigne, calculerTotaux } from "./totaux"
+import { calculerLigne, calculerTotaux, round2, sommeDH, versCentimes } from "./totaux"
 
 describe("calculerTotaux", () => {
   it("adds TVA on top of HT prices", () => {
@@ -35,5 +35,26 @@ describe("calculerTotaux", () => {
   it("keeps net = total - remise", () => {
     const t = calculerTotaux([{ quantite: 0.335, prix_unitaire: 89.9, tva: 20, remise_ligne: 7 }], 12.5)
     expect(Math.round((t.montantTotal - t.montantRemise) * 100) / 100).toBe(t.netTTC)
+  })
+})
+
+describe("arrondi au centime (même règle que commands/calcul.rs)", () => {
+  it("arrondit les demi-centimes loin de zéro malgré la représentation binaire", () => {
+    expect(round2(1.005)).toBe(1.01)
+    expect(round2(-1.005)).toBe(-1.01)
+    expect(round2(3 * 8.335)).toBe(25.01)
+    expect(round2(0.1 + 0.2)).toBe(0.3)
+    expect(round2(2.675)).toBe(2.68)
+    expect(round2(1.004999)).toBe(1)
+    expect(versCentimes(19.99)).toBe(1999)
+    expect(versCentimes(-0.015)).toBe(-2)
+    expect(Object.is(round2(-0.001), 0)).toBe(true)
+  })
+
+  it("additionne en centimes entiers", () => {
+    const dixiemes = Array.from({ length: 1000 }, () => 0.1)
+    expect(dixiemes.reduce((s, x) => s + x, 0)).not.toBe(100)
+    expect(sommeDH(dixiemes)).toBe(100)
+    expect(sommeDH([0.1, 0.2, -0.3])).toBe(0)
   })
 })

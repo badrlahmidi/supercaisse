@@ -3,6 +3,8 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::calcul::montant_positif;
+
 #[tauri::command]
 pub fn get_cheques(
     db: State<DbState>,
@@ -59,6 +61,7 @@ pub fn add_cheque(
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "creer"))?;
+    let montant = montant_positif("Montant du chèque", montant)?;
     conn.execute(
         "INSERT INTO cheques (numero, banque, tireur, montant, date_emission, date_echeance, ctype, client_id, fournisseur_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",

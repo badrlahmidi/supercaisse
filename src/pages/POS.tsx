@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@/lib/tauri"
 import { buildPaiements } from "@/lib/paiements"
-import { calculerTotaux, round2 } from "@/lib/totaux"
+import { calculerTotaux, round2, sommeDH } from "@/lib/totaux"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/context/AuthContext"
 import { usePOSProducts } from "@/hooks/useProducts"
@@ -283,10 +283,10 @@ export default function POS() {
   const handleValidateSale = () => {
     if (cart.length === 0) return
     const montantRecu = paymentSplits.length > 0
-      ? paymentSplits.reduce((s, p) => s + p.amount, 0)
+      ? sommeDH(paymentSplits.map((p) => p.amount))
       : paymentMode === "especes" ? cashAmount : netAmount
     if (montantRecu < netAmount) {
-      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(netAmount - montantRecu)}` })
+      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(sommeDH([netAmount, -montantRecu]))}` })
       return
     }
     setProcessing(true)

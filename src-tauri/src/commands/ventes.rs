@@ -4,7 +4,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
 use super::calcul::{
-    calculer_ligne, round2, totaliser, valider_pourcentage, LigneCalculee, TOLERANCE_MONTANT,
+    calculer_ligne, round2, somme_dh, totaliser, valider_pourcentage, LigneCalculee,
+    TOLERANCE_MONTANT,
 };
 use super::mouvements::{inverser_lots, mouvement_ligne, proprietaire_lots, LigneStock, Sens};
 use super::{
@@ -47,7 +48,10 @@ pub(crate) fn normaliser_paiements(
             ));
         }
     }
-    Ok(paiements)
+    Ok(paiements
+        .into_iter()
+        .map(|(mode, montant)| (mode, round2(montant)))
+        .collect())
 }
 
 struct LigneVente {
@@ -221,14 +225,15 @@ pub(crate) fn create_vente_impl(
     } else {
         0.0
     };
-    let paiement_fidelite: f64 = paiements
-        .iter()
-        .filter(|(m, _)| m == "fidelite")
-        .map(|(_, montant)| montant)
-        .sum();
+    let paiement_fidelite = somme_dh(
+        paiements
+            .iter()
+            .filter(|(m, _)| m == "fidelite")
+            .map(|(_, montant)| *montant),
+    );
 
     if encaisse {
-        let total_paye: f64 = paiements.iter().map(|(_, montant)| montant).sum();
+        let total_paye = somme_dh(paiements.iter().map(|(_, montant)| *montant));
         if (total_paye - totaux.net_ttc).abs() > TOLERANCE_MONTANT {
             return Err(format!(
                 "Montant encaissé ({:.2} DH) différent du net à payer recalculé ({:.2} DH). Rechargez les articles et réessayez.",
@@ -263,11 +268,12 @@ pub(crate) fn create_vente_impl(
         }
     }
 
-    let credit_demandé: f64 = paiements
-        .iter()
-        .filter(|(m, _)| m == "credit")
-        .map(|(_, montant)| montant)
-        .sum();
+    let credit_demandé = somme_dh(
+        paiements
+            .iter()
+            .filter(|(m, _)| m == "credit")
+            .map(|(_, montant)| *montant),
+    );
     if credit_demandé > 0.0 {
         if let Some(cid) = client_id {
             let (actuel, plafond): (f64, Option<f64>) = tx
@@ -279,7 +285,7 @@ pub(crate) fn create_vente_impl(
                 .map_err(|e| e.to_string())?;
 
             if let Some(plaf) = plafond {
-                if plaf > 0.0 && actuel + credit_demandé > plaf {
+                if plaf > 0.0 && somme_dh([actuel, credit_demandé]) > plaf {
                     return Err(format!(
                         "Plafond de crédit dépassé. Crédit actuel: {}, Plafond: {}, Demandé: {}",
                         actuel, plaf, credit_demandé
@@ -418,7 +424,7 @@ fn credit_propre(tx: &Connection, vente_id: i64) -> Result<f64, String> {
         )
         .map_err(|e| e.to_string())?;
     let (nb_paiements, credit_paye): (i64, f64) = tx.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN mode = 'credit' THEN montant END), 0) FROM vente_paiements WHERE vente_id = ?1",
+        "SELECT COUNT(*), COALESCE(SUM(ROUND((CASE WHEN mode = 'credit' THEN montant END) * 100)) / 100.0, 0) FROM vente_paiements WHERE vente_id = ?1",
         params![vente_id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     ).map_err(|e| e.to_string())?;
@@ -1100,7 +1106,7 @@ mod tests {
         assert_eq!(round2(total - remise), round2(ht + tva));
         let somme_tva: f64 = conn
             .query_row(
-                "SELECT SUM(montant_tva) FROM vente_articles WHERE vente_id = ?1",
+                "SELECT SUM(ROUND((montant_tva) * 100)) / 100.0 FROM vente_articles WHERE vente_id = ?1",
                 params![id],
                 |r| r.get(0),
             )

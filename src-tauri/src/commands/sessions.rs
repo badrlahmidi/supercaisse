@@ -3,6 +3,7 @@ use crate::session::{autoriser, verifier_acces, Acces, AuthState, SessionUtilisa
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
+use super::calcul::{en_dh, montant_positif, vers_centimes};
 use super::{default_magasin_id, log_audit};
 
 #[tauri::command]
@@ -52,6 +53,7 @@ pub fn open_session(
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let fond_initial = montant_positif("Fond de caisse", fond_initial)?;
     let caissier_id = me.user_id;
 
     let count: i64 = conn
@@ -102,7 +104,7 @@ pub(crate) fn totaux_especes_session(
 ) -> Result<TotauxEspecesSession, String> {
     let ventes_especes: f64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(vp.montant), 0)
+            "SELECT COALESCE(SUM(ROUND((vp.montant) * 100)) / 100.0, 0)
          FROM vente_paiements vp
          JOIN ventes v ON v.id = vp.vente_id
          WHERE vp.session_id = ?1 AND vp.mode = 'especes' AND v.statut != 'annulee'",
@@ -112,8 +114,8 @@ pub(crate) fn totaux_especes_session(
         .map_err(|e| format!("Calcul des ventes espèces impossible : {}", e))?;
     let (entrees, sorties): (f64, f64) = conn
         .query_row(
-            "SELECT COALESCE(SUM(CASE WHEN jtype = 'entree' THEN montant END), 0),
-                COALESCE(SUM(CASE WHEN jtype = 'sortie' THEN ABS(montant) END), 0)
+            "SELECT COALESCE(SUM(ROUND((CASE WHEN jtype = 'entree' THEN montant END) * 100)) / 100.0, 0),
+                COALESCE(SUM(ROUND((CASE WHEN jtype = 'sortie' THEN ABS(montant) END) * 100)) / 100.0, 0)
          FROM journal_caisse WHERE session_id = ?1",
             params![session_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -175,6 +177,7 @@ pub(crate) fn close_session_impl(
     total_especes_declare: f64,
     utilisateur_id: Option<i64>,
 ) -> Result<(), String> {
+    let total_especes_declare = montant_positif("Total espèces déclaré", total_especes_declare)?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let fond_initial: f64 = tx
@@ -186,8 +189,12 @@ pub(crate) fn close_session_impl(
         .map_err(|_| "Session introuvable ou déjà clôturée".to_string())?;
 
     let totaux = totaux_especes_session(&tx, session_id)?;
-    let total_attendu = fond_initial + totaux.ventes_especes + totaux.entrees - totaux.sorties;
-    let ecart = total_especes_declare - total_attendu;
+    let attendu_centimes = vers_centimes(fond_initial)
+        + vers_centimes(totaux.ventes_especes)
+        + vers_centimes(totaux.entrees)
+        - vers_centimes(totaux.sorties);
+    let total_attendu = en_dh(attendu_centimes);
+    let ecart = en_dh(vers_centimes(total_especes_declare) - attendu_centimes);
     let date_cloture = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     tx.execute(
@@ -310,6 +317,49 @@ mod tests {
         assert_eq!(attendu, 250.0);
         assert_eq!(ecart, 0.0);
         assert_eq!(statut, "cloturee");
+    }
+
+    #[test]
+    fn test_cloture_exacte_au_centime_apres_de_nombreuses_petites_ventes() {
+        let mut conn = setup();
+        conn.execute_batch(
+            "UPDATE articles SET prix_vente = 0.0833, stock = 1000 WHERE id = 1;
+             UPDATE article_stocks SET quantite = 1000 WHERE article_id = 1;",
+        )
+        .unwrap();
+        for _ in 0..300 {
+            create_vente_impl(
+                &mut conn,
+                None,
+                Some(1),
+                vec![json!({ "article_id": 1, "quantite": 1 })],
+                None,
+                "especes".to_string(),
+                None,
+                Some("facture".to_string()),
+                None,
+                Some(1),
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO journal_caisse (jtype, montant, session_id) VALUES ('entree', 0.1, 1), ('sortie', 0.2, 1)",
+            [],
+        )
+        .unwrap();
+        let totaux = totaux_especes_session(&conn, 1).unwrap();
+        assert_eq!(totaux.ventes_especes, 30.0);
+        close_session_impl(&mut conn, 1, 129.9, None).unwrap();
+        let (attendu, ecart): (f64, f64) = conn
+            .query_row(
+                "SELECT total_especes_attendu, ecart FROM sessions_caisse WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(attendu, 129.9);
+        assert_eq!(ecart, 0.0);
+        assert!(close_session_impl(&mut conn, 1, f64::NAN, None).is_err());
     }
 
     #[test]

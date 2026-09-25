@@ -1,4 +1,4 @@
-use super::calcul::round2;
+use super::calcul::{montant_positif, round2};
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::{params, Connection};
@@ -14,7 +14,7 @@ pub(crate) struct Recettes {
 
 pub(crate) fn recettes_depuis(conn: &Connection, depuis: &str) -> Result<Recettes, String> {
     let sql = concat!(
-        "SELECT mode, COALESCE(SUM(montant), 0) FROM (
+        "SELECT mode, COALESCE(SUM(ROUND((montant) * 100)) / 100.0, 0) FROM (
             SELECT vp.mode AS mode, vp.montant AS montant
             FROM vente_paiements vp
             JOIN ventes v ON v.id = COALESCE(
@@ -108,6 +108,7 @@ pub fn open_caisse(
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "creer"))?;
+    let fond_initial = montant_positif("Fond de caisse", fond_initial)?;
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
         "INSERT INTO caisses (nom, utilisateur_id, statut, ouverture_date, fond_initial) VALUES (?1, ?2, 'ouverte', ?3, ?4)",
@@ -246,7 +247,7 @@ mod tests {
     fn test_chiffre_d_affaires_sans_devis_ni_double_comptage() {
         let conn = scenario();
         let ca: f64 = conn.query_row(
-            concat!("SELECT COALESCE(SUM(v.montant_total - v.montant_remise), 0) FROM ventes v WHERE ", filtre_ca!()), [], |r| r.get(0),
+            concat!("SELECT COALESCE(SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0, 0) FROM ventes v WHERE ", filtre_ca!()), [], |r| r.get(0),
         ).unwrap();
         assert_eq!(ca, 240.0);
         let quantite: f64 = conn

@@ -11,7 +11,7 @@ pub fn get_stats(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
-    let total_ventes_30j: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(montant_total - montant_remise),0) FROM ventes v WHERE date >= datetime('now','-30 days','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let total_ventes_30j: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= datetime('now','-30 days','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
     let nb_articles: i64 = conn
         .query_row("SELECT COUNT(*) FROM articles WHERE actif=1", [], |r| {
             r.get(0)
@@ -26,7 +26,7 @@ pub fn get_stats(
         .unwrap_or(0);
     let credit_total: f64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(credit_actuel),0) FROM clients",
+            "SELECT COALESCE(SUM(ROUND((credit_actuel) * 100)) / 100.0,0) FROM clients",
             [],
             |r| r.get(0),
         )
@@ -35,13 +35,13 @@ pub fn get_stats(
         .query_row("SELECT COUNT(*) FROM clients", [], |r| r.get(0))
         .unwrap_or(0);
 
-    let ca_jour: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(montant_total - montant_remise),0) FROM ventes v WHERE date >= date('now','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
-    let ca_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(montant_total - montant_remise),0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let ca_jour: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= date('now','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let ca_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
 
-    let ht_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(COALESCE(montant_ht, montant_total - montant_remise)),0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let ht_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((COALESCE(montant_ht, montant_total - montant_remise)) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
 
     let cout_achats_mois: f64 = conn.query_row(concat!("
-        SELECT COALESCE(SUM(vl.quantite * a.prix_achat * (CASE WHEN vl.total_ligne < 0 THEN -1 ELSE 1 END)), 0)
+        SELECT COALESCE(SUM(ROUND((vl.quantite * a.prix_achat * (CASE WHEN vl.total_ligne < 0 THEN -1 ELSE 1 END)) * 100)) / 100.0, 0)
         FROM vente_articles vl
         JOIN ventes v ON v.id = vl.vente_id
         JOIN articles a ON a.id = vl.article_id
@@ -73,7 +73,7 @@ pub fn get_stats(
     let mut stmt = conn
         .prepare(concat!(
             "
-        SELECT c.nom, SUM(v.montant_total - v.montant_remise) as depense
+        SELECT c.nom, SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0 as depense
         FROM ventes v
         JOIN clients c ON c.id = v.client_id
         WHERE v.date >= datetime('now','-30 days','localtime') AND ",

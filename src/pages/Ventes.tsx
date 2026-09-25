@@ -19,6 +19,7 @@ import EmptyState from "@/components/EmptyState"
 import type { Settings } from "@/types"
 import { compteDansCA } from "@/lib/ventes"
 import type { Sale } from "@/types"
+import { sommeDH } from "@/lib/totaux"
 
 type Vente = Sale
 
@@ -165,7 +166,7 @@ export default function Ventes() {
     v.mode_paiement.toLowerCase().includes(search.toLowerCase())
   ) || []
 
-  const totalVentes = filteredVentes.filter(compteDansCA).reduce((s, v) => s + (v.montant_total - v.montant_remise), 0)
+  const totalVentes = sommeDH(filteredVentes.filter(compteDansCA).map((v) => sommeDH([v.montant_total, -v.montant_remise])))
   const nbVentes = filteredVentes.length
 
   return (

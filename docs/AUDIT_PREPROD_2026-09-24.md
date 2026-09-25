@@ -316,6 +316,20 @@ Tous les rapports doivent ensuite lire `montant_ttc - montant_remise` (ou `monta
 
 ### [MAJEUR] M-1 — Montants en `f64`
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`, avec une approche différente du stockage en `INTEGER`. Invariant retenu : tout montant stocké (totaux, lignes, paiements, crédit, caisse, chèques, journal) est un nombre exact de centimes, et tout calcul sur des montants se fait en centimes entiers.
+>
+> - **Rust** (`calcul.rs`) : `vers_centimes` / `en_dh` / `somme_dh`. Les totaux de document, l'attendu et l'écart de clôture, le plafond de crédit, les paiements et les achats sont calculés en `i64`. L'arrondi se fait au demi-centime loin de zéro, avec une correction de la représentation binaire (`1,005` → `1,01`, `3 × 8,335` → `25,01`).
+> - **Montants saisis** (paiement client, chèque, journal de caisse, fonds de caisse, espèces déclarées, plafond de crédit) : validés par `montant_saisi` / `montant_positif` (NaN et infini refusés, négatifs refusés quand ils n'ont pas de sens), puis arrondis.
+> - **SQL** : les 24 agrégats monétaires (CA, recettes, TVA, marge, crédit, espèces de session) additionnent des centimes (`SUM(ROUND(x * 100)) / 100.0`). Ils sont donc exacts quel que soit le nombre de lignes.
+> - **Migration v2** : arrondit au centime les montants existants des 25 colonnes monétaires. Le nombre de valeurs corrigées est écrit dans le journal.
+> - **Prix unitaires** : ils gardent leur précision, car un prix HT à 4 décimales est nécessaire pour obtenir un TTC rond. C'est le montant de chaque ligne qui est arrondi, conformément à la cohérence exigée par la DGI.
+> - **Frontend** : `versCentimes` / `sommeDH` suivent la même règle. Ils sont utilisés au POS et dans les totaux affichés (ventes, journal, tableau de bord, caisses).
+>   - Bug réel corrigé au passage : trois règlements de 33,33 + 33,33 + 33,34 étaient refusés au POS (« Montant insuffisant », car la somme flottante vaut 99,99999…).
+>
+> Le stockage n'a pas été basculé en `INTEGER`. Cela aurait changé le contrat IPC et 25 colonnes à la fois, pour une garantie identique dès lors que l'invariant ci-dessus est respecté.
+>
+> Couvert par des tests Rust et Vitest identiques des deux côtés. Un test de clôture après 300 ventes à 0,10 DH vérifie un écart exactement nul (il échouait avec l'ancien `SUM`). La migration a été vérifiée sur une base réelle dans l'application.
+
 **Fichier** : toutes les colonnes `REAL` monétaires ; `create_vente`, `close_session`, `add_paiement`
 **Risque** :
 - Accumulation d'erreurs d'arrondi (0,1 + 0,2 ≠ 0,3) dans les SUM, les écarts de caisse et le crédit client.

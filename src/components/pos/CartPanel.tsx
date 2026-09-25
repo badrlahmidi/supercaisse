@@ -7,7 +7,7 @@ import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
 import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
 import type { Article, Client } from "@/types"
-import { calculerLigne, round2 } from "@/lib/totaux"
+import { calculerLigne, round2, sommeDH } from "@/lib/totaux"
 
 interface ReceiptData {
   shopName: string
@@ -108,11 +108,11 @@ export default function CartPanel({
     (s, i) => s + calculerLigne({ ...i, remise_ligne: 0 }).total_ligne - calculerLigne(i).total_ligne,
     0,
   ))
-  const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
-  const splitRemaining = Math.max(0, netAmount - splitsTotal)
+  const splitsTotal = sommeDH(paymentSplits.map((p) => p.amount))
+  const splitRemaining = Math.max(0, sommeDH([netAmount, -splitsTotal]))
   const cashSplit = paymentSplits.find((p) => p.mode === "especes")
   const cashTotal = cashSplit?.amount || 0
-  const splitChange = cashTotal > 0 ? Math.max(0, cashTotal - (netAmount - splitsTotal + cashTotal)) : 0
+  const splitChange = cashTotal > 0 ? Math.max(0, sommeDH([splitsTotal, -netAmount])) : 0
 
   const handleHoldCart = () => {
     if (cart.length === 0) return

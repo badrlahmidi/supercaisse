@@ -1,4 +1,13 @@
-export const round2 = (n: number) => Math.round(n * 100) / 100
+const CORRECTION_DEMI_CENTIME = 1e-6
+
+export function versCentimes(n: number): number {
+  const centimes = n * 100
+  return Math.round(centimes + Math.sign(centimes) * CORRECTION_DEMI_CENTIME) + 0
+}
+
+export const round2 = (n: number) => versCentimes(n) / 100
+
+export const sommeDH = (montants: number[]) => montants.reduce((s, m) => s + versCentimes(m), 0) / 100
 
 export interface LigneMontants {
   quantite: number
@@ -37,13 +46,13 @@ export function calculerLigne(ligne: LigneMontants, remiseGlobale = 0): LigneCal
 export function calculerTotaux(lignes: LigneMontants[], remiseGlobale = 0): TotauxDocument {
   const calculs = lignes.map((l) => calculerLigne(l, remiseGlobale))
   const bruts = lignes.map((l) => calculerLigne(l, 0))
-  const montantTotal = round2(calculs.reduce((s, l) => s + l.total_ligne, 0))
-  const montantHT = round2(calculs.reduce((s, l) => s + l.montant_ht, 0))
-  const montantTVA = round2(calculs.reduce((s, l) => s + l.montant_tva, 0))
-  const netTTC = round2(montantHT + montantTVA)
+  const montantTotal = sommeDH(calculs.map((l) => l.total_ligne))
+  const montantHT = sommeDH(calculs.map((l) => l.montant_ht))
+  const montantTVA = sommeDH(calculs.map((l) => l.montant_tva))
+  const netTTC = sommeDH([montantHT, montantTVA])
   const tvaParTaux: Record<number, number> = {}
   lignes.forEach((l, i) => {
-    if (l.tva > 0) tvaParTaux[l.tva] = round2((tvaParTaux[l.tva] ?? 0) + calculs[i].montant_tva)
+    if (l.tva > 0) tvaParTaux[l.tva] = sommeDH([tvaParTaux[l.tva] ?? 0, calculs[i].montant_tva])
   })
   return {
     lignes: calculs,
@@ -51,9 +60,9 @@ export function calculerTotaux(lignes: LigneMontants[], remiseGlobale = 0): Tota
     montantHT,
     montantTVA,
     netTTC,
-    montantRemise: round2(montantTotal - netTTC),
-    sousTotalHT: round2(bruts.reduce((s, l) => s + l.montant_ht, 0)),
-    totalTVABrut: round2(bruts.reduce((s, l) => s + l.montant_tva, 0)),
+    montantRemise: sommeDH([montantTotal, -netTTC]),
+    sousTotalHT: sommeDH(bruts.map((l) => l.montant_ht)),
+    totalTVABrut: sommeDH(bruts.map((l) => l.montant_tva)),
     tvaParTaux,
   }
 }

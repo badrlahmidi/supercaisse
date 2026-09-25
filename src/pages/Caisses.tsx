@@ -17,6 +17,7 @@ import { z } from "zod"
 import PageHeader from "@/components/PageHeader"
 import { formatCurrency, formatDateTime } from "@/lib/utils"
 import { Plus, XCircle, Monitor, Loader2, Banknote, CreditCard, Landmark, ArrowRightLeft } from "lucide-react"
+import { sommeDH } from "@/lib/totaux"
 
 interface Caisse {
   id: number
@@ -121,7 +122,7 @@ export default function Caisses() {
 
   const caissesOuvertes = caisses.filter((c) => c.statut === "ouverte")
   const recettesDuJour = tresorerie?.jour?.total ?? 0
-  const fondTotal = caissesOuvertes.reduce((s, c) => s + c.fond_initial, 0)
+  const fondTotal = sommeDH(caissesOuvertes.map((c) => c.fond_initial))
 
   const totalRecettes = (c: Caisse) =>
     c.recettes_especes + c.recettes_cb + c.recettes_cheque + c.recettes_virement

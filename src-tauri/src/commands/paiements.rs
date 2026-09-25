@@ -3,6 +3,7 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::calcul::montant_positif;
 use super::log_audit;
 
 #[tauri::command]
@@ -58,6 +59,10 @@ pub fn add_paiement(
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("clients", "modifier"))?;
+    let montant = montant_positif("Montant du paiement", montant)?;
+    if montant == 0.0 {
+        return Err("Le montant du paiement doit être supérieur à zéro".to_string());
+    }
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute(
         "INSERT INTO paiements (client_id, montant, type, reference) VALUES (?1, ?2, ?3, ?4)",

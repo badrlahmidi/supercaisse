@@ -3,6 +3,7 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::calcul::montant_positif;
 use super::log_audit;
 
 #[tauri::command]
@@ -51,6 +52,9 @@ pub fn add_client(
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "creer"))?;
+    let credit_plafond = credit_plafond
+        .map(|m| montant_positif("Plafond de crédit", m))
+        .transpose()?;
     conn.execute(
         "INSERT INTO clients (code, nom, adresse, telephone, email, credit_plafond, ice, segment) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment],
@@ -75,6 +79,9 @@ pub fn update_client(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "modifier"))?;
+    let credit_plafond = credit_plafond
+        .map(|m| montant_positif("Plafond de crédit", m))
+        .transpose()?;
     conn.execute(
         "UPDATE clients SET code=?1, nom=?2, adresse=?3, telephone=?4, email=?5, credit_plafond=?6, ice=?7, segment=?8 WHERE id=?9",
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment, id],

@@ -78,7 +78,7 @@ pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
 type Migration = fn(&Connection) -> Result<()>;
 
-const MIGRATIONS: &[Migration] = &[migration_001_base];
+const MIGRATIONS: &[Migration] = &[migration_001_base, migration_002_montants_au_centime];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
     let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -156,6 +156,78 @@ fn ajouter_colonne(conn: &Connection, table: &str, colonne: &str, definition: &s
             ),
             [],
         )?;
+    }
+    Ok(())
+}
+
+pub(crate) const COLONNES_MONTANTS: &[(&str, &[&str])] = &[
+    ("clients", &["credit_plafond", "credit_actuel"]),
+    (
+        "ventes",
+        &[
+            "montant_total",
+            "montant_remise",
+            "montant_ht",
+            "montant_tva",
+        ],
+    ),
+    (
+        "vente_articles",
+        &["total_ligne", "montant_ht", "montant_tva"],
+    ),
+    ("vente_paiements", &["montant"]),
+    ("achats", &["montant_total"]),
+    ("achat_articles", &["total_ligne"]),
+    ("paiements", &["montant"]),
+    ("journal_caisse", &["montant"]),
+    ("cheques", &["montant"]),
+    (
+        "sessions_caisse",
+        &[
+            "fond_initial",
+            "total_especes_attendu",
+            "total_especes_declare",
+            "ecart",
+        ],
+    ),
+    (
+        "caisses",
+        &[
+            "fond_initial",
+            "recettes_especes",
+            "recettes_cb",
+            "recettes_cheque",
+            "recettes_virement",
+            "depenses",
+            "ecart",
+        ],
+    ),
+];
+
+fn migration_002_montants_au_centime(conn: &Connection) -> Result<()> {
+    let mut corriges = 0;
+    for (table, colonnes) in COLONNES_MONTANTS {
+        for colonne in *colonnes {
+            let arrondi = format!(
+                "ROUND({c} * 100 + (CASE WHEN {c} > 0 THEN 1e-6 WHEN {c} < 0 THEN -1e-6 ELSE 0 END)) / 100.0",
+                c = colonne
+            );
+            corriges += conn.execute(
+                &format!(
+                    "UPDATE {t} SET {c} = {a} WHERE {c} IS NOT NULL AND typeof({c}) IN ('real', 'integer') AND {c} != {a}",
+                    t = table,
+                    c = colonne,
+                    a = arrondi
+                ),
+                [],
+            )?;
+        }
+    }
+    if corriges > 0 {
+        log::info!(
+            "Montants arrondis au centime : {} valeurs corrigées",
+            corriges
+        );
     }
     Ok(())
 }
@@ -919,6 +991,51 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_migration_arrondit_les_montants_au_centime() {
+        let mut conn = super::Connection::open_in_memory().unwrap();
+        super::appliquer_migrations(&mut conn, &super::MIGRATIONS[..1]).unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO clients (id, nom, credit_actuel, credit_plafond) VALUES (1, 'C', 0.1 + 0.2, NULL);
+            INSERT INTO ventes (id, montant_total, montant_remise, montant_ht, montant_tva) VALUES (1, 23.999999999, 1.005, 20.004, -0.015);
+            INSERT INTO sessions_caisse (id, caissier_id, fond_initial, ecart) VALUES (1, 1, 100, -3.3333);
+            ",
+        )
+        .unwrap();
+        super::migrer(&mut conn).unwrap();
+        assert_eq!(super::version_schema(&conn).unwrap(), super::SCHEMA_VERSION);
+        let (credit, plafond): (f64, Option<f64>) = conn
+            .query_row(
+                "SELECT credit_actuel, credit_plafond FROM clients",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(credit, 0.3);
+        assert_eq!(plafond, None);
+        let v: (f64, f64, f64, f64) = conn
+            .query_row(
+                "SELECT montant_total, montant_remise, montant_ht, montant_tva FROM ventes",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(v, (24.0, 1.01, 20.0, -0.02));
+        let ecart: f64 = conn
+            .query_row("SELECT ecart FROM sessions_caisse", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ecart, -3.33);
+        for (table, colonnes) in super::COLONNES_MONTANTS {
+            for colonne in *colonnes {
+                assert!(
+                    super::colonne_existe(&conn, table, colonne).unwrap(),
+                    "{table}.{colonne}"
+                );
+            }
+        }
+    }
+
     use super::*;
 
     fn fichier(nom: &str) -> String {

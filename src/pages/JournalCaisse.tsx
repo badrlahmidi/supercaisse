@@ -15,6 +15,7 @@ import { format, subDays } from "date-fns"
 import { useAuth } from "@/context/AuthContext"
 import { useCurrentSession, useCloseSession } from "@/hooks/useSessions"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/ui/Dialog"
+import { sommeDH } from "@/lib/totaux"
 
 interface JournalEntry {
   id: number
@@ -53,8 +54,8 @@ export default function JournalCaisse() {
     return true
   }) || []
 
-  const totalEntrees = filtered.filter(e => e.montant > 0).reduce((s, e) => s + e.montant, 0)
-  const totalSorties = filtered.filter(e => e.montant < 0).reduce((s, e) => s + Math.abs(e.montant), 0)
+  const totalEntrees = sommeDH(filtered.filter(e => e.montant > 0).map(e => e.montant))
+  const totalSorties = sommeDH(filtered.filter(e => e.montant < 0).map(e => Math.abs(e.montant)))
   const solde = totalEntrees - totalSorties
 
   return (
