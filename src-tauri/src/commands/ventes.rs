@@ -7,14 +7,14 @@ use super::calcul::{
     calculer_ligne, round2, somme_dh, totaliser, valider_pourcentage, LigneCalculee,
     TOLERANCE_MONTANT,
 };
+use super::contrats::{
+    LigneVenteDetail, LigneVenteSaisie, ModePaiement, PaiementSaisi, TypeDocument, VenteCreee,
+    VenteDetail, VenteEntete, VenteResume,
+};
 use super::mouvements::{inverser_lots, mouvement_ligne, proprietaire_lots, LigneStock, Sens};
 use super::{
     annee_courante, default_magasin_id, document_prefixe, log_audit, next_numero_document,
 };
-
-const MODES_PAIEMENT: [&str; 7] = [
-    "especes", "carte", "cb", "cheque", "virement", "credit", "fidelite",
-];
 
 pub(crate) fn mode_de_vente(paiements: &[(String, f64)]) -> String {
     let mut modes: Vec<&str> = paiements.iter().map(|(m, _)| m.as_str()).collect();
@@ -26,40 +26,31 @@ pub(crate) fn mode_de_vente(paiements: &[(String, f64)]) -> String {
 }
 
 pub(crate) fn normaliser_paiements(
-    mode_paiement: &str,
-    splits: Option<&[serde_json::Value]>,
+    mode_paiement: ModePaiement,
+    splits: Option<&[PaiementSaisi]>,
     montant_par_defaut: f64,
 ) -> Result<Vec<(String, f64)>, String> {
-    let paiements: Vec<(String, f64)> = match splits {
-        Some(list) if !list.is_empty() => list
-            .iter()
-            .map(|s| {
-                let mode = s["mode"]
-                    .as_str()
-                    .ok_or("Mode de paiement manquant")?
-                    .to_string();
-                let montant = s["montant"]
-                    .as_f64()
-                    .ok_or_else(|| format!("Montant manquant pour le paiement {}", mode))?;
-                Ok((mode, montant))
-            })
-            .collect::<Result<_, String>>()?,
-        _ => vec![(mode_paiement.to_string(), montant_par_defaut.max(0.0))],
+    let paiements: Vec<(ModePaiement, f64)> = match splits {
+        Some(list) if !list.is_empty() => list.iter().map(|s| (s.mode, s.montant)).collect(),
+        _ => vec![(mode_paiement, montant_par_defaut.max(0.0))],
     };
     for (mode, montant) in &paiements {
-        if !MODES_PAIEMENT.contains(&mode.as_str()) {
-            return Err(format!("Mode de paiement inconnu : {}", mode));
+        if *mode == ModePaiement::Mixte {
+            return Err(
+                "« mixte » n'est pas un mode de règlement : détaillez chaque paiement".to_string(),
+            );
         }
         if !montant.is_finite() || *montant < 0.0 {
             return Err(format!(
                 "Montant invalide pour le paiement {} : {}",
-                mode, montant
+                mode.code(),
+                montant
             ));
         }
     }
     Ok(paiements
         .into_iter()
-        .map(|(mode, montant)| (mode, round2(montant)))
+        .map(|(mode, montant)| (mode.code().to_string(), round2(montant)))
         .collect())
 }
 
@@ -77,7 +68,7 @@ struct LigneVente {
 
 fn preparer_lignes(
     tx: &Connection,
-    articles: &[serde_json::Value],
+    articles: &[LigneVenteSaisie],
     remise_globale: f64,
 ) -> Result<Vec<LigneVente>, String> {
     if articles.is_empty() {
@@ -86,25 +77,16 @@ fn preparer_lignes(
     articles
         .iter()
         .map(|a| {
-            let article_id = a["article_id"]
-                .as_i64()
-                .ok_or("article_id manquant ou invalide dans la ligne")?;
-            let quantite = a["quantite"]
-                .as_f64()
-                .ok_or_else(|| format!("Quantité manquante (article {})", article_id))?;
+            let article_id = a.article_id;
+            let quantite = a.quantite;
             if !quantite.is_finite() || quantite <= 0.0 {
                 return Err(format!(
                     "Quantité invalide (article {}) : {}",
                     article_id, quantite
                 ));
             }
-            let remise_ligne =
-                valider_pourcentage("Remise ligne", a["remise_ligne"].as_f64().unwrap_or(0.0))?;
-            let prix_type = match a["prix_type"].as_str().unwrap_or("public") {
-                "grossiste" => "grossiste",
-                _ => "public",
-            }
-            .to_string();
+            let remise_ligne = valider_pourcentage("Remise ligne", a.remise_ligne.unwrap_or(0.0))?;
+            let prix_type = a.prix_type.unwrap_or_default().code().to_string();
             let (prix_vente, prix_grossiste, tva): (f64, Option<f64>, f64) = tx
                 .query_row(
                     "SELECT prix_vente, prix_grossiste, tva FROM articles WHERE id = ?1",
@@ -127,12 +109,12 @@ fn preparer_lignes(
             };
             Ok(LigneVente {
                 article_id,
-                variante_id: a["variante_id"].as_i64(),
+                variante_id: a.variante_id,
                 quantite,
                 prix_unitaire,
                 tva,
                 remise_ligne,
-                note: a["note"].as_str().map(|s| s.to_string()),
+                note: a.note.clone(),
                 prix_type,
                 calcul: calculer_ligne(quantite, prix_unitaire, tva, remise_ligne, remise_globale),
             })
@@ -156,17 +138,17 @@ pub fn create_vente(
     auth: State<AuthState>,
     token: String,
     client_id: Option<i64>,
-    articles: Vec<serde_json::Value>,
+    articles: Vec<LigneVenteSaisie>,
     remise_globale_pct: Option<f64>,
-    mode_paiement: String,
-    splits: Option<Vec<serde_json::Value>>,
-    dtype: Option<String>,
+    mode_paiement: ModePaiement,
+    splits: Option<Vec<PaiementSaisi>>,
+    dtype: Option<TypeDocument>,
     points_utilises: Option<f64>,
     magasin_id: Option<i64>,
-) -> Result<serde_json::Value, String> {
+) -> Result<VenteCreee, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "creer"))?;
-    if super::fiscal::est_fiscal(dtype.as_deref().unwrap_or("facture")) {
+    if super::fiscal::est_fiscal(dtype.unwrap_or(TypeDocument::Facture).code()) {
         super::fiscal::verifier_mentions_vendeur(&conn)?;
     }
     let resultat = create_vente_impl(
@@ -189,14 +171,14 @@ pub(crate) fn create_vente_impl(
     conn: &mut Connection,
     client_id: Option<i64>,
     caissier_id: Option<i64>,
-    articles: Vec<serde_json::Value>,
+    articles: Vec<LigneVenteSaisie>,
     remise_globale_pct: Option<f64>,
-    mode_paiement: String,
-    splits: Option<Vec<serde_json::Value>>,
-    dtype: Option<String>,
+    mode_paiement: ModePaiement,
+    splits: Option<Vec<PaiementSaisi>>,
+    dtype: Option<TypeDocument>,
     points_utilises: Option<f64>,
     magasin_id: Option<i64>,
-) -> Result<serde_json::Value, String> {
+) -> Result<VenteCreee, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = match magasin_id {
         Some(id) => id,
@@ -212,7 +194,7 @@ pub(crate) fn create_vente_impl(
         }
     };
 
-    let document_type = dtype.unwrap_or_else(|| "facture".to_string());
+    let document_type = dtype.unwrap_or(TypeDocument::Facture).code().to_string();
     document_prefixe(&document_type)?;
     let encaisse = matches!(document_type.as_str(), "facture" | "bl");
     if document_type == "facture" {
@@ -224,7 +206,7 @@ pub(crate) fn create_vente_impl(
     let calculs: Vec<LigneCalculee> = lignes.iter().map(|l| l.calcul).collect();
     let totaux = totaliser(&calculs);
 
-    let paiements = normaliser_paiements(&mode_paiement, splits.as_deref(), totaux.net_ttc)?;
+    let paiements = normaliser_paiements(mode_paiement, splits.as_deref(), totaux.net_ttc)?;
     let mode_vente = mode_de_vente(&paiements);
 
     let fidelite_actif = lire_setting(&tx, "fidelite_actif")?.as_deref() == Some("true");
@@ -420,16 +402,16 @@ pub(crate) fn create_vente_impl(
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({
-        "id": vente_id,
-        "numero_facture": numero_facture,
-        "montant_total": totaux.montant_total,
-        "montant_remise": totaux.montant_remise,
-        "montant_ht": totaux.montant_ht,
-        "montant_tva": totaux.montant_tva,
-        "net_ttc": totaux.net_ttc,
-        "points_gagnes": pts_gagnes,
-    }))
+    Ok(VenteCreee {
+        id: vente_id,
+        numero_facture,
+        montant_total: totaux.montant_total,
+        montant_remise: totaux.montant_remise,
+        montant_ht: totaux.montant_ht,
+        montant_tva: totaux.montant_tva,
+        net_ttc: totaux.net_ttc,
+        points_gagnes: pts_gagnes,
+    })
 }
 
 fn credit_propre(tx: &Connection, vente_id: i64) -> Result<f64, String> {
@@ -691,7 +673,7 @@ pub fn get_ventes(
     token: String,
     debut: Option<String>,
     fin: Option<String>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<VenteResume>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
     let mut where_clause = String::new();
@@ -723,22 +705,22 @@ pub fn get_ventes(
         query_params.iter().map(|p| p.as_ref()).collect();
     let rows = stmt
         .query_map(params_refs.as_slice(), |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, String>(1)?,
-                "client_id": row.get::<_, Option<i64>>(2)?,
-                "caissier_id": row.get::<_, Option<i64>>(3)?,
-                "montant_total": row.get::<_, f64>(4)?,
-                "montant_remise": row.get::<_, f64>(5)?,
-                "mode_paiement": row.get::<_, String>(6)?,
-                "statut": row.get::<_, String>(7)?,
-                "numero_facture": row.get::<_, Option<String>>(8)?,
-                "client_nom": row.get::<_, Option<String>>(9)?,
-                "caissier_nom": row.get::<_, Option<String>>(10)?,
-                "dtype": row.get::<_, String>(11)?,
-                "client_telephone": row.get::<_, Option<String>>(12)?,
-                "client_email": row.get::<_, Option<String>>(13)?,
-            }))
+            Ok(VenteResume {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                client_id: row.get(2)?,
+                caissier_id: row.get(3)?,
+                montant_total: row.get(4)?,
+                montant_remise: row.get(5)?,
+                mode_paiement: row.get(6)?,
+                statut: row.get(7)?,
+                numero_facture: row.get(8)?,
+                client_nom: row.get(9)?,
+                caissier_nom: row.get(10)?,
+                dtype: row.get(11)?,
+                client_telephone: row.get(12)?,
+                client_email: row.get(13)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -751,7 +733,7 @@ pub fn get_vente_details(
     auth: State<AuthState>,
     token: String,
     vente_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<VenteDetail, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
     let vente = conn.query_row(
@@ -766,25 +748,25 @@ pub fn get_vente_details(
          WHERE v.id = ?1",
         params![vente_id],
         |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, String>(1)?,
-                "montant_total": row.get::<_, f64>(2)?,
-                "montant_remise": row.get::<_, f64>(3)?,
-                "mode_paiement": row.get::<_, String>(4)?,
-                "statut": row.get::<_, String>(5)?,
-                "numero_facture": row.get::<_, Option<String>>(6)?,
-                "client_nom": row.get::<_, Option<String>>(7)?,
-                "client_tel": row.get::<_, Option<String>>(8)?,
-                "caissier_nom": row.get::<_, Option<String>>(9)?,
-                "dtype": row.get::<_, String>(10)?,
-                "client_ice": row.get::<_, Option<String>>(11)?,
-                "source_vente_id": row.get::<_, Option<i64>>(12)?,
-                "source_dtype": row.get::<_, Option<String>>(13)?,
-                "source_numero": row.get::<_, Option<String>>(14)?,
-                "montant_ht": row.get::<_, Option<f64>>(15)?,
-                "montant_tva": row.get::<_, Option<f64>>(16)?,
-            }))
+            Ok(VenteEntete {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                montant_total: row.get(2)?,
+                montant_remise: row.get(3)?,
+                mode_paiement: row.get(4)?,
+                statut: row.get(5)?,
+                numero_facture: row.get(6)?,
+                client_nom: row.get(7)?,
+                client_tel: row.get(8)?,
+                caissier_nom: row.get(9)?,
+                dtype: row.get(10)?,
+                client_ice: row.get(11)?,
+                source_vente_id: row.get(12)?,
+                source_dtype: row.get(13)?,
+                source_numero: row.get(14)?,
+                montant_ht: row.get(15)?,
+                montant_tva: row.get(16)?,
+            })
         }
     ).map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
@@ -795,24 +777,24 @@ pub fn get_vente_details(
     ).map_err(|e| e.to_string())?;
     let lignes = stmt
         .query_map(params![vente_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "article_id": row.get::<_, i64>(1)?,
-                "designation": row.get::<_, String>(2)?,
-                "quantite": row.get::<_, f64>(3)?,
-                "prix_unitaire": row.get::<_, f64>(4)?,
-                "tva": row.get::<_, f64>(5)?,
-                "total_ligne": row.get::<_, f64>(6)?,
-                "remise_ligne": row.get::<_, Option<f64>>(7)?,
-                "montant_ht": row.get::<_, Option<f64>>(8)?,
-                "montant_tva": row.get::<_, Option<f64>>(9)?,
-            }))
+            Ok(LigneVenteDetail {
+                id: row.get(0)?,
+                article_id: row.get(1)?,
+                designation: row.get(2)?,
+                quantite: row.get(3)?,
+                prix_unitaire: row.get(4)?,
+                tva: row.get(5)?,
+                total_ligne: row.get(6)?,
+                remise_ligne: row.get(7)?,
+                montant_ht: row.get(8)?,
+                montant_tva: row.get(9)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     let lignes: Vec<_> = lignes
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "vente": vente, "lignes": lignes }))
+    Ok(VenteDetail { vente, lignes })
 }
 
 #[tauri::command(async)]
@@ -1035,6 +1017,42 @@ pub(crate) fn convert_document_impl(
 }
 
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn vendre_json(
+    conn: &mut Connection,
+    client_id: Option<i64>,
+    caissier_id: Option<i64>,
+    articles: Vec<serde_json::Value>,
+    remise_globale_pct: Option<f64>,
+    mode_paiement: String,
+    splits: Option<Vec<serde_json::Value>>,
+    dtype: Option<String>,
+    points_utilises: Option<f64>,
+    magasin_id: Option<i64>,
+) -> Result<VenteCreee, String> {
+    create_vente_impl(
+        conn,
+        client_id,
+        caissier_id,
+        serde_json::from_value(serde_json::Value::Array(articles))
+            .map_err(|e| format!("Contrat : {}", e))?,
+        remise_globale_pct,
+        serde_json::from_value(serde_json::json!(mode_paiement))
+            .map_err(|e| format!("Contrat : {}", e))?,
+        splits
+            .map(|s| serde_json::from_value(serde_json::Value::Array(s)))
+            .transpose()
+            .map_err(|e| format!("Contrat : {}", e))?,
+        dtype
+            .map(|d| serde_json::from_value(serde_json::json!(d)))
+            .transpose()
+            .map_err(|e| format!("Contrat : {}", e))?,
+        points_utilises,
+        magasin_id,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1076,8 +1094,8 @@ mod tests {
         paiements: serde_json::Value,
         dtype: &str,
         points: Option<f64>,
-    ) -> Result<serde_json::Value, String> {
-        create_vente_impl(
+    ) -> Result<VenteCreee, String> {
+        crate::commands::ventes::vendre_json(
             conn,
             client,
             Some(1),
@@ -1099,18 +1117,29 @@ mod tests {
     #[test]
     fn test_prix_et_tva_lus_depuis_le_catalogue() {
         let mut conn = setup();
-        let r = vendre(
+        let refus = vendre(
             &mut conn,
             None,
             json!([{ "article_id": 1, "quantite": 2, "prix_unitaire": 1, "tva": 0 }]),
+            None,
+            json!([{ "mode": "especes", "montant": 2 }]),
+            "facture",
+            None,
+        )
+        .unwrap_err();
+        assert!(refus.contains("unknown field `prix_unitaire`"), "{refus}");
+        let r = vendre(
+            &mut conn,
+            None,
+            json!([{ "article_id": 1, "quantite": 2 }]),
             None,
             json!([{ "mode": "especes", "montant": 240 }]),
             "facture",
             None,
         )
         .unwrap();
-        assert_eq!(r["net_ttc"], json!(240.0));
-        let id = r["id"].as_i64().unwrap();
+        assert_eq!(r.net_ttc, 240.0);
+        let id = r.id;
         assert_eq!(montants(&conn, id), (240.0, 0.0, 200.0, 40.0));
         let (pu, tva, total): (f64, f64, f64) = conn
             .query_row(
@@ -1138,7 +1167,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let id = r["id"].as_i64().unwrap();
+        let id = r.id;
         let (total, remise, ht, tva) = montants(&conn, id);
         assert_eq!((total, ht, tva), (138.0, 108.0, 16.2));
         assert_eq!(remise, 13.8);
@@ -1186,7 +1215,7 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(r["net_ttc"], json!(96.0));
+        assert_eq!(r.net_ttc, 96.0);
     }
 
     #[test]
@@ -1202,7 +1231,7 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(r["points_gagnes"], json!(0.0));
+        assert_eq!(r.points_gagnes, 0.0);
         let nb: i64 = conn
             .query_row("SELECT COUNT(*) FROM vente_paiements", [], |r| r.get(0))
             .unwrap();
@@ -1222,7 +1251,7 @@ mod tests {
             Some(20.0),
         )
         .unwrap();
-        assert_eq!(r["points_gagnes"], json!(1.0));
+        assert_eq!(r.points_gagnes, 1.0);
         let points: f64 = conn
             .query_row(
                 "SELECT points_fidelite FROM clients WHERE id = 1",
@@ -1234,7 +1263,7 @@ mod tests {
         let tva: f64 = conn
             .query_row(
                 "SELECT montant_tva FROM ventes WHERE id = ?1",
-                params![r["id"].as_i64().unwrap()],
+                params![r.id],
                 |r| r.get(0),
             )
             .unwrap();
@@ -1346,7 +1375,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let facture = r["id"].as_i64().unwrap();
+        let facture = r.id;
         let avoir = convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
         assert_eq!(montants(&conn, avoir), (-120.0, -12.0, -90.0, -18.0));
         let (ht, tva): (f64, f64) = conn
@@ -1377,7 +1406,7 @@ mod tests {
     }
 
     fn document_credit(conn: &mut Connection, dtype: &str) -> i64 {
-        create_vente_impl(
+        crate::commands::ventes::vendre_json(
             conn,
             Some(1),
             Some(1),
@@ -1389,9 +1418,8 @@ mod tests {
             None,
             None,
         )
-        .unwrap()["id"]
-            .as_i64()
-            .unwrap()
+        .unwrap()
+        .id
     }
 
     #[test]
@@ -1412,7 +1440,7 @@ mod tests {
         let mut conn = setup();
         conn.execute("UPDATE clients SET credit_plafond = 100 WHERE id = 1", [])
             .unwrap();
-        let devis = create_vente_impl(
+        let devis = crate::commands::ventes::vendre_json(
             &mut conn,
             Some(1),
             Some(1),
@@ -1424,9 +1452,8 @@ mod tests {
             None,
             None,
         )
-        .unwrap()["id"]
-            .as_i64()
-            .unwrap();
+        .unwrap()
+        .id;
         conn.execute("UPDATE vente_articles SET quantite = 12, total_ligne = 120, montant_ht = 120 WHERE vente_id = ?1", params![devis]).unwrap();
         conn.execute(
             "UPDATE ventes SET montant_total = 120, montant_ht = 120 WHERE id = ?1",
@@ -1458,7 +1485,7 @@ mod tests {
         .unwrap();
         assert_eq!(credit(&conn), 90.0);
         assert_eq!(points(&conn), 50.0 - 30.0 + 0.0);
-        let facture = r["id"].as_i64().unwrap();
+        let facture = r.id;
         annuler_vente_impl(&mut conn, facture, Some(1), Some("Erreur de saisie")).unwrap();
         assert_eq!(credit(&conn), 0.0);
         assert_eq!(points(&conn), 50.0);
@@ -1489,7 +1516,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(points(&conn), 56.0);
-        annuler_vente_impl(&mut conn, r["id"].as_i64().unwrap(), None, Some("Test")).unwrap();
+        annuler_vente_impl(&mut conn, r.id, None, Some("Test")).unwrap();
         assert_eq!(points(&conn), 50.0);
     }
 

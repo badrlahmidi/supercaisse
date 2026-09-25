@@ -1,4 +1,5 @@
-import type { User, Article, ArticleComposant, ArticleLot, ArticleVariante, Client, Fournisseur, Category, Settings, SessionCaisse, TableResto, Magasin } from "@/types"
+import type { User, Article, ArticleComposant, ArticleLot, ArticleVariante, Client, Fournisseur, Category, Settings, TableResto, Magasin } from "@/types"
+import type { SessionCaisse } from "@/types/generated/SessionCaisse"
 
 interface MockCaisse {
   id: number
@@ -202,6 +203,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
       caissier_id: caissierId as number,
       date_ouverture: new Date().toISOString(),
       fond_initial: fondInitial as number,
+      magasin_id: null,
       statut: "ouverte",
     }
     return nextId

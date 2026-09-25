@@ -27,6 +27,7 @@ mod categories;
 mod cheques;
 mod clients;
 mod composants;
+pub mod contrats;
 mod diagnostic;
 mod fiscal;
 mod fournisseurs;

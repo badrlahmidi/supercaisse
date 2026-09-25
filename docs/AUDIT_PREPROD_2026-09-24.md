@@ -672,6 +672,25 @@ Liste acceptable : `ALTER TABLE ADD COLUMN` en attendant S-1, et `create_dir_all
 
 ### [MINEUR] M-17 — `serde_json::Value` en entrée et en sortie
 
+> **Statut : corrigé en partie** sur `claude/hopeful-clarke-4uflms` : les entrées sont entièrement typées, les sorties en partie.
+>
+> - **Entrées (toutes typées) :**
+>   - les structures `LigneVenteSaisie`, `PaiementSaisi`, `LigneAchatSaisie` et `LigneTransfertSaisie`, ainsi que les énumérations `ModePaiement`, `TypeDocument` et `PrixType`, sont définies dans `commands/contrats.rs` avec `deny_unknown_fields` ;
+>   - une clé mal orthographiée (`remise_lign`), un champ manquant, un type faux ou une valeur inconnue (`prix_type: "vip"`, `mode: "Especes "`) sont refusés avec un message explicite, au lieu de devenir 0 ou « public » ;
+>   - le client ne peut plus envoyer de prix unitaire : un `prix_unitaire` joint à une ligne de vente est refusé, alors qu'il était auparavant accepté puis ignoré ;
+>   - le POS envoyait `modePaiement: "especes+cb"` pour un paiement fractionné ; il envoie maintenant un mode valide, le détail passant par les règlements.
+> - **Contrat partagé :** `ts-rs` génère `src/types/generated/*.ts` depuis les structures Rust à chaque `cargo test`. La CI échoue si ces fichiers ne sont pas à jour. Le frontend les utilise pour :
+>   - la vente (`create_vente` et son résultat `VenteCreee`) ;
+>   - l'historique (`get_ventes` et `get_vente_details`) ;
+>   - la session de caisse ;
+>   - le panier (modes de paiement, type de document).
+>   Les interfaces écrites à la main `Sale`, `SaleLine` et `SessionCaisse` sont supprimées.
+> - **Sorties :** 5 commandes du cœur fiscal sont typées. Les **30 autres commandes** renvoient encore du `serde_json::Value`, surtout des listes et des rapports en lecture. Un test « cliquet » plafonne ce nombre à 30 : une nouvelle commande non typée fait échouer la CI, et le plafond ne peut que baisser.
+>
+> Couvert par des tests Rust (contrat strict, codes identiques à la sérialisation, cliquet), qui s'ajoutent aux tests de vente existants. Leurs fixtures passent désormais par la désérialisation typée, et celles qui envoyaient `prix_unitaire` et `tva` ont été corrigées.
+>
+> Vérifié dans l'application : vente fractionnée espèces + carte enregistrée en `mixte` avec ses deux règlements, puis liste et détail des ventes affichés.
+
 **Fichier** : `create_vente(articles: Vec<serde_json::Value>, splits: …)`, `create_achat`, `create_transfert`, et plus de 40 commandes renvoyant `serde_json::Value`
 **Risque** : aucun typage des lignes de vente. Une clé mal orthographiée devient `unwrap_or(0.0)`, soit une ligne à 0 DH ou une quantité nulle acceptée. Aucun contrat partagé avec `src/types/index.ts`.
 **Fix** :
@@ -1081,16 +1100,16 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 78 / 100
+## Note après corrections (25/09/2026) : 79 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`. La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
 | Sécurité | 6 / 25 | **19 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** brute-force et collisions du PIN (M-9, majeur), routeur non aligné sur les permissions (M-10, UI seulement), énumération par timing (m-1), double verrouillage (m-2). |
 | Intégrité données | 5 / 20 | **18 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). **Reste :** plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **12 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12). **Restent :** index manquants (S-3), traçabilité `created_at` / `updated_by` (S-5). |
-| Architecture backend | 7 / 15 | **11 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** JSON non typé (M-17), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |
+| Architecture backend | 7 / 15 | **12 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** 30 commandes aux sorties non typées (M-17 en partie, entrées typées), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |
 | Frontend | 5 / 15 | **11 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 142 tests Vitest, formulaires Clients et Paramètres réparés. **Restent :** routeur par rôle (M-10), panier partagé (F-1), gestion d'erreurs hétérogène (F-2), 58 avertissements de lint (F-3). |
 | Production readiness | 3 / 10 | **7 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, fichiers d'impression à nom fixe (P-6), et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
 

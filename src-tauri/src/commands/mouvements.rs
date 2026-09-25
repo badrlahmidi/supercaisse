@@ -307,7 +307,7 @@ pub(crate) fn mouvement_ligne(
 mod tests {
     use super::*;
     use crate::commands::magasins::{create_transfert_impl, validate_transfert_impl};
-    use crate::commands::ventes::{annuler_vente_impl, convert_document_impl, create_vente_impl};
+    use crate::commands::ventes::{annuler_vente_impl, convert_document_impl};
     use serde_json::json;
 
     fn setup() -> Connection {
@@ -342,7 +342,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        let r = create_vente_impl(
+        let r = crate::commands::ventes::vendre_json(
             conn,
             None,
             Some(1),
@@ -354,7 +354,7 @@ mod tests {
             None,
             Some(magasin),
         )?;
-        Ok(r["id"].as_i64().unwrap())
+        Ok(r.id)
     }
 
     fn stock(conn: &Connection, article: i64, magasin: i64) -> f64 {
@@ -512,7 +512,10 @@ mod tests {
             1,
             1,
             None,
-            vec![json!({ "article_id": 1, "quantite": 1 })]
+            vec![crate::commands::contrats::LigneTransfertSaisie {
+                article_id: 1,
+                quantite: 1.0
+            }]
         )
         .is_err());
         assert!(create_transfert_impl(
@@ -520,7 +523,10 @@ mod tests {
             1,
             2,
             None,
-            vec![json!({ "article_id": 1, "quantite": 0 })]
+            vec![crate::commands::contrats::LigneTransfertSaisie {
+                article_id: 1,
+                quantite: 0.0
+            }]
         )
         .is_err());
         assert!(create_transfert_impl(
@@ -528,7 +534,10 @@ mod tests {
             1,
             2,
             None,
-            vec![json!({ "article_id": 99, "quantite": 1 })]
+            vec![crate::commands::contrats::LigneTransfertSaisie {
+                article_id: 99,
+                quantite: 1.0
+            }]
         )
         .is_err());
         assert!(create_transfert_impl(
@@ -536,7 +545,10 @@ mod tests {
             1,
             9,
             None,
-            vec![json!({ "article_id": 1, "quantite": 1 })]
+            vec![crate::commands::contrats::LigneTransfertSaisie {
+                article_id: 1,
+                quantite: 1.0
+            }]
         )
         .is_err());
         let trop = create_transfert_impl(
@@ -544,7 +556,10 @@ mod tests {
             1,
             2,
             None,
-            vec![json!({ "article_id": 1, "quantite": 5 })],
+            vec![crate::commands::contrats::LigneTransfertSaisie {
+                article_id: 1,
+                quantite: 5.0,
+            }],
         )
         .unwrap();
         assert!(validate_transfert_impl(&mut conn, trop, None)
@@ -555,7 +570,10 @@ mod tests {
             1,
             2,
             None,
-            vec![json!({ "article_id": 1, "quantite": 2 })],
+            vec![crate::commands::contrats::LigneTransfertSaisie {
+                article_id: 1,
+                quantite: 2.0,
+            }],
         )
         .unwrap();
         validate_transfert_impl(&mut conn, ok, None).unwrap();

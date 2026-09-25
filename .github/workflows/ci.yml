@@ -41,3 +41,10 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Check generated TypeScript contracts are up to date
+        run: |
+          if [ -n "$(git status --porcelain -- src/types/generated)" ]; then
+            git status --porcelain -- src/types/generated
+            echo "Generated contracts are stale: run cargo test and commit src/types/generated" >&2
+            exit 1
+          fi

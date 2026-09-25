@@ -1,4 +1,4 @@
-import type { SessionCaisse } from "@/types"
+import type { SessionCaisse } from "@/types/generated/SessionCaisse"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"

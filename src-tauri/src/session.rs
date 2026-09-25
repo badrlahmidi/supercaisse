@@ -285,7 +285,8 @@ mod tests {
         let mut synchrones = Vec::new();
         for entree in std::fs::read_dir(dossier).unwrap() {
             let source = std::fs::read_to_string(entree.unwrap().path()).unwrap();
-            for bloc in source.split("#[tauri::command").skip(1) {
+            let code = source.split("#[cfg(test)]").next().unwrap();
+            for bloc in code.split("#[tauri::command").skip(1) {
                 let (attribut, bloc) = bloc.split_once(']').unwrap();
                 let nom = bloc
                     .trim_start()

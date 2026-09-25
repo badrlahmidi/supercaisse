@@ -199,11 +199,11 @@ pub fn get_tresorerie(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::ventes::{annuler_vente_impl, convert_document_impl, create_vente_impl};
+    use crate::commands::ventes::{annuler_vente_impl, convert_document_impl};
     use serde_json::json;
 
     fn document(conn: &mut Connection, dtype: &str, mode: &str) -> i64 {
-        create_vente_impl(
+        crate::commands::ventes::vendre_json(
             conn,
             Some(1),
             Some(1),
@@ -215,9 +215,8 @@ mod tests {
             None,
             Some(1),
         )
-        .unwrap()["id"]
-            .as_i64()
-            .unwrap()
+        .unwrap()
+        .id
     }
 
     fn scenario() -> Connection {

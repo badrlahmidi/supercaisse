@@ -1,17 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
-import type { Sale, SaleLine } from "@/types"
-
-export type { Sale, SaleLine }
+import type { LigneVenteSaisie } from "@/types/generated/LigneVenteSaisie"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
+import type { PaiementSaisi } from "@/types/generated/PaiementSaisi"
+import type { TypeDocument } from "@/types/generated/TypeDocument"
+import type { VenteCreee } from "@/types/generated/VenteCreee"
+import type { VenteResume } from "@/types/generated/VenteResume"
 
 export interface CreateSaleInput {
   clientId: number | null
-  articles: Array<{ article_id: number; variante_id?: number | null; quantite: number; remise_ligne?: number; prix_type?: "public" | "grossiste"; note?: string | null }>
+  articles: LigneVenteSaisie[]
   remiseGlobalePct?: number
-  modePaiement: string
-  splits?: Array<{ mode: string; montant: number }>
-  dtype: string
+  modePaiement: ModePaiement
+  splits?: PaiementSaisi[]
+  dtype: TypeDocument
   pointsUtilises?: number
   magasinId?: number | null
 }
@@ -19,7 +22,7 @@ export interface CreateSaleInput {
 export function useSalesList(dateDebut?: string, dateFin?: string) {
   return useQuery({
     queryKey: ["ventes", dateDebut, dateFin],
-    queryFn: () => invoke<Sale[]>("get_ventes", { debut: dateDebut || null, fin: dateFin || null }),
+    queryFn: () => invoke<VenteResume[]>("get_ventes", { debut: dateDebut || null, fin: dateFin || null }),
     staleTime: 30000,
   })
 }
@@ -27,7 +30,7 @@ export function useSalesList(dateDebut?: string, dateFin?: string) {
 export function useRecentSales() {
   return useQuery({
     queryKey: ["ventes", "recent"],
-    queryFn: () => invoke<Sale[]>("get_ventes", { debut: null, fin: null }),
+    queryFn: () => invoke<VenteResume[]>("get_ventes", { debut: null, fin: null }),
     staleTime: 30000,
   })
 }
@@ -35,7 +38,7 @@ export function useRecentSales() {
 export function useCreateSale() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: CreateSaleInput) => invoke<{ id: number; numero_facture: string }>("create_vente", { ...data }),
+    mutationFn: (data: CreateSaleInput) => invoke<VenteCreee>("create_vente", { ...data }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ventes"] })
       qc.invalidateQueries({ queryKey: ["stats"] })

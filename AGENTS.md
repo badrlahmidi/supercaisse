@@ -46,6 +46,11 @@
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (in `src-tauri/`) — Rust checks run by CI
 - `npx vite build` — verify production build
 
+## IPC contracts
+- Payloads and results shared with the frontend are Rust structs in `src-tauri/src/commands/contrats.rs` (`#[derive(TS)]`, strict `deny_unknown_fields` inputs)
+- `cargo test` regenerates `src/types/generated/*.ts` (never edit them by hand; commit them, CI fails if stale); import them directly, e.g. `@/types/generated/VenteResume`
+- New commands must not use `serde_json::Value` in their signature (a Rust test caps the remaining untyped commands)
+
 ## Versioning & releases
 - `package.json` holds the version; `tauri.conf.json` reads it (`"version": "../package.json"`) and `npm version <x.y.z>` syncs `Cargo.toml`/`Cargo.lock` (a Rust test fails if they diverge)
 - Pushing a `v<x.y.z>` tag runs `.github/workflows/release.yml` (signed Windows installer + `latest.json`, draft release); setup steps in `docs/RELEASE.md`

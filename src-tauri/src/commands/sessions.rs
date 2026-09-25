@@ -11,7 +11,7 @@ pub fn get_current_session(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Option<serde_json::Value>, String> {
+) -> Result<Option<super::contrats::SessionCaisse>, String> {
     let conn = db.lecture()?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let caissier_id = me.user_id;
@@ -26,14 +26,14 @@ pub fn get_current_session(
 
     let mut rows = stmt
         .query_map(params![caissier_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "caissier_id": row.get::<_, i64>(1)?,
-                "date_ouverture": row.get::<_, String>(2)?,
-                "fond_initial": row.get::<_, f64>(3)?,
-                "statut": row.get::<_, String>(4)?,
-                "magasin_id": row.get::<_, Option<i64>>(5)?
-            }))
+            Ok(super::contrats::SessionCaisse {
+                id: row.get(0)?,
+                caissier_id: row.get(1)?,
+                date_ouverture: row.get(2)?,
+                fond_initial: row.get(3)?,
+                statut: row.get(4)?,
+                magasin_id: row.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?;
 
@@ -225,7 +225,7 @@ pub(crate) fn close_session_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::ventes::{create_vente_impl, normaliser_paiements};
+    use crate::commands::ventes::normaliser_paiements;
     use serde_json::json;
 
     fn setup() -> Connection {
@@ -237,7 +237,7 @@ mod tests {
     }
 
     fn ligne() -> Vec<serde_json::Value> {
-        vec![json!({ "article_id": 1, "quantite": 1, "prix_unitaire": 100, "tva": 20 })]
+        vec![json!({ "article_id": 1, "quantite": 1 })]
     }
 
     fn vendre(
@@ -245,7 +245,7 @@ mod tests {
         dtype: &str,
         paiements: serde_json::Value,
     ) -> Result<i64, String> {
-        let r = create_vente_impl(
+        let r = crate::commands::ventes::vendre_json(
             conn,
             None,
             Some(1),
@@ -257,7 +257,7 @@ mod tests {
             None,
             Some(1),
         )?;
-        Ok(r["id"].as_i64().unwrap())
+        Ok(r.id)
     }
 
     #[test]
@@ -330,7 +330,7 @@ mod tests {
         )
         .unwrap();
         for _ in 0..300 {
-            create_vente_impl(
+            crate::commands::ventes::vendre_json(
                 &mut conn,
                 None,
                 Some(1),
@@ -403,7 +403,7 @@ mod tests {
         let mut conn = setup();
         conn.execute("INSERT INTO utilisateurs (id, login, password_hash, nom) VALUES (2, 'c2', 'x', 'Caissier 2')", []).unwrap();
         conn.execute("INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (2, 2, 0, 'ouverte', 1)", []).unwrap();
-        create_vente_impl(
+        crate::commands::ventes::vendre_json(
             &mut conn,
             None,
             Some(2),
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn test_paiement_sans_detail_utilise_le_ttc() {
         let mut conn = setup();
-        create_vente_impl(
+        crate::commands::ventes::vendre_json(
             &mut conn,
             None,
             Some(1),
@@ -452,13 +452,13 @@ mod tests {
     fn test_credit_en_paiement_fractionne_respecte_le_plafond() {
         let mut conn = setup();
         conn.execute("INSERT INTO clients (id, nom, credit_plafond, credit_actuel) VALUES (1, 'Client', 100, 0)", []).unwrap();
-        let depasse = create_vente_impl(
+        let depasse = crate::commands::ventes::vendre_json(
             &mut conn,
             Some(1),
             Some(1),
             ligne(),
             None,
-            "especes+credit".into(),
+            "especes".into(),
             Some(vec![
                 json!({ "mode": "especes", "montant": 10 }),
                 json!({ "mode": "credit", "montant": 110 }),
@@ -468,13 +468,13 @@ mod tests {
             Some(1),
         );
         assert!(depasse.unwrap_err().contains("Plafond"));
-        create_vente_impl(
+        crate::commands::ventes::vendre_json(
             &mut conn,
             Some(1),
             Some(1),
             ligne(),
             None,
-            "especes+credit".into(),
+            "especes".into(),
             Some(vec![
                 json!({ "mode": "especes", "montant": 40 }),
                 json!({ "mode": "credit", "montant": 80 }),
@@ -498,27 +498,18 @@ mod tests {
 
     #[test]
     fn test_paiements_invalides_refuses() {
-        assert!(normaliser_paiements(
-            "especes",
-            Some(&[json!({ "mode": "bitcoin", "montant": 10 })]),
-            0.0
-        )
-        .is_err());
-        assert!(normaliser_paiements(
-            "especes",
-            Some(&[json!({ "mode": "especes", "montant": -5 })]),
-            0.0
-        )
-        .is_err());
-        assert!(normaliser_paiements(
-            "especes",
-            Some(&[json!({ "mode": "especes", "amount": 10 })]),
-            0.0
-        )
-        .is_err());
-        assert!(normaliser_paiements("inconnu", None, 10.0).is_err());
+        use crate::commands::contrats::{ModePaiement, PaiementSaisi};
+        let splits = |v: serde_json::Value| serde_json::from_value::<Vec<PaiementSaisi>>(v);
+        assert!(splits(json!([{ "mode": "bitcoin", "montant": 10 }])).is_err());
+        assert!(splits(json!([{ "mode": "especes", "amount": 10 }])).is_err());
+        assert!(serde_json::from_value::<ModePaiement>(json!("inconnu")).is_err());
+        let negatif = splits(json!([{ "mode": "especes", "montant": -5 }])).unwrap();
+        assert!(normaliser_paiements(ModePaiement::Especes, Some(&negatif), 0.0).is_err());
+        let mixte = splits(json!([{ "mode": "mixte", "montant": 5 }])).unwrap();
+        assert!(normaliser_paiements(ModePaiement::Especes, Some(&mixte), 0.0).is_err());
+        assert!(normaliser_paiements(ModePaiement::Mixte, None, 10.0).is_err());
         assert_eq!(
-            normaliser_paiements("carte", None, 42.0).unwrap(),
+            normaliser_paiements(ModePaiement::Carte, None, 42.0).unwrap(),
             vec![("carte".to_string(), 42.0)]
         );
     }

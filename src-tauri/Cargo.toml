@@ -28,3 +28,4 @@ hex = "0.4"
 rand = "0.8"
 base64 = "0.22"
 tauri-plugin-updater = "2"
+ts-rs = { version = "11", features = ["serde-compat", "no-serde-warnings"] }

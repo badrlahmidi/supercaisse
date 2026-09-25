@@ -279,7 +279,6 @@ pub(crate) fn valider_inventaire_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::ventes::create_vente_impl;
     use serde_json::json;
 
     fn setup() -> Connection {
@@ -303,7 +302,7 @@ mod tests {
     }
 
     fn vendre(conn: &mut Connection, qte: f64) {
-        create_vente_impl(
+        crate::commands::ventes::vendre_json(
             conn,
             None,
             Some(1),

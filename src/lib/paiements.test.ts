@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { buildPaiements } from "./paiements"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
 
 describe("buildPaiements", () => {
   it("returns a single payment for the net amount when not split", () => {
@@ -21,7 +22,7 @@ describe("buildPaiements", () => {
   })
 
   it("keeps exact cents when the split parts sum to the net amount", () => {
-    const splits = [
+    const splits: { mode: ModePaiement; amount: number }[] = [
       { mode: "especes", amount: 33.33 },
       { mode: "cb", amount: 33.33 },
       { mode: "cheque", amount: 33.34 },

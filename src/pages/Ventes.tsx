@@ -18,26 +18,12 @@ import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import type { Settings } from "@/types"
 import { compteDansCA } from "@/lib/ventes"
-import type { Sale } from "@/types"
+import type { VenteDetail } from "@/types/generated/VenteDetail"
+import type { VenteResume } from "@/types/generated/VenteResume"
 import { sommeDH } from "@/lib/totaux"
 import { annulationDirecte, DELAI_ANNULATION_MINUTES } from "@/lib/fiscal"
 
-type Vente = Sale
-
-interface VenteDetail {
-  vente: Vente
-  lignes: Array<{
-    id: number
-    article_id: number
-    designation: string
-    quantite: number
-    prix_unitaire: number
-    tva: number
-    total_ligne: number
-    montant_tva?: number | null
-    remise_ligne?: number | null
-  }>
-}
+type Vente = VenteResume
 
 export default function Ventes() {
   const [search, setSearch] = useState("")

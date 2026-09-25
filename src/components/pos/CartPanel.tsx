@@ -8,6 +8,8 @@ import { cn, formatCurrency } from "@/lib/utils"
 import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
 import type { Article, Client } from "@/types"
 import { calculerLigne, round2, sommeDH } from "@/lib/totaux"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
+import type { TypeDocument } from "@/types/generated/TypeDocument"
 
 interface ReceiptData {
   shopName: string
@@ -46,8 +48,8 @@ interface CartPanelProps {
   onPrintLastReceipt: () => void
   onGeneratePdf: () => void
   generatingPdf?: boolean
-  documentType: string
-  setDocumentType: (type: string) => void
+  documentType: TypeDocument
+  setDocumentType: (type: TypeDocument) => void
   isLoyaltyActive: boolean
   ptsValueDH: number
   ptsEarned: number
@@ -398,7 +400,7 @@ export default function CartPanel({
           )}
 
           <div className="grid grid-cols-2 gap-2">
-            <Select value={documentType} onValueChange={setDocumentType}>
+            <Select value={documentType} onValueChange={(v) => setDocumentType(v as TypeDocument)}>
               <SelectTrigger className="w-full h-10">
                 <SelectValue placeholder="Type de document" />
               </SelectTrigger>
@@ -502,7 +504,7 @@ export default function CartPanel({
                   <div key={idx} className="flex items-center gap-2">
                     <select
                       value={split.mode}
-                      onChange={(e) => updateSplitMode(idx, e.target.value)}
+                      onChange={(e) => updateSplitMode(idx, e.target.value as ModePaiement)}
                       className="h-10 px-2 rounded-lg border border-border bg-background text-sm font-medium outline-none focus:ring-2 focus:ring-primary/30"
                     >
                       {PAYMENT_MODES.map((m) => (

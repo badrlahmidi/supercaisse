@@ -178,7 +178,7 @@ pub fn create_transfert(
     token: String,
     source_id: i64,
     dest_id: i64,
-    articles: Vec<serde_json::Value>,
+    articles: Vec<super::contrats::LigneTransfertSaisie>,
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("stock", "creer"))?;
@@ -190,7 +190,7 @@ pub(crate) fn create_transfert_impl(
     source_id: i64,
     dest_id: i64,
     utilisateur_id: Option<i64>,
-    articles: Vec<serde_json::Value>,
+    articles: Vec<super::contrats::LigneTransfertSaisie>,
 ) -> Result<i64, String> {
     if source_id == dest_id {
         return Err(
@@ -222,10 +222,8 @@ pub(crate) fn create_transfert_impl(
     let transfert_id = tx.last_insert_rowid();
 
     for a in articles {
-        let article_id = a["article_id"]
-            .as_i64()
-            .ok_or("article_id manquant ou invalide dans la ligne")?;
-        let quantite = a["quantite"].as_f64().unwrap_or(0.0);
+        let article_id = a.article_id;
+        let quantite = a.quantite;
         if !quantite.is_finite() || quantite <= 0.0 {
             return Err(format!(
                 "Quantité invalide pour l'article {} : {}",

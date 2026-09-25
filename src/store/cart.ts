@@ -1,8 +1,9 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
 
 interface PaymentSplit {
-  mode: string
+  mode: ModePaiement
   amount: number
 }
 
@@ -36,7 +37,7 @@ interface HeldCart {
 interface CartState {
   items: CartItem[]
   selectedClient: number | null
-  paymentMode: string
+  paymentMode: ModePaiement
   discountPercent: string
   cashGiven: string
   paymentSplits: PaymentSplit[]
@@ -49,16 +50,16 @@ interface CartState {
   removeItem: (articleId: number, varianteId?: number | null) => void
   clearCart: () => void
   setSelectedClient: (clientId: number | null) => void
-  setPaymentMode: (mode: string) => void
+  setPaymentMode: (mode: ModePaiement) => void
   setDiscountPercent: (percent: string) => void
   setCashGiven: (cash: string) => void
   setLineDiscount: (articleId: number, percent: number, varianteId?: number | null) => void
   setLineNote: (articleId: number, note: string, varianteId?: number | null) => void
   setLinePrice: (articleId: number, prixUnitaire: number, prixType: "public" | "grossiste", varianteId?: number | null) => void
-  addSplit: (mode: string) => void
+  addSplit: (mode: ModePaiement) => void
   removeSplit: (index: number) => void
   updateSplitAmount: (index: number, amount: number) => void
-  updateSplitMode: (index: number, mode: string) => void
+  updateSplitMode: (index: number, mode: ModePaiement) => void
   holdCart: (label: string, customId?: string) => string
   resumeCart: (id: string) => void
   deleteHeldCart: (id: string) => void

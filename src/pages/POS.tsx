@@ -27,6 +27,10 @@ import CartPanel from "@/components/pos/CartPanel"
 import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
 import type { Article, ArticleVariante, Category } from "@/types"
 import { estFiscal, mentionsVendeurManquantes } from "@/lib/fiscal"
+import type { LigneVenteSaisie } from "@/types/generated/LigneVenteSaisie"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
+import type { TypeDocument } from "@/types/generated/TypeDocument"
+import type { VenteCreee } from "@/types/generated/VenteCreee"
 
 interface RapportX {
   session_id: number
@@ -50,7 +54,7 @@ const SHORTCUTS = [
   { key: "F8", label: "Reprendre ticket" },
 ]
 
-const PAYMENT_CYCLE = ["especes", "carte", "cheque", "credit", "virement"]
+const PAYMENT_CYCLE: ModePaiement[] = ["especes", "carte", "cheque", "credit", "virement"]
 
 export default function POS() {
   const { user } = useAuth()
@@ -71,7 +75,7 @@ export default function POS() {
   const [showHeldPanel, setShowHeldPanel] = useState(false)
   const [, setLastSync] = useState<Date>(new Date())
 
-  const [documentType, setDocumentType] = useState<string>("facture")
+  const [documentType, setDocumentType] = useState<TypeDocument>("facture")
   const mentionsManquantes = mentionsVendeurManquantes(settings)
   const [variantPickerArticle, setVariantPickerArticle] = useState<Article | null>(null)
   const [showVariantPicker, setShowVariantPicker] = useState(false)
@@ -395,22 +399,19 @@ export default function POS() {
 
   const createSaleMutation = useMutation({
     mutationFn: async () => {
-      const items = cart.map((i) => ({
+      const items: LigneVenteSaisie[] = cart.map((i) => ({
         article_id: i.article_id,
         variante_id: i.variante_id || null,
         quantite: i.quantite,
-        prix_unitaire: i.prix_unitaire,
-        tva: i.tva,
         remise_ligne: i.remise_ligne || 0,
         note: i.note || null,
         prix_type: i.prix_type || "public",
       }))
-      const isSplit = paymentSplits.length > 0
-      return invoke<{ id: number; numero_facture: string }>("create_vente", {
+      return invoke<VenteCreee>("create_vente", {
         clientId: selectedClient,
         articles: items,
         remiseGlobalePct: discount,
-        modePaiement: isSplit ? paymentSplits.map((s) => s.mode).join("+") : paymentMode,
+        modePaiement: paymentMode,
         splits: buildPaiements(paymentSplits, paymentMode, netAmount, loyaltyDiscount),
         dtype: documentType,
         pointsUtilises: ptsToUse,

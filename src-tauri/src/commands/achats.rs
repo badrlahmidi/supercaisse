@@ -6,30 +6,26 @@ use tauri::State;
 use super::calcul::{montant_saisi, somme_dh};
 use super::{adjust_article_stock, default_magasin_id};
 
-pub(crate) fn lire_ligne_achat(ligne: &serde_json::Value) -> Result<(i64, f64, f64, f64), String> {
-    let article_id = ligne["article_id"]
-        .as_i64()
-        .ok_or("article_id manquant ou invalide dans la ligne")?;
-    let quantite = ligne["quantite"]
-        .as_f64()
-        .filter(|q| q.is_finite() && *q > 0.0)
-        .ok_or_else(|| {
-            format!(
-                "Quantité manquante ou invalide pour l'article {}",
-                article_id
-            )
-        })?;
-    let prix = ligne["prix_unitaire"]
-        .as_f64()
-        .filter(|p| p.is_finite() && *p >= 0.0)
-        .ok_or_else(|| {
-            format!(
-                "Prix unitaire manquant ou invalide pour l'article {}",
-                article_id
-            )
-        })?;
-    let total = montant_saisi("Total de ligne d'achat", quantite * prix)?;
-    Ok((article_id, quantite, prix, total))
+pub(crate) fn lire_ligne_achat(
+    ligne: &super::contrats::LigneAchatSaisie,
+) -> Result<(i64, f64, f64, f64), String> {
+    if !ligne.quantite.is_finite() || ligne.quantite <= 0.0 {
+        return Err(format!(
+            "Quantité invalide pour l'article {} : {}",
+            ligne.article_id, ligne.quantite
+        ));
+    }
+    if !ligne.prix_unitaire.is_finite() || ligne.prix_unitaire < 0.0 {
+        return Err(format!(
+            "Prix unitaire invalide pour l'article {} : {}",
+            ligne.article_id, ligne.prix_unitaire
+        ));
+    }
+    let total = montant_saisi(
+        "Total de ligne d'achat",
+        ligne.quantite * ligne.prix_unitaire,
+    )?;
+    Ok((ligne.article_id, ligne.quantite, ligne.prix_unitaire, total))
 }
 
 #[tauri::command(async)]
@@ -39,7 +35,7 @@ pub fn create_achat(
     token: String,
     fournisseur_id: Option<i64>,
     reference: Option<String>,
-    articles: Vec<serde_json::Value>,
+    articles: Vec<super::contrats::LigneAchatSaisie>,
     statut_livraison: Option<String>,
     statut_paiement: Option<String>,
 ) -> Result<i64, String> {
@@ -273,25 +269,20 @@ mod tests {
 
     #[test]
     fn test_lignes_d_achat_incompletes_refusees() {
+        let ligne = |v: serde_json::Value| {
+            serde_json::from_value::<crate::commands::contrats::LigneAchatSaisie>(v)
+                .map_err(|e| e.to_string())
+                .and_then(|l| lire_ligne_achat(&l))
+        };
         assert_eq!(
-            lire_ligne_achat(&json!({ "article_id": 1, "quantite": 3, "prix_unitaire": 3.335 }))
-                .unwrap(),
+            ligne(json!({ "article_id": 1, "quantite": 3, "prix_unitaire": 3.335 })).unwrap(),
             (1, 3.0, 3.335, 10.01)
         );
-        assert!(lire_ligne_achat(&json!({ "article_id": 1, "prix_unitaire": 2 })).is_err());
-        assert!(lire_ligne_achat(&json!({ "article_id": 1, "quantite": 2 })).is_err());
-        assert!(
-            lire_ligne_achat(&json!({ "article_id": 1, "quantite": "2", "prix_unitaire": 2 }))
-                .is_err()
-        );
-        assert!(
-            lire_ligne_achat(&json!({ "article_id": 1, "quantite": 0, "prix_unitaire": 2 }))
-                .is_err()
-        );
-        assert!(
-            lire_ligne_achat(&json!({ "article_id": 1, "quantite": 1, "prix_unitaire": -2 }))
-                .is_err()
-        );
-        assert!(lire_ligne_achat(&json!({ "quantite": 1, "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": "2", "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": 0, "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": 1, "prix_unitaire": -2 })).is_err());
+        assert!(ligne(json!({ "quantite": 1, "prix_unitaire": 2 })).is_err());
     }
 }

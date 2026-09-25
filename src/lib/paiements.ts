@@ -1,18 +1,15 @@
-export interface PaiementVente {
-  mode: string
-  montant: number
-}
-
 import { round2, sommeDH } from "@/lib/totaux"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
+import type { PaiementSaisi } from "@/types/generated/PaiementSaisi"
 
 export function buildPaiements(
-  splits: { mode: string; amount: number }[],
-  paymentMode: string,
+  splits: { mode: ModePaiement; amount: number }[],
+  paymentMode: ModePaiement,
   netAmount: number,
   fidelite = 0,
-): PaiementVente[] {
-  const avecFidelite = (paiements: PaiementVente[]) =>
-    fidelite > 0 ? [...paiements, { mode: "fidelite", montant: round2(fidelite) }] : paiements
+): PaiementSaisi[] {
+  const avecFidelite = (paiements: PaiementSaisi[]) =>
+    fidelite > 0 ? [...paiements, { mode: "fidelite" as const, montant: round2(fidelite) }] : paiements
   if (splits.length === 0) {
     return avecFidelite([{ mode: paymentMode, montant: round2(Math.max(0, netAmount)) }])
   }
