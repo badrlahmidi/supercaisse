@@ -104,7 +104,7 @@ pub fn delete_fournisseur(
         .map_err(|e| e.to_string())?
         .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM fournisseurs WHERE id=?1", params![id])
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| super::erreur_suppression(e, "ce fournisseur"))?;
     log_audit(
         &conn,
         Some(me.user_id),

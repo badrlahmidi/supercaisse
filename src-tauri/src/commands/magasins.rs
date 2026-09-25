@@ -99,7 +99,7 @@ pub fn delete_magasin(
     )
     .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM magasins WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| super::erreur_suppression(e, "ce magasin"))?;
     tx.execute(
         "UPDATE articles SET stock = COALESCE((SELECT SUM(quantite) FROM article_stocks WHERE article_id = articles.id), 0)",
         [],

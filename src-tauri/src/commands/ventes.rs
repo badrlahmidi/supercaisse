@@ -16,6 +16,15 @@ const MODES_PAIEMENT: [&str; 7] = [
     "especes", "carte", "cb", "cheque", "virement", "credit", "fidelite",
 ];
 
+pub(crate) fn mode_de_vente(paiements: &[(String, f64)]) -> String {
+    let mut modes: Vec<&str> = paiements.iter().map(|(m, _)| m.as_str()).collect();
+    modes.dedup();
+    match modes.as_slice() {
+        [mode] => mode.to_string(),
+        _ => "mixte".to_string(),
+    }
+}
+
 pub(crate) fn normaliser_paiements(
     mode_paiement: &str,
     splits: Option<&[serde_json::Value]>,
@@ -210,6 +219,7 @@ pub(crate) fn create_vente_impl(
     let totaux = totaliser(&calculs);
 
     let paiements = normaliser_paiements(&mode_paiement, splits.as_deref(), totaux.net_ttc)?;
+    let mode_vente = mode_de_vente(&paiements);
 
     let fidelite_actif = lire_setting(&tx, "fidelite_actif")?.as_deref() == Some("true");
     let valeur_point: f64 = lire_setting(&tx, "fidelite_valeur_1_point")?
@@ -329,7 +339,7 @@ pub(crate) fn create_vente_impl(
 
     tx.execute(
         "INSERT INTO ventes (client_id, caissier_id, montant_total, montant_remise, montant_ht, montant_tva, mode_paiement, numero_facture, dtype, session_id, points_utilises, points_gagnes, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        params![client_id, caissier_id, totaux.montant_total, totaux.montant_remise, totaux.montant_ht, totaux.montant_tva, mode_paiement, numero_facture, document_type, current_session_id, pts_utilises, pts_gagnes, magasin_id],
+        params![client_id, caissier_id, totaux.montant_total, totaux.montant_remise, totaux.montant_ht, totaux.montant_tva, mode_vente, numero_facture, document_type, current_session_id, pts_utilises, pts_gagnes, magasin_id],
     ).map_err(|e| e.to_string())?;
     let vente_id = tx.last_insert_rowid();
 
@@ -396,7 +406,7 @@ pub(crate) fn create_vente_impl(
         "creer_vente",
         &format!(
             "Vente #{} - {:.2} DH TTC ({}) - {}",
-            vente_id, totaux.net_ttc, document_type, mode_paiement
+            vente_id, totaux.net_ttc, document_type, mode_vente
         ),
         Some("vente"),
         Some(vente_id),
@@ -1014,6 +1024,21 @@ pub(crate) fn convert_document_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_mode_de_vente_valide() {
+        let p = |m: &[(&str, f64)]| {
+            mode_de_vente(
+                &m.iter()
+                    .map(|(a, b)| (a.to_string(), *b))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(p(&[("especes", 10.0)]), "especes");
+        assert_eq!(p(&[("especes", 5.0), ("cb", 5.0)]), "mixte");
+        assert_eq!(p(&[("especes", 5.0), ("especes", 5.0)]), "especes");
+        assert_eq!(p(&[("cb", 5.0), ("fidelite", 1.0)]), "mixte");
+    }
     use serde_json::json;
 
     fn setup() -> Connection {

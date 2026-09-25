@@ -137,7 +137,11 @@ pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
 type Migration = fn(&Connection) -> Result<()>;
 
-const MIGRATIONS: &[Migration] = &[migration_001_base, migration_002_montants_au_centime];
+const MIGRATIONS: &[Migration] = &[
+    migration_001_base,
+    migration_002_montants_au_centime,
+    migration_003_contraintes,
+];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
     let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -186,15 +190,35 @@ fn appliquer_migrations(
             conn.pragma_update(None, "user_version", cible)
                 .map_err(|e| e.to_string())?;
         } else {
-            let tx = conn.transaction().map_err(|e| e.to_string())?;
-            migration(&tx).map_err(|e| format!("Migration v{} : {}", cible, e))?;
-            tx.pragma_update(None, "user_version", cible)
+            let cles_actives: bool = conn
+                .pragma_query_value(None, "foreign_keys", |r| r.get(0))
                 .map_err(|e| e.to_string())?;
-            tx.commit().map_err(|e| e.to_string())?;
+            conn.pragma_update(None, "foreign_keys", false)
+                .map_err(|e| e.to_string())?;
+            let resultat = executer_migration(conn, *migration, cible);
+            conn.pragma_update(None, "foreign_keys", cles_actives)
+                .map_err(|e| e.to_string())?;
+            resultat?;
         }
         log::info!("Schéma de base migré en v{}", cible);
     }
     Ok(())
+}
+
+fn executer_migration(
+    conn: &mut Connection,
+    migration: Migration,
+    cible: i64,
+) -> std::result::Result<(), String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    migration(&tx).map_err(|e| format!("Migration v{} : {}", cible, e))?;
+    tx.pragma_update(None, "user_version", cible)
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+fn erreur_migration(message: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(message.into())
 }
 
 fn colonne_existe(conn: &Connection, table: &str, colonne: &str) -> Result<bool> {
@@ -289,6 +313,339 @@ fn migration_002_montants_au_centime(conn: &Connection) -> Result<()> {
             "Montants arrondis au centime : {} valeurs corrigées",
             corriges
         );
+    }
+    Ok(())
+}
+
+pub(crate) const MODES_PAIEMENT_VENTE: &[&str] = &[
+    "especes", "carte", "cb", "cheque", "virement", "credit", "fidelite", "mixte",
+];
+pub(crate) const TYPES_DOCUMENT: &[&str] = &["facture", "bl", "devis", "commande", "avoir"];
+pub(crate) const STATUTS_VENTE: &[&str] = &["validee", "annulee", "convertie"];
+pub(crate) const TYPES_JOURNAL: &[&str] = &["entree", "sortie", "encaissement"];
+pub(crate) const TYPES_MOUVEMENT: &[&str] = &["entree", "sortie", "inventaire"];
+pub(crate) const STATUTS_SESSION: &[&str] = &["ouverte", "cloturee"];
+pub(crate) const ROLES: &[&str] = &["admin", "manager", "caissier"];
+pub(crate) const TYPES_CHEQUE: &[&str] = &["client", "fournisseur"];
+pub(crate) const STATUTS_CHEQUE: &[&str] = &["en_attente", "encaisse", "impaye"];
+
+fn liste_sql(valeurs: &[&str]) -> String {
+    valeurs
+        .iter()
+        .map(|v| format!("'{}'", v))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+struct Reconstruction {
+    table: &'static str,
+    definition: String,
+    colonnes: &'static str,
+    selection: &'static str,
+}
+
+fn reconstructions() -> Vec<Reconstruction> {
+    vec![
+        Reconstruction {
+            table: "utilisateurs",
+            definition: format!(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                nom TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'caissier' CHECK (role IN ({})),
+                pin_hash TEXT,
+                must_change_password INTEGER NOT NULL DEFAULT 0",
+                liste_sql(ROLES)
+            ),
+            colonnes: "id, login, password_hash, nom, role, pin_hash, must_change_password",
+            selection: "id, login, password_hash, nom, COALESCE(role, 'caissier'), pin_hash, COALESCE(must_change_password, 0)",
+        },
+        Reconstruction {
+            table: "sessions_caisse",
+            definition: format!(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                caissier_id INTEGER NOT NULL REFERENCES utilisateurs(id),
+                date_ouverture TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                date_cloture TEXT,
+                fond_initial REAL NOT NULL DEFAULT 0 CHECK (fond_initial >= 0),
+                total_especes_attendu REAL DEFAULT 0,
+                total_especes_declare REAL DEFAULT 0,
+                ecart REAL DEFAULT 0,
+                statut TEXT NOT NULL DEFAULT 'ouverte' CHECK (statut IN ({})),
+                magasin_id INTEGER REFERENCES magasins(id)",
+                liste_sql(STATUTS_SESSION)
+            ),
+            colonnes: "id, caissier_id, date_ouverture, date_cloture, fond_initial, total_especes_attendu, total_especes_declare, ecart, statut, magasin_id",
+            selection: "id, caissier_id, date_ouverture, date_cloture, COALESCE(fond_initial, 0), total_especes_attendu, total_especes_declare, ecart, COALESCE(statut, 'ouverte'), magasin_id",
+        },
+        Reconstruction {
+            table: "ventes",
+            definition: format!(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                client_id INTEGER REFERENCES clients(id),
+                caissier_id INTEGER REFERENCES utilisateurs(id),
+                montant_total REAL NOT NULL DEFAULT 0,
+                montant_remise REAL NOT NULL DEFAULT 0,
+                mode_paiement TEXT NOT NULL DEFAULT 'especes' CHECK (mode_paiement IN ({})),
+                statut TEXT NOT NULL DEFAULT 'validee' CHECK (statut IN ({})),
+                points_utilises REAL NOT NULL DEFAULT 0 CHECK (points_utilises >= 0),
+                points_gagnes REAL NOT NULL DEFAULT 0,
+                numero_facture TEXT,
+                dtype TEXT NOT NULL DEFAULT 'facture' CHECK (dtype IN ({})),
+                session_id INTEGER REFERENCES sessions_caisse(id),
+                source_vente_id INTEGER REFERENCES ventes(id),
+                magasin_id INTEGER REFERENCES magasins(id),
+                montant_ht REAL,
+                montant_tva REAL,
+                CHECK (dtype = 'avoir' OR montant_total >= 0)",
+                liste_sql(MODES_PAIEMENT_VENTE),
+                liste_sql(STATUTS_VENTE),
+                liste_sql(TYPES_DOCUMENT)
+            ),
+            colonnes: "id, date, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, points_utilises, points_gagnes, numero_facture, dtype, session_id, source_vente_id, magasin_id, montant_ht, montant_tva",
+            selection: "id, date, client_id, caissier_id, COALESCE(montant_total, 0), COALESCE(montant_remise, 0), COALESCE(mode_paiement, 'especes'), COALESCE(statut, 'validee'), COALESCE(points_utilises, 0), COALESCE(points_gagnes, 0), numero_facture, COALESCE(dtype, 'facture'), session_id, source_vente_id, magasin_id, montant_ht, montant_tva",
+        },
+        Reconstruction {
+            table: "vente_articles",
+            definition: "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vente_id INTEGER NOT NULL REFERENCES ventes(id),
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                quantite REAL NOT NULL CHECK (quantite > 0),
+                prix_unitaire REAL NOT NULL,
+                tva REAL NOT NULL DEFAULT 0 CHECK (tva >= 0 AND tva <= 100),
+                total_ligne REAL NOT NULL,
+                remise_ligne REAL NOT NULL DEFAULT 0 CHECK (remise_ligne >= 0 AND remise_ligne <= 100),
+                note TEXT,
+                variante_id INTEGER REFERENCES article_variantes(id),
+                prix_type TEXT NOT NULL DEFAULT 'public' CHECK (prix_type IN ('public','grossiste')),
+                montant_ht REAL,
+                montant_tva REAL"
+                .to_string(),
+            colonnes: "id, vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type, montant_ht, montant_tva",
+            selection: "id, vente_id, article_id, quantite, prix_unitaire, COALESCE(tva, 0), total_ligne, COALESCE(remise_ligne, 0), note, variante_id, COALESCE(prix_type, 'public'), montant_ht, montant_tva",
+        },
+        Reconstruction {
+            table: "journal_caisse",
+            definition: format!(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                utilisateur_id INTEGER REFERENCES utilisateurs(id),
+                jtype TEXT NOT NULL CHECK (jtype IN ({})),
+                montant REAL NOT NULL,
+                description TEXT,
+                session_id INTEGER REFERENCES sessions_caisse(id)",
+                liste_sql(TYPES_JOURNAL)
+            ),
+            colonnes: "id, date, utilisateur_id, jtype, montant, description, session_id",
+            selection: "id, date, utilisateur_id, jtype, montant, description, session_id",
+        },
+        Reconstruction {
+            table: "mouvements_stock",
+            definition: format!(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                quantite REAL NOT NULL,
+                mtype TEXT NOT NULL CHECK (mtype IN ({})),
+                reference_id INTEGER,
+                reference_type TEXT,
+                magasin_id INTEGER REFERENCES magasins(id)",
+                liste_sql(TYPES_MOUVEMENT)
+            ),
+            colonnes: "id, date, article_id, quantite, mtype, reference_id, reference_type, magasin_id",
+            selection: "id, date, article_id, quantite, mtype, reference_id, reference_type, magasin_id",
+        },
+        Reconstruction {
+            table: "cheques",
+            definition: format!(
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero TEXT NOT NULL,
+                banque TEXT NOT NULL,
+                tireur TEXT,
+                montant REAL NOT NULL CHECK (montant >= 0),
+                date_emission TEXT NOT NULL,
+                date_echeance TEXT NOT NULL,
+                statut TEXT NOT NULL DEFAULT 'en_attente' CHECK (statut IN ({})),
+                ctype TEXT NOT NULL CHECK (ctype IN ({})),
+                client_id INTEGER REFERENCES clients(id),
+                fournisseur_id INTEGER REFERENCES fournisseurs(id)",
+                liste_sql(STATUTS_CHEQUE),
+                liste_sql(TYPES_CHEQUE)
+            ),
+            colonnes: "id, numero, banque, tireur, montant, date_emission, date_echeance, statut, ctype, client_id, fournisseur_id",
+            selection: "id, numero, banque, tireur, montant, date_emission, date_echeance, COALESCE(statut, 'en_attente'), ctype, client_id, fournisseur_id",
+        },
+    ]
+}
+
+const NORMALISATIONS: &[&str] = &[
+    "UPDATE utilisateurs SET role = lower(trim(role)) WHERE role != lower(trim(role))",
+    "UPDATE sessions_caisse SET statut = lower(trim(statut)) WHERE statut != lower(trim(statut))",
+    "UPDATE sessions_caisse SET statut = 'cloturee' WHERE statut IN ('fermee', 'cloture', 'clôturée', 'clôturé')",
+    "UPDATE ventes SET mode_paiement = lower(trim(mode_paiement)) WHERE mode_paiement != lower(trim(mode_paiement))",
+    "UPDATE ventes SET mode_paiement = 'mixte' WHERE instr(mode_paiement, '+') > 0 OR mode_paiement IN ('split', 'multiple')",
+    "UPDATE ventes SET mode_paiement = 'especes' WHERE mode_paiement IN ('espece', 'espèces', 'cash', '')",
+    "UPDATE ventes SET statut = lower(trim(statut)) WHERE statut != lower(trim(statut))",
+    "UPDATE ventes SET statut = 'validee' WHERE statut IN ('valide', 'validée', '')",
+    "UPDATE ventes SET statut = 'annulee' WHERE statut = 'annulée'",
+    "UPDATE ventes SET dtype = lower(trim(dtype)) WHERE dtype != lower(trim(dtype))",
+    "UPDATE vente_articles SET prix_type = 'public' WHERE prix_type IS NULL OR prix_type NOT IN ('public', 'grossiste')",
+    "UPDATE journal_caisse SET jtype = lower(trim(jtype)) WHERE jtype != lower(trim(jtype))",
+    "UPDATE mouvements_stock SET mtype = lower(trim(mtype)) WHERE mtype != lower(trim(mtype))",
+    "UPDATE mouvements_stock SET mtype = 'sortie' WHERE mtype = 'vente'",
+    "UPDATE mouvements_stock SET mtype = 'entree' WHERE mtype = 'achat'",
+    "UPDATE cheques SET statut = lower(trim(statut)) WHERE statut != lower(trim(statut))",
+    "UPDATE cheques SET statut = 'encaisse' WHERE statut = 'encaissé'",
+    "UPDATE cheques SET statut = 'impaye' WHERE statut = 'impayé'",
+    "UPDATE cheques SET ctype = lower(trim(ctype)) WHERE ctype != lower(trim(ctype))",
+];
+
+const REFERENCES_ORPHELINES: &[(&str, &str, &str)] = &[
+    ("ventes", "session_id", "sessions_caisse"),
+    ("ventes", "source_vente_id", "ventes"),
+    ("ventes", "magasin_id", "magasins"),
+    ("ventes", "client_id", "clients"),
+    ("ventes", "caissier_id", "utilisateurs"),
+    ("vente_articles", "variante_id", "article_variantes"),
+    ("journal_caisse", "session_id", "sessions_caisse"),
+    ("journal_caisse", "utilisateur_id", "utilisateurs"),
+    ("sessions_caisse", "magasin_id", "magasins"),
+    ("mouvements_stock", "magasin_id", "magasins"),
+    ("cheques", "client_id", "clients"),
+    ("cheques", "fournisseur_id", "fournisseurs"),
+];
+
+fn verifier_enumeration(
+    conn: &Connection,
+    table: &str,
+    colonne: &str,
+    valeurs: &[&str],
+) -> Result<()> {
+    let sql = format!(
+        "SELECT DISTINCT COALESCE({c}, 'NULL') FROM {t} WHERE {c} IS NULL OR {c} NOT IN ({v})",
+        t = table,
+        c = colonne,
+        v = liste_sql(valeurs)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let invalides = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>>>()?;
+    if invalides.is_empty() {
+        Ok(())
+    } else {
+        Err(erreur_migration(format!(
+            "valeurs inconnues dans {}.{} : {} (attendu : {}). Corrigez ces lignes puis relancez l'application",
+            table,
+            colonne,
+            invalides.join(", "),
+            valeurs.join(", ")
+        )))
+    }
+}
+
+fn migration_003_contraintes(conn: &Connection) -> Result<()> {
+    for sql in NORMALISATIONS {
+        conn.execute(sql, [])?;
+    }
+    let mut orphelines = 0;
+    for (table, colonne, parent) in REFERENCES_ORPHELINES {
+        orphelines += conn.execute(
+            &format!(
+                "UPDATE {t} SET {c} = NULL WHERE {c} IS NOT NULL AND {c} NOT IN (SELECT id FROM {p})",
+                t = table,
+                c = colonne,
+                p = parent
+            ),
+            [],
+        )?;
+    }
+    if orphelines > 0 {
+        log::warn!(
+            "Références orphelines remises à NULL avant ajout des clés étrangères : {}",
+            orphelines
+        );
+    }
+    for (table, colonne, valeurs) in [
+        ("utilisateurs", "role", ROLES),
+        ("sessions_caisse", "statut", STATUTS_SESSION),
+        ("ventes", "mode_paiement", MODES_PAIEMENT_VENTE),
+        ("ventes", "statut", STATUTS_VENTE),
+        ("ventes", "dtype", TYPES_DOCUMENT),
+        ("journal_caisse", "jtype", TYPES_JOURNAL),
+        ("mouvements_stock", "mtype", TYPES_MOUVEMENT),
+        ("cheques", "statut", STATUTS_CHEQUE),
+        ("cheques", "ctype", TYPES_CHEQUE),
+    ] {
+        verifier_enumeration(conn, table, colonne, valeurs)?;
+    }
+    for reconstruction in reconstructions() {
+        reconstruire_table(conn, &reconstruction)?;
+    }
+    let mut stmt = conn.prepare("PRAGMA foreign_key_check")?;
+    let violations = stmt
+        .query_map([], |r| {
+            Ok(format!(
+                "{} #{} → {}",
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                r.get::<_, String>(2)?
+            ))
+        })?
+        .collect::<Result<Vec<_>>>()?;
+    if !violations.is_empty() {
+        return Err(erreur_migration(format!(
+            "références invalides : {}",
+            violations
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    Ok(())
+}
+
+fn reconstruire_table(conn: &Connection, r: &Reconstruction) -> Result<()> {
+    let annexes = {
+        let mut stmt = conn.prepare(
+            "SELECT sql FROM sqlite_master WHERE tbl_name = ?1 AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+        )?;
+        let lignes = stmt
+            .query_map([r.table], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>>>()?;
+        lignes
+    };
+    let sequence: Option<i64> = conn
+        .query_row(
+            "SELECT seq FROM sqlite_sequence WHERE name = ?1",
+            [r.table],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let nouvelle = format!("{}_v3", r.table);
+    conn.execute_batch(&format!(
+        "CREATE TABLE {n} ({d});
+         INSERT INTO {n} ({c}) SELECT {s} FROM {t};
+         DROP TABLE {t};
+         ALTER TABLE {n} RENAME TO {t};",
+        n = nouvelle,
+        d = r.definition,
+        c = r.colonnes,
+        s = r.selection,
+        t = r.table
+    ))?;
+    for sql in annexes {
+        conn.execute_batch(&sql)?;
+    }
+    if let Some(seq) = sequence {
+        conn.execute(
+            "UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = ?2",
+            params![seq, r.table],
+        )?;
     }
     Ok(())
 }
@@ -1049,6 +1406,136 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    fn base_v2() -> super::Connection {
+        let mut conn = super::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        super::appliquer_migrations(&mut conn, &super::MIGRATIONS[..2]).unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'c', 'x', 'Caissier', ' Caissier ');
+            INSERT INTO sessions_caisse (id, caissier_id, statut, magasin_id) VALUES (1, 2, 'fermee', 42);
+            INSERT INTO articles (id, designation, prix_vente) VALUES (1, 'A', 10);
+            INSERT INTO ventes (id, montant_total, mode_paiement, statut, dtype, session_id, magasin_id, numero_facture)
+                VALUES (1, 12, 'especes+cb', 'Validee', 'facture', 1, 99, 'FA-1'),
+                       (7, 12, 'cb', 'validee', 'facture', 5, 1, 'FA-2');
+            INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, total_ligne, variante_id)
+                VALUES (1, 1, 1, 10, 12, 77);
+            INSERT INTO journal_caisse (jtype, montant, session_id) VALUES ('Entree', 5, 1);
+            INSERT INTO mouvements_stock (article_id, quantite, mtype) VALUES (1, 1, 'vente');
+            DELETE FROM ventes WHERE id = 7;
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_migration_contraintes_normalise_et_conserve_les_donnees() {
+        let mut conn = base_v2();
+        super::migrer(&mut conn).unwrap();
+        assert_eq!(super::version_schema(&conn).unwrap(), super::SCHEMA_VERSION);
+        let cles: bool = conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
+        assert!(cles);
+        let vente: (String, String, Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT mode_paiement, statut, session_id, magasin_id FROM ventes WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(vente, ("mixte".into(), "validee".into(), Some(1), None));
+        let role: String = conn
+            .query_row("SELECT role FROM utilisateurs WHERE id = 2", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(role, "caissier");
+        let (statut, magasin): (String, Option<i64>) = conn
+            .query_row("SELECT statut, magasin_id FROM sessions_caisse", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((statut.as_str(), magasin), ("cloturee", None));
+        let variante: Option<i64> = conn
+            .query_row("SELECT variante_id FROM vente_articles", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(variante, None);
+        let mtype: String = conn
+            .query_row("SELECT mtype FROM mouvements_stock", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mtype, "sortie");
+        let index: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_ventes_date', 'idx_ventes_numero_facture_unique', 'idx_vente_articles_vente', 'idx_journal_date')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 4);
+        conn.execute("INSERT INTO ventes (montant_total) VALUES (1)", [])
+            .unwrap();
+        assert!(conn.last_insert_rowid() > 7);
+    }
+
+    #[test]
+    fn test_contraintes_actives_apres_migration() {
+        let conn = super::init_db(":memory:").unwrap();
+        for sql in [
+            "INSERT INTO ventes (montant_total, mode_paiement) VALUES (10, 'Especes')",
+            "INSERT INTO ventes (montant_total, dtype) VALUES (10, 'ticket')",
+            "INSERT INTO ventes (montant_total, statut) VALUES (10, 'ok')",
+            "INSERT INTO ventes (montant_total) VALUES (-10)",
+            "INSERT INTO ventes (montant_total, magasin_id) VALUES (10, 999)",
+            "INSERT INTO ventes (montant_total, session_id) VALUES (10, 999)",
+            "INSERT INTO journal_caisse (jtype, montant) VALUES ('autre', 1)",
+            "INSERT INTO utilisateurs (login, password_hash, nom, role) VALUES ('x', 'x', 'X', 'patron')",
+            "INSERT INTO mouvements_stock (article_id, quantite, mtype) VALUES (1, 1, 'vente')",
+            "INSERT INTO cheques (numero, banque, montant, date_emission, date_echeance, ctype) VALUES ('1', 'B', 10, 'd', 'd', 'autre')",
+            "INSERT INTO sessions_caisse (caissier_id, statut) VALUES (1, 'fermee')",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "accepté : {sql}");
+        }
+        conn.execute(
+            "INSERT INTO ventes (montant_total, montant_remise, dtype) VALUES (-10, -1, 'avoir')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO articles (id, designation) VALUES (1, 'A')", [])
+            .unwrap();
+        let vente = conn.last_insert_rowid();
+        assert!(conn
+            .execute(
+                "INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (?1, 1, 0, 1, 1)",
+                [vente],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn test_migration_contraintes_refuse_une_valeur_inconnue_sans_rien_modifier() {
+        let mut conn = base_v2();
+        conn.execute("UPDATE ventes SET dtype = 'ticket' WHERE id = 1", [])
+            .unwrap();
+        let err = super::migrer(&mut conn).unwrap_err();
+        assert!(
+            err.contains("ventes.dtype") && err.contains("ticket"),
+            "{err}"
+        );
+        assert_eq!(super::version_schema(&conn).unwrap(), 2);
+        let mode: String = conn
+            .query_row("SELECT mode_paiement FROM ventes WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(mode, "especes+cb");
+        let cles: bool = conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
+        assert!(cles);
+    }
+
     #[test]
     fn test_lecteurs_paralleles_a_l_ecriture() {
         let dossier = std::env::temp_dir().join(format!("sc_lecteurs_{}", std::process::id()));

@@ -62,6 +62,7 @@ pub fn add_cheque(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "creer"))?;
     let montant = montant_positif("Montant du chèque", montant)?;
+    super::valeur_autorisee("Type de chèque", &ctype, TYPES_CHEQUE)?;
     conn.execute(
         "INSERT INTO cheques (numero, banque, tireur, montant, date_emission, date_echeance, ctype, client_id, fournisseur_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -80,6 +81,7 @@ pub fn update_cheque_status(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "modifier"))?;
+    super::valeur_autorisee("Statut du chèque", &statut, STATUTS_CHEQUE)?;
     conn.execute(
         "UPDATE cheques SET statut = ?1 WHERE id = ?2",
         params![statut, cheque_id],

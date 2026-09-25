@@ -507,6 +507,42 @@ Pour les bases existantes, une migration « 0 » idempotente doit détecter les 
 
 ### [MAJEUR] S-2 — Colonnes ajoutées sans clé étrangère ni contrainte
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. La migration v3 reconstruit 7 tables selon la procédure SQLite. Les clés étrangères sont désactivées pendant la migration puis restaurées, et `foreign_key_check` s'exécute avant le commit. Les index et la séquence `AUTOINCREMENT` sont conservés : un identifiant supprimé n'est jamais réutilisé.
+>
+> - **Clés étrangères ajoutées :**
+>   - `ventes` : `session_id`, `magasin_id`, `source_vente_id` ;
+>   - `vente_articles.variante_id` ;
+>   - `journal_caisse.session_id` ;
+>   - `sessions_caisse.magasin_id` ;
+>   - `mouvements_stock.magasin_id`.
+> - **`CHECK` sur les énumérations :**
+>   - `ventes` : `statut`, `dtype`, `mode_paiement` ;
+>   - `journal_caisse.jtype` et `mouvements_stock.mtype` ;
+>   - `utilisateurs.role` ;
+>   - `cheques` : `ctype`, `statut` ;
+>   - `sessions_caisse.statut` ;
+>   - `vente_articles.prix_type`.
+> - **`CHECK` sur les valeurs :**
+>   - quantité de ligne > 0, TVA et remise de ligne entre 0 et 100 ;
+>   - total ≥ 0 sauf pour un avoir ;
+>   - fonds de caisse et montant de chèque ≥ 0 ;
+>   - points utilisés ≥ 0.
+> - **Données existantes :**
+>   - Elles sont d'abord normalisées : casse et espaces, `'especes+cb'` → `mixte`, `fermee` → `cloturee` pour une session, `vente` / `achat` → `sortie` / `entree` pour les mouvements.
+>   - Les références orphelines des nouvelles colonnes sont remises à `NULL`, et leur nombre est journalisé.
+>   - Si une valeur reste inconnue, la migration est entièrement annulée avec un message qui nomme la table, la colonne et les valeurs à corriger.
+> - **Code :**
+>   - `create_vente` enregistre le mode unique ou `mixte`. Le POS envoyait `"especes+cb"`, qui aurait violé la contrainte ; le détail reste dans `vente_paiements`.
+>   - Rôle, type de journal, type et statut de chèque sont validés avec un message clair.
+>   - La suppression d'un magasin, d'un article, d'un client, d'une catégorie, d'un fournisseur, d'un utilisateur ou d'une variante encore utilisé renvoie « Suppression impossible : … est utilisé par d'autres enregistrements ». `delete_article_variante` s'exécute maintenant dans une transaction.
+>
+> Couvert par des tests Rust :
+> - migration d'une base v2 avec données fautives, orphelines et une séquence plus haute que le plus grand id ;
+> - 12 insertions invalides refusées ;
+> - migration annulée sur une valeur inconnue, base laissée intacte.
+>
+> Vérifié dans l'application (xvfb) : migration v2 → v3 d'une base existante, ouverture de session, puis vente en paiement fractionné espèces + carte, enregistrée en `mixte` avec ses deux règlements.
+
 **Fichier** : `src-tauri/src/db.rs:511-531`
 **Risque** : `ventes.session_id`, `ventes.magasin_id`, `ventes.source_vente_id`, `vente_articles.variante_id`, `journal_caisse.session_id` et `sessions_caisse.magasin_id` n'ont aucune FK, alors que `foreign_keys=ON`. `delete_magasin` peut ainsi laisser des ventes orphelines.
 

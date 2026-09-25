@@ -65,6 +65,7 @@ pub fn add_journal_caisse(
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("journal", "creer"))?;
     let montant = montant_saisi("Montant", montant)?;
+    super::valeur_autorisee("Type d'opération", &jtype, TYPES_JOURNAL)?;
     let utilisateur_id = Some(me.user_id);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 

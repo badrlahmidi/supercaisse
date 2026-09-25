@@ -120,13 +120,15 @@ pub fn delete_article_variante(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM article_variante_stocks WHERE variante_id = ?1",
         params![id],
     )
     .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM article_variantes WHERE id=?1", params![id])
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| super::erreur_suppression(e, "cette variante"))?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 

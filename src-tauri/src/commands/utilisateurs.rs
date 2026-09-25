@@ -45,6 +45,7 @@ pub fn add_utilisateur(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    super::valeur_autorisee("Rôle", &role, ROLES)?;
     valider_nouveau_mot_de_passe(&login, &password)?;
     let hash = hash_password(&password)?;
     conn.execute(
@@ -123,6 +124,7 @@ pub(crate) fn update_utilisateur_impl(
     password: Option<&str>,
     auteur: Option<i64>,
 ) -> Result<(), String> {
+    super::valeur_autorisee("Rôle", role, ROLES)?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let conn: &Connection = &tx;
     if role != "admin" {
@@ -191,7 +193,7 @@ pub(crate) fn delete_utilisateur_impl(
         .map_err(|e| e.to_string())?
         .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM utilisateurs WHERE id=?1", params![id])
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| super::erreur_suppression(e, "cet utilisateur"))?;
     log_audit(
         conn,
         auteur,

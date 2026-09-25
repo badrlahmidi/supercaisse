@@ -123,6 +123,37 @@ pub(crate) fn log_audit(
     .map_err(|e| format!("Journal d'audit impossible à écrire ({}) : opération annulée", e))
 }
 
+pub(crate) fn valeur_autorisee(
+    libelle: &str,
+    valeur: &str,
+    autorisees: &[&str],
+) -> Result<(), String> {
+    if autorisees.contains(&valeur) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} invalide : « {} » (valeurs possibles : {})",
+            libelle,
+            valeur,
+            autorisees.join(", ")
+        ))
+    }
+}
+
+pub(crate) fn erreur_suppression(erreur: rusqlite::Error, element: &str) -> String {
+    match &erreur {
+        rusqlite::Error::SqliteFailure(e, _)
+            if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY =>
+        {
+            format!(
+                "Suppression impossible : {} est utilisé par d'autres enregistrements (ventes, stock, achats…)",
+                element
+            )
+        }
+        _ => erreur.to_string(),
+    }
+}
+
 pub(crate) fn fin_de_journee(fin: &str) -> String {
     if fin.len() == 10 {
         format!("{} 23:59:59", fin)
@@ -171,6 +202,26 @@ pub use ventes::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_suppression_d_un_element_utilise_explicite() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute(
+            "INSERT INTO ventes (montant_total, magasin_id) VALUES (10, 1)",
+            [],
+        )
+        .unwrap();
+        let err = conn
+            .execute("DELETE FROM magasins WHERE id = 1", [])
+            .map_err(|e| erreur_suppression(e, "ce magasin"))
+            .unwrap_err();
+        assert!(
+            err.starts_with("Suppression impossible : ce magasin"),
+            "{err}"
+        );
+        assert!(valeur_autorisee("Rôle", "patron", crate::db::ROLES).is_err());
+        assert!(valeur_autorisee("Rôle", "manager", crate::db::ROLES).is_ok());
+    }
 
     #[test]
     fn test_fin_de_journee_inclut_toute_la_journee() {
