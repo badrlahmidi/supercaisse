@@ -1,12 +1,21 @@
 use crate::db::*;
+use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::{params, OptionalExtension};
 use tauri::State;
-use crate::session::{autoriser, Acces, AuthState};
 
 use super::default_magasin_id;
 
 #[tauri::command]
-pub fn add_article_variante(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64, taille: Option<String>, couleur: Option<String>, code_barre: Option<String>, stock_initial: f64) -> Result<i64, String> {
+pub fn add_article_variante(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    article_id: i64,
+    taille: Option<String>,
+    couleur: Option<String>,
+    code_barre: Option<String>,
+    stock_initial: f64,
+) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     conn.execute(
@@ -17,44 +26,75 @@ pub fn add_article_variante(db: State<DbState>, auth: State<AuthState>, token: S
 }
 
 #[tauri::command]
-pub fn get_article_variantes(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_article_variantes(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    article_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn.prepare(
         "SELECT id, taille, couleur, code_barre, stock_dedie FROM article_variantes WHERE article_id = ?1 ORDER BY taille, couleur"
     ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![article_id], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "taille": row.get::<_, Option<String>>(1)?,
-            "couleur": row.get::<_, Option<String>>(2)?,
-            "code_barre": row.get::<_, Option<String>>(3)?,
-            "stock_dedie": row.get::<_, f64>(4)?,
-        }))
-    }).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let rows = stmt
+        .query_map(params![article_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "taille": row.get::<_, Option<String>>(1)?,
+                "couleur": row.get::<_, Option<String>>(2)?,
+                "code_barre": row.get::<_, Option<String>>(3)?,
+                "stock_dedie": row.get::<_, f64>(4)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn update_article_variante(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, taille: Option<String>, couleur: Option<String>, code_barre: Option<String>) -> Result<(), String> {
+pub fn update_article_variante(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    id: i64,
+    taille: Option<String>,
+    couleur: Option<String>,
+    code_barre: Option<String>,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     conn.execute(
         "UPDATE article_variantes SET taille=?1, couleur=?2, code_barre=?3 WHERE id=?4",
         params![taille, couleur, code_barre, id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn adjust_article_variante_stock(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, quantite: f64) -> Result<(), String> {
+pub fn adjust_article_variante_stock(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    id: i64,
+    quantite: f64,
+) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let article_id: i64 = tx.query_row("SELECT article_id FROM article_variantes WHERE id = ?1", params![id], |r| r.get(0))
+    let article_id: i64 = tx
+        .query_row(
+            "SELECT article_id FROM article_variantes WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
         .map_err(|_| "Variante introuvable".to_string())?;
-    tx.execute("UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2", params![quantite, id])
-        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2",
+        params![quantite, id],
+    )
+    .map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
     let mtype = if quantite >= 0.0 { "entree" } else { "sortie" };
     tx.execute(
@@ -66,15 +106,26 @@ pub fn adjust_article_variante_stock(db: State<DbState>, auth: State<AuthState>,
 }
 
 #[tauri::command]
-pub fn delete_article_variante(db: State<DbState>, auth: State<AuthState>, token: String, id: i64) -> Result<(), String> {
+pub fn delete_article_variante(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    id: i64,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
-    conn.execute("DELETE FROM article_variantes WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM article_variantes WHERE id=?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn find_variante_by_barcode(db: State<DbState>, auth: State<AuthState>, token: String, code_barre: String) -> Result<Option<serde_json::Value>, String> {
+pub fn find_variante_by_barcode(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    code_barre: String,
+) -> Result<Option<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     conn.query_row(
@@ -84,16 +135,20 @@ pub fn find_variante_by_barcode(db: State<DbState>, auth: State<AuthState>, toke
          JOIN articles a ON a.id = v.article_id
          WHERE v.code_barre = ?1",
         params![code_barre],
-        |row| Ok(serde_json::json!({
-            "variante_id": row.get::<_, i64>(0)?,
-            "article_id": row.get::<_, i64>(1)?,
-            "taille": row.get::<_, Option<String>>(2)?,
-            "couleur": row.get::<_, Option<String>>(3)?,
-            "stock_dedie": row.get::<_, f64>(4)?,
-            "designation": row.get::<_, String>(5)?,
-            "prix_vente": row.get::<_, f64>(6)?,
-            "tva": row.get::<_, f64>(7)?,
-            "actif": row.get::<_, i32>(8)? != 0,
-        })),
-    ).optional().map_err(|e| e.to_string())
+        |row| {
+            Ok(serde_json::json!({
+                "variante_id": row.get::<_, i64>(0)?,
+                "article_id": row.get::<_, i64>(1)?,
+                "taille": row.get::<_, Option<String>>(2)?,
+                "couleur": row.get::<_, Option<String>>(3)?,
+                "stock_dedie": row.get::<_, f64>(4)?,
+                "designation": row.get::<_, String>(5)?,
+                "prix_vente": row.get::<_, f64>(6)?,
+                "tva": row.get::<_, f64>(7)?,
+                "actif": row.get::<_, i32>(8)? != 0,
+            }))
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }

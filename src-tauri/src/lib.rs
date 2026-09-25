@@ -31,10 +31,17 @@ pub fn run() {
                 .unwrap_or_else(|_| data.clone());
             let dirs = AppDirs { data, documents };
             let db_path = prepare_database(&dirs, &legacy_database_candidates())?;
-            let conn = init_db(&db_path.to_string_lossy())
-                .map_err(|e| format!("Initialisation de la base {} impossible : {}", db_path.display(), e))?;
+            let conn = init_db(&db_path.to_string_lossy()).map_err(|e| {
+                format!(
+                    "Initialisation de la base {} impossible : {}",
+                    db_path.display(),
+                    e
+                )
+            })?;
             log::info!("Base de données : {}", db_path.display());
-            app.manage(DbState { conn: Arc::new(Mutex::new(conn)) });
+            app.manage(DbState {
+                conn: Arc::new(Mutex::new(conn)),
+            });
             app.manage(dirs);
             Ok(())
         })

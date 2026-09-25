@@ -796,6 +796,11 @@ Côté UI, utiliser `@tauri-apps/plugin-dialog` pour choisir le fichier, avec un
 ### [MAJEUR] P-4 — CI insuffisante pour une release
 
 > **Constat ajouté pendant les corrections :** l'étape `npx tsc --noEmit` de la CI ne vérifie aucun fichier, car le `tsconfig.json` racine a `"files": []` et seulement des références. `npx tsc --noEmit -p tsconfig.app.json` remonte 56 erreurs de typage préexistantes. Il faut les corriger, puis passer la CI à `tsc -b` (ou `-p tsconfig.app.json`).
+>
+> **Statut : corrigé en partie** sur `claude/hopeful-clarke-4uflms`.
+> - Les 56 erreurs de typage sont corrigées : types alignés sur les retours Rust, et composant `Tabs` réparé.
+> - La CI lance `tsc -b`, `cargo fmt --check` et `cargo clippy --all-targets -D warnings` (code formaté, 26 avertissements clippy corrigés).
+> - Reste à faire : tests d'intégration IPC de bout en bout et job de bundle `tauri build`.
 
 **Fichier** : `.github/workflows/ci.yml`
 **Risque** : aucun `cargo clippy`, `cargo fmt --check`, test d'intégration IPC ni build `tauri build`. Les 2 tests Rust existants ne couvrent ni `create_vente`, ni la numérotation, ni la clôture de session. Tous les défauts critiques ci-dessus passent la CI au vert.

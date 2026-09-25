@@ -1,7 +1,7 @@
 use crate::db::*;
+use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use crate::session::{autoriser, Acces, AuthState};
 use tauri::State;
 
 use super::log_audit;
@@ -10,20 +10,32 @@ pub(crate) const MOT_DE_PASSE_LONGUEUR_MIN: usize = 8;
 
 pub(crate) fn mot_de_passe_faible(login: &str, password: &str) -> bool {
     let p = password.trim().to_lowercase();
-    p.chars().count() < MOT_DE_PASSE_LONGUEUR_MIN || p == "admin" || p == login.trim().to_lowercase()
+    p.chars().count() < MOT_DE_PASSE_LONGUEUR_MIN
+        || p == "admin"
+        || p == login.trim().to_lowercase()
 }
 
 pub(crate) fn valider_nouveau_mot_de_passe(login: &str, password: &str) -> Result<(), String> {
     if password.chars().count() < MOT_DE_PASSE_LONGUEUR_MIN {
-        return Err(format!("Le mot de passe doit contenir au moins {} caractères", MOT_DE_PASSE_LONGUEUR_MIN));
+        return Err(format!(
+            "Le mot de passe doit contenir au moins {} caractères",
+            MOT_DE_PASSE_LONGUEUR_MIN
+        ));
     }
     if mot_de_passe_faible(login, password) {
-        return Err("Mot de passe trop faible : il ne doit être ni « admin » ni identique au login".to_string());
+        return Err(
+            "Mot de passe trop faible : il ne doit être ni « admin » ni identique au login"
+                .to_string(),
+        );
     }
     Ok(())
 }
 
-pub(crate) fn login_impl(conn: &Connection, login: &str, password: &str) -> Result<Option<Utilisateur>, String> {
+pub(crate) fn login_impl(
+    conn: &Connection,
+    login: &str,
+    password: &str,
+) -> Result<Option<Utilisateur>, String> {
     let result = conn.query_row(
         "SELECT id, login, nom, role, password_hash, must_change_password FROM utilisateurs WHERE login = ?1",
         params![login],
@@ -40,26 +52,46 @@ pub(crate) fn login_impl(conn: &Connection, login: &str, password: &str) -> Resu
         return Ok(None);
     };
     if !verify_password(password, &hash) {
-        log_audit(conn, Some(id), "echec_connexion",
+        log_audit(
+            conn,
+            Some(id),
+            "echec_connexion",
             &format!("Tentative de connexion échouée pour: {}", ulogin),
-            Some("utilisateur"), Some(id));
+            Some("utilisateur"),
+            Some(id),
+        );
         return Ok(None);
     }
     if !hash.starts_with("$argon2") {
         conn.execute(
             "UPDATE utilisateurs SET password_hash = ?1 WHERE id = ?2",
             params![hash_password(password), id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
     let must_change_password = must_change || mot_de_passe_faible(&ulogin, password);
     if must_change_password && !must_change {
-        conn.execute("UPDATE utilisateurs SET must_change_password = 1 WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE utilisateurs SET must_change_password = 1 WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
     }
-    log_audit(conn, Some(id), "connexion",
+    log_audit(
+        conn,
+        Some(id),
+        "connexion",
         &format!("Connexion réussie: {} ({})", nom, role),
-        Some("utilisateur"), Some(id));
-    Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role, must_change_password }))
+        Some("utilisateur"),
+        Some(id),
+    );
+    Ok(Some(Utilisateur {
+        id: Some(id),
+        login: ulogin,
+        nom,
+        role,
+        must_change_password,
+    }))
 }
 
 #[derive(Debug, Serialize)]
@@ -69,18 +101,29 @@ pub struct Connexion {
     pub token: String,
 }
 
-fn ouvrir_session(auth: &AuthState, utilisateur: Option<Utilisateur>) -> Result<Option<Connexion>, String> {
+fn ouvrir_session(
+    auth: &AuthState,
+    utilisateur: Option<Utilisateur>,
+) -> Result<Option<Connexion>, String> {
     match utilisateur {
         None => Ok(None),
         Some(u) => {
             let token = auth.ouvrir(u.id.ok_or("Utilisateur sans identifiant")?, &u.role)?;
-            Ok(Some(Connexion { utilisateur: u, token }))
+            Ok(Some(Connexion {
+                utilisateur: u,
+                token,
+            }))
         }
     }
 }
 
 #[tauri::command]
-pub fn login(db: State<DbState>, auth: State<AuthState>, login: String, password: String) -> Result<Option<Connexion>, String> {
+pub fn login(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    login: String,
+    password: String,
+) -> Result<Option<Connexion>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     ouvrir_session(&auth, login_impl(&conn, &login, &password)?)
 }
@@ -90,16 +133,30 @@ pub fn logout(auth: State<AuthState>, token: String) -> Result<(), String> {
     auth.fermer(&token)
 }
 
-pub(crate) fn change_password_impl(conn: &Connection, user_id: i64, ancien: &str, nouveau: &str) -> Result<(), String> {
-    let (login, hash): (String, String) = conn.query_row(
-        "SELECT login, password_hash FROM utilisateurs WHERE id = ?1",
-        params![user_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    ).optional().map_err(|e| e.to_string())?.ok_or("Utilisateur introuvable")?;
+pub(crate) fn change_password_impl(
+    conn: &Connection,
+    user_id: i64,
+    ancien: &str,
+    nouveau: &str,
+) -> Result<(), String> {
+    let (login, hash): (String, String) = conn
+        .query_row(
+            "SELECT login, password_hash FROM utilisateurs WHERE id = ?1",
+            params![user_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or("Utilisateur introuvable")?;
     if !verify_password(ancien, &hash) {
-        log_audit(conn, Some(user_id), "echec_changement_mot_de_passe",
+        log_audit(
+            conn,
+            Some(user_id),
+            "echec_changement_mot_de_passe",
             &format!("Ancien mot de passe incorrect pour: {}", login),
-            Some("utilisateur"), Some(user_id));
+            Some("utilisateur"),
+            Some(user_id),
+        );
         return Err("Ancien mot de passe incorrect".to_string());
     }
     if ancien == nouveau {
@@ -109,22 +166,43 @@ pub(crate) fn change_password_impl(conn: &Connection, user_id: i64, ancien: &str
     conn.execute(
         "UPDATE utilisateurs SET password_hash = ?1, must_change_password = 0 WHERE id = ?2",
         params![hash_password(nouveau), user_id],
-    ).map_err(|e| e.to_string())?;
-    log_audit(conn, Some(user_id), "changer_mot_de_passe",
+    )
+    .map_err(|e| e.to_string())?;
+    log_audit(
+        conn,
+        Some(user_id),
+        "changer_mot_de_passe",
         &format!("Mot de passe modifié: {}", login),
-        Some("utilisateur"), Some(user_id));
+        Some("utilisateur"),
+        Some(user_id),
+    );
     Ok(())
 }
 
 #[tauri::command]
-pub fn change_password(db: State<DbState>, auth: State<AuthState>, token: String, ancien_mot_de_passe: String, nouveau_mot_de_passe: String) -> Result<(), String> {
+pub fn change_password(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    ancien_mot_de_passe: String,
+    nouveau_mot_de_passe: String,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
-    change_password_impl(&conn, me.user_id, &ancien_mot_de_passe, &nouveau_mot_de_passe)
+    change_password_impl(
+        &conn,
+        me.user_id,
+        &ancien_mot_de_passe,
+        &nouveau_mot_de_passe,
+    )
 }
 
 #[tauri::command]
-pub fn login_pin(db: State<DbState>, auth: State<AuthState>, pin: String) -> Result<Option<Connexion>, String> {
+pub fn login_pin(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    pin: String,
+) -> Result<Option<Connexion>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     ouvrir_session(&auth, login_pin_impl(&conn, &pin)?)
 }
@@ -133,26 +211,42 @@ pub(crate) fn login_pin_impl(conn: &Connection, pin: &str) -> Result<Option<Util
     let mut stmt = conn.prepare(
         "SELECT id, login, nom, role, pin_hash, must_change_password FROM utilisateurs WHERE pin_hash IS NOT NULL AND pin_hash != ''"
     ).map_err(|e| e.to_string())?;
-    let users: Vec<(i64, String, String, String, String, bool)> = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, bool>(5)?,
-        ))
-    }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect();
+    let users: Vec<(i64, String, String, String, String, bool)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, bool>(5)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
     for (id, ulogin, nom, role, hash, must_change_password) in users {
         if verify_password(pin, &hash) {
-            return Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role, must_change_password }));
+            return Ok(Some(Utilisateur {
+                id: Some(id),
+                login: ulogin,
+                nom,
+                role,
+                must_change_password,
+            }));
         }
     }
     Ok(None)
 }
 
 #[tauri::command]
-pub fn set_user_pin(db: State<DbState>, auth: State<AuthState>, token: String, user_id: i64, pin: String) -> Result<(), String> {
+pub fn set_user_pin(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    user_id: i64,
+    pin: String,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let hash = if pin.is_empty() {
@@ -163,7 +257,8 @@ pub fn set_user_pin(db: State<DbState>, auth: State<AuthState>, token: String, u
     conn.execute(
         "UPDATE utilisateurs SET pin_hash = ?1 WHERE id = ?2",
         params![hash, user_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -173,12 +268,18 @@ mod tests {
     use crate::commands::utilisateurs::{delete_utilisateur_impl, update_utilisateur_impl};
 
     fn temp_db(name: &str) -> String {
-        std::env::temp_dir().join(format!(
-            "supercaisse_test_auth_{}_{}_{}.db",
-            name,
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        )).to_string_lossy().to_string()
+        std::env::temp_dir()
+            .join(format!(
+                "supercaisse_test_auth_{}_{}_{}.db",
+                name,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string()
     }
 
     fn cleanup(path: &str) {
@@ -200,10 +301,16 @@ mod tests {
         let path = temp_db("rename");
         {
             let conn = crate::db::init_db(&path).unwrap();
-            conn.execute("UPDATE utilisateurs SET login = 'patron' WHERE login = 'admin'", []).unwrap();
+            conn.execute(
+                "UPDATE utilisateurs SET login = 'patron' WHERE login = 'admin'",
+                [],
+            )
+            .unwrap();
         }
         let conn = crate::db::init_db(&path).unwrap();
-        let nb: i64 = conn.query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0)).unwrap();
+        let nb: i64 = conn
+            .query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(nb, 1);
         assert!(login_impl(&conn, "admin", "admin").unwrap().is_none());
         assert!(login_impl(&conn, "patron", "admin").unwrap().is_some());
@@ -240,7 +347,9 @@ mod tests {
             ", sha)).unwrap();
         }
         let conn = crate::db::init_db(&path).unwrap();
-        let nb: i64 = conn.query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0)).unwrap();
+        let nb: i64 = conn
+            .query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(nb, 1);
         let admin = login_impl(&conn, "admin", "admin").unwrap().unwrap();
         assert!(admin.must_change_password);
@@ -256,7 +365,9 @@ mod tests {
     #[test]
     fn test_changement_de_mot_de_passe() {
         let conn = crate::db::init_db(":memory:").unwrap();
-        assert!(change_password_impl(&conn, 1, "mauvais", "Caisse-2026!").unwrap_err().contains("incorrect"));
+        assert!(change_password_impl(&conn, 1, "mauvais", "Caisse-2026!")
+            .unwrap_err()
+            .contains("incorrect"));
         assert!(change_password_impl(&conn, 1, "admin", "admin").is_err());
         assert!(change_password_impl(&conn, 1, "admin", "court").is_err());
         assert!(change_password_impl(&conn, 1, "admin", "ADMIN").is_err());
@@ -282,10 +393,20 @@ mod tests {
     fn test_dernier_admin_protege() {
         let conn = crate::db::init_db(":memory:").unwrap();
         assert!(delete_utilisateur_impl(&conn, 1, None).is_err());
-        assert!(update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None, None).is_err());
+        assert!(update_utilisateur_impl(
+            &conn,
+            1,
+            "admin",
+            "Administrateur",
+            "manager",
+            None,
+            None
+        )
+        .is_err());
         update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "admin", None, None).unwrap();
         conn.execute("INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'gerant', 'x', 'Gérant', 'admin')", []).unwrap();
-        update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None, None).unwrap();
+        update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None, None)
+            .unwrap();
         assert!(delete_utilisateur_impl(&conn, 2, None).is_err());
         delete_utilisateur_impl(&conn, 1, None).unwrap();
     }
@@ -294,8 +415,28 @@ mod tests {
     fn test_nouveau_mot_de_passe_utilisateur_valide() {
         let conn = crate::db::init_db(":memory:").unwrap();
         conn.execute("INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'karim', 'x', 'Karim', 'caissier')", []).unwrap();
-        assert!(update_utilisateur_impl(&conn, 2, "karim", "Karim", "caissier", Some("karim"), None).is_err());
-        update_utilisateur_impl(&conn, 2, "karim", "Karim", "caissier", Some("Vente-Karim-1"), None).unwrap();
-        assert!(login_impl(&conn, "karim", "Vente-Karim-1").unwrap().is_some());
+        assert!(update_utilisateur_impl(
+            &conn,
+            2,
+            "karim",
+            "Karim",
+            "caissier",
+            Some("karim"),
+            None
+        )
+        .is_err());
+        update_utilisateur_impl(
+            &conn,
+            2,
+            "karim",
+            "Karim",
+            "caissier",
+            Some("Vente-Karim-1"),
+            None,
+        )
+        .unwrap();
+        assert!(login_impl(&conn, "karim", "Vente-Karim-1")
+            .unwrap()
+            .is_some());
     }
 }

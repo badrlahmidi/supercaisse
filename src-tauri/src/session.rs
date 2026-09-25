@@ -47,21 +47,33 @@ impl AuthState {
         let maintenant = Instant::now();
         let mut sessions = self.sessions.lock().map_err(|e| e.to_string())?;
         sessions.retain(|_, e| !Self::expiree(e, maintenant));
-        sessions.insert(token.clone(), Entree {
-            session: SessionUtilisateur { user_id, role: role.to_string() },
-            creee: maintenant,
-            derniere_activite: maintenant,
-        });
+        sessions.insert(
+            token.clone(),
+            Entree {
+                session: SessionUtilisateur {
+                    user_id,
+                    role: role.to_string(),
+                },
+                creee: maintenant,
+                derniere_activite: maintenant,
+            },
+        );
         Ok(token)
     }
 
     pub fn fermer(&self, token: &str) -> Result<(), String> {
-        self.sessions.lock().map_err(|e| e.to_string())?.remove(token);
+        self.sessions
+            .lock()
+            .map_err(|e| e.to_string())?
+            .remove(token);
         Ok(())
     }
 
     pub fn fermer_utilisateur(&self, user_id: i64) -> Result<(), String> {
-        self.sessions.lock().map_err(|e| e.to_string())?.retain(|_, e| e.session.user_id != user_id);
+        self.sessions
+            .lock()
+            .map_err(|e| e.to_string())?
+            .retain(|_, e| e.session.user_id != user_id);
         Ok(())
     }
 
@@ -82,7 +94,8 @@ impl AuthState {
     }
 
     fn expiree(e: &Entree, maintenant: Instant) -> bool {
-        maintenant.duration_since(e.derniere_activite) > INACTIVITE_MAX || maintenant.duration_since(e.creee) > DUREE_MAX
+        maintenant.duration_since(e.derniere_activite) > INACTIVITE_MAX
+            || maintenant.duration_since(e.creee) > DUREE_MAX
     }
 
     #[cfg(test)]
@@ -95,10 +108,19 @@ impl AuthState {
     }
 }
 
-pub fn autoriser(auth: &AuthState, conn: &Connection, token: &str, acces: Acces) -> Result<SessionUtilisateur, String> {
+pub fn autoriser(
+    auth: &AuthState,
+    conn: &Connection,
+    token: &str,
+    acces: Acces,
+) -> Result<SessionUtilisateur, String> {
     let session = auth.session(token)?;
     let role_actuel: Option<String> = conn
-        .query_row("SELECT role FROM utilisateurs WHERE id = ?1", params![session.user_id], |r| r.get(0))
+        .query_row(
+            "SELECT role FROM utilisateurs WHERE id = ?1",
+            params![session.user_id],
+            |r| r.get(0),
+        )
         .optional()
         .map_err(|e| e.to_string())?;
     let Some(role) = role_actuel else {
@@ -110,7 +132,11 @@ pub fn autoriser(auth: &AuthState, conn: &Connection, token: &str, acces: Acces)
     Ok(session)
 }
 
-pub fn verifier_acces(conn: &Connection, session: &SessionUtilisateur, acces: Acces) -> Result<(), String> {
+pub fn verifier_acces(
+    conn: &Connection,
+    session: &SessionUtilisateur,
+    acces: Acces,
+) -> Result<(), String> {
     match acces {
         Acces::Connecte => Ok(()),
         _ if session.est_admin() => Ok(()),
@@ -148,8 +174,14 @@ mod tests {
     #[test]
     fn test_token_inconnu_refuse() {
         let auth = AuthState::default();
-        assert_eq!(autoriser(&auth, &db(), "faux", Acces::Connecte).unwrap_err(), ERREUR_SESSION);
-        assert_eq!(autoriser(&auth, &db(), "", Acces::Connecte).unwrap_err(), ERREUR_SESSION);
+        assert_eq!(
+            autoriser(&auth, &db(), "faux", Acces::Connecte).unwrap_err(),
+            ERREUR_SESSION
+        );
+        assert_eq!(
+            autoriser(&auth, &db(), "", Acces::Connecte).unwrap_err(),
+            ERREUR_SESSION
+        );
     }
 
     #[test]
@@ -170,10 +202,28 @@ mod tests {
         let admin = auth.ouvrir(1, "admin").unwrap();
 
         assert!(autoriser(&auth, &conn, &caissier, Acces::Module("ventes", "creer")).is_ok());
-        assert!(autoriser(&auth, &conn, &caissier, Acces::Module("articles", "modifier")).is_err());
+        assert!(autoriser(
+            &auth,
+            &conn,
+            &caissier,
+            Acces::Module("articles", "modifier")
+        )
+        .is_err());
         assert!(autoriser(&auth, &conn, &caissier, Acces::Admin).is_err());
-        assert!(autoriser(&auth, &conn, &manager, Acces::Module("articles", "modifier")).is_ok());
-        assert!(autoriser(&auth, &conn, &manager, Acces::Module("settings", "modifier")).is_err());
+        assert!(autoriser(
+            &auth,
+            &conn,
+            &manager,
+            Acces::Module("articles", "modifier")
+        )
+        .is_ok());
+        assert!(autoriser(
+            &auth,
+            &conn,
+            &manager,
+            Acces::Module("settings", "modifier")
+        )
+        .is_err());
         assert!(autoriser(&auth, &conn, &manager, Acces::Admin).is_err());
         assert!(autoriser(&auth, &conn, &admin, Acces::Admin).is_ok());
         assert!(autoriser(&auth, &conn, &admin, Acces::Module("inexistant", "voir")).is_ok());
@@ -185,7 +235,8 @@ mod tests {
         let conn = db();
         let token = auth.ouvrir(3, "admin").unwrap();
         assert!(autoriser(&auth, &conn, &token, Acces::Admin).is_err());
-        conn.execute("UPDATE utilisateurs SET role = 'admin' WHERE id = 3", []).unwrap();
+        conn.execute("UPDATE utilisateurs SET role = 'admin' WHERE id = 3", [])
+            .unwrap();
         assert!(autoriser(&auth, &conn, &token, Acces::Admin).is_ok());
     }
 
@@ -194,7 +245,8 @@ mod tests {
         let auth = AuthState::default();
         let conn = db();
         let token = auth.ouvrir(2, "caissier").unwrap();
-        conn.execute("DELETE FROM utilisateurs WHERE id = 2", []).unwrap();
+        conn.execute("DELETE FROM utilisateurs WHERE id = 2", [])
+            .unwrap();
         assert!(autoriser(&auth, &conn, &token, Acces::Connecte).is_err());
         assert!(auth.session(&token).is_err());
     }
@@ -228,21 +280,38 @@ mod tests {
         for entree in std::fs::read_dir(dossier).unwrap() {
             let source = std::fs::read_to_string(entree.unwrap().path()).unwrap();
             for bloc in source.split("#[tauri::command]").skip(1) {
-                let nom = bloc.trim_start().trim_start_matches("pub fn ").split('(').next().unwrap().to_string();
+                let nom = bloc
+                    .trim_start()
+                    .trim_start_matches("pub fn ")
+                    .split('(')
+                    .next()
+                    .unwrap()
+                    .to_string();
                 commandes += 1;
                 if publiques.contains(&nom.as_str()) {
                     continue;
                 }
                 let signature = bloc.split('{').next().unwrap();
                 let corps = bloc.split_once('{').map(|x| x.1).unwrap_or("");
-                let debut: String = corps.lines().take(4).collect::<Vec<_>>().join("\n");
-                let controle = debut.contains("autoriser(&auth, &conn, &token,") || debut.contains("auth.session(&token)?");
-                if !signature.contains("token: String") || !controle {
+                let sans_espaces =
+                    |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                let debut = sans_espaces(corps)
+                    .split(';')
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(";");
+                let controle = debut.contains("autoriser(&auth,&conn,&token,")
+                    || debut.contains("auth.session(&token)?");
+                if !sans_espaces(signature).contains("token:String") || !controle {
                     fautives.push(nom);
                 }
             }
         }
         assert!(commandes >= 98, "{} commandes trouvées", commandes);
-        assert!(fautives.is_empty(), "commandes sans contrôle de session : {:?}", fautives);
+        assert!(
+            fautives.is_empty(),
+            "commandes sans contrôle de session : {:?}",
+            fautives
+        );
     }
 }

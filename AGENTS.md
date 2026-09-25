@@ -42,5 +42,6 @@
 - `npm run dev` — Vite dev server
 - `npm run build` — Vite production build
 - `npm run lint` — ESLint
-- `npx tsc --noEmit` — TypeScript check
+- `npx tsc -b` — TypeScript check (the root `tsc --noEmit` checks no file: the root tsconfig only has references)
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (in `src-tauri/`) — Rust checks run by CI
 - `npx vite build` — verify production build

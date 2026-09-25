@@ -37,7 +37,10 @@ pub fn legacy_database_candidates() -> Vec<PathBuf> {
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("data").join(DB_FILE_NAME));
     }
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
         candidates.push(exe_dir.join("data").join(DB_FILE_NAME));
     }
     candidates.dedup();
@@ -50,9 +53,16 @@ pub fn prepare_database(dirs: &AppDirs, legacy_candidates: &[PathBuf]) -> Result
     if target.exists() {
         return Ok(target);
     }
-    if let Some(legacy) = legacy_candidates.iter().find(|p| p.is_file() && **p != target) {
+    if let Some(legacy) = legacy_candidates
+        .iter()
+        .find(|p| p.is_file() && **p != target)
+    {
         copy_sqlite_database(legacy, &target)?;
-        log::info!("Base migrée de {} vers {}", legacy.display(), target.display());
+        log::info!(
+            "Base migrée de {} vers {}",
+            legacy.display(),
+            target.display()
+        );
     }
     Ok(target)
 }
@@ -61,8 +71,14 @@ fn copy_sqlite_database(source: &Path, target: &Path) -> Result<(), String> {
     let tmp = target.with_extension("db.migration");
     let _ = std::fs::remove_file(&tmp);
     let result = (|| -> Result<(), String> {
-        let src = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| format!("Lecture de l'ancienne base {} impossible : {}", source.display(), e))?;
+        let src =
+            Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
+                format!(
+                    "Lecture de l'ancienne base {} impossible : {}",
+                    source.display(),
+                    e
+                )
+            })?;
         let mut dst = Connection::open(&tmp).map_err(|e| e.to_string())?;
         Backup::new(&src, &mut dst)
             .map_err(|e| e.to_string())?
@@ -74,7 +90,8 @@ fn copy_sqlite_database(source: &Path, target: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    std::fs::rename(&tmp, target).map_err(|e| format!("Finalisation de la migration impossible : {}", e))
+    std::fs::rename(&tmp, target)
+        .map_err(|e| format!("Finalisation de la migration impossible : {}", e))
 }
 
 #[cfg(test)]
@@ -86,14 +103,20 @@ mod tests {
             "supercaisse_paths_{}_{}_{}",
             name,
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
     fn dirs_in(root: &Path) -> AppDirs {
-        AppDirs { data: root.join("appdata"), documents: root.join("docs") }
+        AppDirs {
+            data: root.join("appdata"),
+            documents: root.join("docs"),
+        }
     }
 
     #[test]
@@ -119,11 +142,16 @@ mod tests {
             let dirs = dirs_in(&root);
             let path = prepare_database(&dirs, std::slice::from_ref(&legacy)).unwrap();
             let migrated = Connection::open(&path).unwrap();
-            let v: String = migrated.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
+            let v: String = migrated
+                .query_row("SELECT v FROM t", [], |r| r.get(0))
+                .unwrap();
             assert_eq!(v, "vente-1");
         }
         assert!(legacy.exists());
-        assert!(!root.join("appdata").join("supercaisse.db.migration").exists());
+        assert!(!root
+            .join("appdata")
+            .join("supercaisse.db.migration")
+            .exists());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -132,14 +160,21 @@ mod tests {
         let root = temp_root("existing");
         let dirs = dirs_in(&root);
         std::fs::create_dir_all(&dirs.data).unwrap();
-        Connection::open(dirs.database()).unwrap()
-            .execute_batch("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('actuelle');").unwrap();
+        Connection::open(dirs.database())
+            .unwrap()
+            .execute_batch("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('actuelle');")
+            .unwrap();
         let legacy_dir = root.join("old");
         std::fs::create_dir_all(&legacy_dir).unwrap();
-        Connection::open(legacy_dir.join(DB_FILE_NAME)).unwrap()
-            .execute_batch("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('ancienne');").unwrap();
+        Connection::open(legacy_dir.join(DB_FILE_NAME))
+            .unwrap()
+            .execute_batch("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('ancienne');")
+            .unwrap();
         let path = prepare_database(&dirs, &[legacy_dir.join(DB_FILE_NAME)]).unwrap();
-        let v: String = Connection::open(&path).unwrap().query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
+        let v: String = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT v FROM t", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, "actuelle");
         std::fs::remove_dir_all(&root).unwrap();
     }

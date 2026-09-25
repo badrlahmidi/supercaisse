@@ -1,12 +1,17 @@
 use crate::db::*;
+use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
-use crate::session::{autoriser, Acces, AuthState};
 
-use super::{default_magasin_id, adjust_article_stock, log_audit};
+use super::{adjust_article_stock, default_magasin_id, log_audit};
 
 #[tauri::command]
-pub fn get_articles(db: State<DbState>, auth: State<AuthState>, token: String, recherche: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_articles(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    recherche: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let image_col = "a.image_url";
@@ -36,38 +41,60 @@ pub fn get_articles(db: State<DbState>, auth: State<AuthState>, token: String, r
         ),
     };
     let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt.query_map(params_refs.as_slice(), |row| {
-        let actif_int: i32 = row.get(10)?;
-        let suivi_lot_int: Option<i32> = row.get(14)?;
-        let est_kit_int: Option<i32> = row.get(16)?;
-        let a_variantes_int: i32 = row.get(17)?;
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "code_barre": row.get::<_, Option<String>>(1)?,
-            "designation": row.get::<_, String>(2)?,
-            "prix_achat": row.get::<_, f64>(3)?,
-            "prix_vente": row.get::<_, f64>(4)?,
-            "tva": row.get::<_, f64>(5)?,
-            "stock": row.get::<_, f64>(6)?,
-            "stock_alerte": row.get::<_, Option<f64>>(7)?,
-            "categorie_id": row.get::<_, Option<i64>>(8)?,
-            "fournisseur_id": row.get::<_, Option<i64>>(9)?,
-            "actif": actif_int != 0,
-            "image_url": row.get::<_, Option<String>>(11)?,
-            "categorie_nom": row.get::<_, Option<String>>(12)?,
-            "fournisseur_nom": row.get::<_, Option<String>>(13)?,
-            "suivi_lot": suivi_lot_int.unwrap_or(0) != 0,
-            "prix_grossiste": row.get::<_, Option<f64>>(15)?,
-            "est_kit": est_kit_int.unwrap_or(0) != 0,
-            "a_variantes": a_variantes_int != 0,
-        }))
-    }).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params_vec.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt
+        .query_map(params_refs.as_slice(), |row| {
+            let actif_int: i32 = row.get(10)?;
+            let suivi_lot_int: Option<i32> = row.get(14)?;
+            let est_kit_int: Option<i32> = row.get(16)?;
+            let a_variantes_int: i32 = row.get(17)?;
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "code_barre": row.get::<_, Option<String>>(1)?,
+                "designation": row.get::<_, String>(2)?,
+                "prix_achat": row.get::<_, f64>(3)?,
+                "prix_vente": row.get::<_, f64>(4)?,
+                "tva": row.get::<_, f64>(5)?,
+                "stock": row.get::<_, f64>(6)?,
+                "stock_alerte": row.get::<_, Option<f64>>(7)?,
+                "categorie_id": row.get::<_, Option<i64>>(8)?,
+                "fournisseur_id": row.get::<_, Option<i64>>(9)?,
+                "actif": actif_int != 0,
+                "image_url": row.get::<_, Option<String>>(11)?,
+                "categorie_nom": row.get::<_, Option<String>>(12)?,
+                "fournisseur_nom": row.get::<_, Option<String>>(13)?,
+                "suivi_lot": suivi_lot_int.unwrap_or(0) != 0,
+                "prix_grossiste": row.get::<_, Option<f64>>(15)?,
+                "est_kit": est_kit_int.unwrap_or(0) != 0,
+                "a_variantes": a_variantes_int != 0,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn add_article(db: State<DbState>, auth: State<AuthState>, token: String, code_barre: Option<String>, designation: String, description: Option<String>, image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock: f64, stock_alerte: Option<f64>, categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>, prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<i64, String> {
+pub fn add_article(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    code_barre: Option<String>,
+    designation: String,
+    description: Option<String>,
+    image_url: Option<String>,
+    prix_achat: f64,
+    prix_vente: f64,
+    tva: f64,
+    stock: f64,
+    stock_alerte: Option<f64>,
+    categorie_id: Option<i64>,
+    fournisseur_id: Option<i64>,
+    suivi_lot: Option<bool>,
+    prix_grossiste: Option<f64>,
+    est_kit: Option<bool>,
+) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "creer"))?;
     let effective_code_barre = match &code_barre {
@@ -85,7 +112,8 @@ pub fn add_article(db: State<DbState>, auth: State<AuthState>, token: String, co
         conn.execute(
             "UPDATE articles SET code_barre = ?1 WHERE id = ?2",
             params![auto_barcode, article_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
     if stock != 0.0 {
         let magasin_id = default_magasin_id(&conn)?;
@@ -95,47 +123,101 @@ pub fn add_article(db: State<DbState>, auth: State<AuthState>, token: String, co
 }
 
 #[tauri::command]
-pub fn update_article(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, code_barre: Option<String>, designation: String, description: Option<String>, image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock_alerte: Option<f64>, categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>, prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<(), String> {
+pub fn update_article(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    id: i64,
+    code_barre: Option<String>,
+    designation: String,
+    description: Option<String>,
+    image_url: Option<String>,
+    prix_achat: f64,
+    prix_vente: f64,
+    tva: f64,
+    stock_alerte: Option<f64>,
+    categorie_id: Option<i64>,
+    fournisseur_id: Option<i64>,
+    actif: bool,
+    suivi_lot: Option<bool>,
+    prix_grossiste: Option<f64>,
+    est_kit: Option<bool>,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
-    let old: Option<(f64, f64, String)> = conn.query_row(
-        "SELECT prix_vente, prix_achat, designation FROM articles WHERE id = ?1", params![id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-    ).ok();
+    let old: Option<(f64, f64, String)> = conn
+        .query_row(
+            "SELECT prix_vente, prix_achat, designation FROM articles WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .ok();
     conn.execute(
         "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12, prix_grossiste=?13, est_kit=?14 WHERE id=?15",
         params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32, id],
     ).map_err(|e| e.to_string())?;
     if let Some((old_pv, old_pa, old_name)) = old {
         let mut changes = Vec::new();
-        if (old_pv - prix_vente).abs() > 0.001 { changes.push(format!("prix vente: {:.2} → {:.2}", old_pv, prix_vente)); }
-        if (old_pa - prix_achat).abs() > 0.001 { changes.push(format!("prix achat: {:.2} → {:.2}", old_pa, prix_achat)); }
-        if old_name != designation { changes.push(format!("nom: {} → {}", old_name, designation)); }
+        if (old_pv - prix_vente).abs() > 0.001 {
+            changes.push(format!("prix vente: {:.2} → {:.2}", old_pv, prix_vente));
+        }
+        if (old_pa - prix_achat).abs() > 0.001 {
+            changes.push(format!("prix achat: {:.2} → {:.2}", old_pa, prix_achat));
+        }
+        if old_name != designation {
+            changes.push(format!("nom: {} → {}", old_name, designation));
+        }
         if !changes.is_empty() {
-            log_audit(&conn, Some(me.user_id), "modifier_article",
+            log_audit(
+                &conn,
+                Some(me.user_id),
+                "modifier_article",
                 &format!("{} (ID {}) — {}", designation, id, changes.join(", ")),
-                Some("article"), Some(id));
+                Some("article"),
+                Some(id),
+            );
         }
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn delete_article(db: State<DbState>, auth: State<AuthState>, token: String, id: i64) -> Result<(), String> {
+pub fn delete_article(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    id: i64,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
-    let designation: String = conn.query_row(
-        "SELECT designation FROM articles WHERE id = ?1", params![id], |r| r.get(0)
-    ).unwrap_or_else(|_| format!("ID {}", id));
-    conn.execute("DELETE FROM articles WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
-    log_audit(&conn, Some(me.user_id), "supprimer_article",
+    let designation: String = conn
+        .query_row(
+            "SELECT designation FROM articles WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| format!("ID {}", id));
+    conn.execute("DELETE FROM articles WHERE id=?1", params![id])
+        .map_err(|e| e.to_string())?;
+    log_audit(
+        &conn,
+        Some(me.user_id),
+        "supprimer_article",
         &format!("Suppression article: {} (ID {})", designation, id),
-        Some("article"), Some(id));
+        Some("article"),
+        Some(id),
+    );
     Ok(())
 }
 
 #[tauri::command]
-pub fn update_article_stock(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64, quantite: f64) -> Result<(), String> {
+pub fn update_article_stock(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    article_id: i64,
+    quantite: f64,
+) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -151,7 +233,12 @@ pub fn update_article_stock(db: State<DbState>, auth: State<AuthState>, token: S
 }
 
 #[tauri::command]
-pub fn import_articles_csv(db: State<DbState>, auth: State<AuthState>, token: String, csv_content: String) -> Result<String, String> {
+pub fn import_articles_csv(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    csv_content: String,
+) -> Result<String, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "creer"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -160,25 +247,77 @@ pub fn import_articles_csv(db: State<DbState>, auth: State<AuthState>, token: St
     let mut errors: Vec<String> = Vec::new();
 
     for (i, line) in csv_content.lines().enumerate() {
-        if i == 0 { continue; }
-        if line.trim().is_empty() { continue; }
+        if i == 0 {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
         let cols: Vec<&str> = line.split(';').collect();
         if cols.len() < 5 {
-            errors.push(format!("Ligne {}: format invalide (minimum 5 colonnes attendues)", i+1));
+            errors.push(format!(
+                "Ligne {}: format invalide (minimum 5 colonnes attendues)",
+                i + 1
+            ));
             continue;
         }
         let designation = cols[0].trim().trim_matches('"');
-        let code_barre = if cols[1].trim().is_empty() || cols[1].trim() == "\"\"" { None } else { Some(cols[1].trim().trim_matches('"').to_string()) };
-        let prix_achat: f64 = cols[2].trim().trim_matches('"').replace(',', ".").parse().unwrap_or(0.0);
-        let prix_vente: f64 = cols[3].trim().trim_matches('"').replace(',', ".").parse().unwrap_or(0.0);
-        let tva: f64 = if cols.len() > 4 { cols[4].trim().trim_matches('"').replace(',', ".").parse().unwrap_or(0.0) } else { 0.0 };
-        let stock: f64 = if cols.len() > 5 { cols[5].trim().trim_matches('"').replace(',', ".").parse().unwrap_or(0.0) } else { 0.0 };
-        let stock_alerte: Option<f64> = if cols.len() > 6 && !cols[6].trim().is_empty() && cols[6].trim() != "\"\"" {
-            Some(cols[6].trim().trim_matches('"').replace(',', ".").parse().unwrap_or(0.0))
-        } else { None };
-        let image_url: Option<String> = if cols.len() > 7 && !cols[7].trim().is_empty() && cols[7].trim() != "\"\"" {
-            Some(cols[7].trim().trim_matches('"').to_string())
-        } else { None };
+        let code_barre = if cols[1].trim().is_empty() || cols[1].trim() == "\"\"" {
+            None
+        } else {
+            Some(cols[1].trim().trim_matches('"').to_string())
+        };
+        let prix_achat: f64 = cols[2]
+            .trim()
+            .trim_matches('"')
+            .replace(',', ".")
+            .parse()
+            .unwrap_or(0.0);
+        let prix_vente: f64 = cols[3]
+            .trim()
+            .trim_matches('"')
+            .replace(',', ".")
+            .parse()
+            .unwrap_or(0.0);
+        let tva: f64 = if cols.len() > 4 {
+            cols[4]
+                .trim()
+                .trim_matches('"')
+                .replace(',', ".")
+                .parse()
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let stock: f64 = if cols.len() > 5 {
+            cols[5]
+                .trim()
+                .trim_matches('"')
+                .replace(',', ".")
+                .parse()
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let stock_alerte: Option<f64> =
+            if cols.len() > 6 && !cols[6].trim().is_empty() && cols[6].trim() != "\"\"" {
+                Some(
+                    cols[6]
+                        .trim()
+                        .trim_matches('"')
+                        .replace(',', ".")
+                        .parse()
+                        .unwrap_or(0.0),
+                )
+            } else {
+                None
+            };
+        let image_url: Option<String> =
+            if cols.len() > 7 && !cols[7].trim().is_empty() && cols[7].trim() != "\"\"" {
+                Some(cols[7].trim().trim_matches('"').to_string())
+            } else {
+                None
+            };
 
         match tx.execute(
             "INSERT INTO articles (code_barre, designation, prix_achat, prix_vente, tva, stock, stock_alerte, image_url)
@@ -198,15 +337,28 @@ pub fn import_articles_csv(db: State<DbState>, auth: State<AuthState>, token: St
         }
     }
 
-    log_audit(&tx, Some(me.user_id), "importer_csv",
-        &format!("Import CSV: {} articles importés, {} erreurs", imported, errors.len()),
-        None, None);
+    log_audit(
+        &tx,
+        Some(me.user_id),
+        "importer_csv",
+        &format!(
+            "Import CSV: {} articles importés, {} erreurs",
+            imported,
+            errors.len()
+        ),
+        None,
+        None,
+    );
 
     tx.commit().map_err(|e| e.to_string())?;
 
     let mut report = format!("Import terminé. {} articles importés.", imported);
     if !errors.is_empty() {
-        report.push_str(&format!("\n{} erreur(s):\n{}", errors.len(), errors.join("\n")));
+        report.push_str(&format!(
+            "\n{} erreur(s):\n{}",
+            errors.len(),
+            errors.join("\n")
+        ));
     }
     Ok(report)
 }

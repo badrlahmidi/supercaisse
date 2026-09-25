@@ -1,8 +1,8 @@
-use rusqlite::{Connection, OptionalExtension, Result, params};
+use argon2::password_hash::{rand_core::OsRng, SaltString};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use argon2::password_hash::{SaltString, rand_core::OsRng};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Category {
@@ -77,7 +77,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nom TEXT NOT NULL UNIQUE,
@@ -340,9 +341,11 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             FOREIGN KEY (inventaire_id) REFERENCES inventaires(id),
             FOREIGN KEY (article_id) REFERENCES articles(id)
         );
-    ")?;
+    ",
+    )?;
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS permissions (
             role TEXT NOT NULL,
             module TEXT NOT NULL,
@@ -350,13 +353,26 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             allowed INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (role, module, action)
         );
-    ")?;
+    ",
+    )?;
 
     {
         let modules = vec![
-            "articles", "categories", "clients", "fournisseurs", "ventes",
-            "achats", "stock", "inventaire", "journal", "cheques",
-            "rapports", "magasins", "audit", "settings", "reappro",
+            "articles",
+            "categories",
+            "clients",
+            "fournisseurs",
+            "ventes",
+            "achats",
+            "stock",
+            "inventaire",
+            "journal",
+            "cheques",
+            "rapports",
+            "magasins",
+            "audit",
+            "settings",
+            "reappro",
         ];
         let actions = vec!["voir", "creer", "modifier", "exporter"];
 
@@ -371,7 +387,11 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 
         let manager_denied = ["magasins", "audit", "settings"];
         for module in &modules {
-            let allowed = if manager_denied.contains(module) { 0 } else { 1 };
+            let allowed = if manager_denied.contains(module) {
+                0
+            } else {
+                1
+            };
             for action in &actions {
                 conn.execute(
                     "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('manager', ?1, ?2, ?3)",
@@ -380,12 +400,15 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             }
         }
 
-        let caissier_allowed: Vec<(&str, &str)> = vec![
-            ("ventes", "voir"), ("ventes", "creer"), ("clients", "voir"),
-        ];
+        let caissier_allowed: Vec<(&str, &str)> =
+            vec![("ventes", "voir"), ("ventes", "creer"), ("clients", "voir")];
         for module in &modules {
             for action in &actions {
-                let allowed = if caissier_allowed.contains(&(module, action)) { 1 } else { 0 };
+                let allowed = if caissier_allowed.contains(&(module, action)) {
+                    1
+                } else {
+                    0
+                };
                 conn.execute(
                     "INSERT OR IGNORE INTO permissions (role, module, action, allowed) VALUES ('caissier', ?1, ?2, ?3)",
                     params![module, action, allowed],
@@ -395,37 +418,91 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     }
 
     // Ajout des colonnes pour la migration des bases existantes
-    let _ = conn.execute("ALTER TABLE clients ADD COLUMN points_fidelite REAL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN points_utilises REAL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN points_gagnes REAL DEFAULT 0", []);
+    let _ = conn.execute(
+        "ALTER TABLE clients ADD COLUMN points_fidelite REAL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE ventes ADD COLUMN points_utilises REAL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE ventes ADD COLUMN points_gagnes REAL DEFAULT 0",
+        [],
+    );
 
     // Configuration par défaut de la fidélité si elle n'existe pas
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_actif', 'true')", [])?;
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_dh_pour_1_point', '100')", [])?; // Dépenser 100 DH donne 1 point
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_valeur_1_point', '1')", [])?;
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('idle_timeout', '300')", [])?;
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_actif', 'true')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_dh_pour_1_point', '100')",
+        [],
+    )?; // Dépenser 100 DH donne 1 point
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('fidelite_valeur_1_point', '1')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('idle_timeout', '300')",
+        [],
+    )?;
 
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN image_url TEXT", []);
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN numero_facture TEXT", []);
-    let _ = conn.execute("ALTER TABLE articles ADD COLUMN divers_taux REAL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN remise_ligne REAL DEFAULT 0", []);
+    let _ = conn.execute(
+        "ALTER TABLE articles ADD COLUMN divers_taux REAL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE vente_articles ADD COLUMN remise_ligne REAL DEFAULT 0",
+        [],
+    );
     let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN note TEXT", []);
     let _ = conn.execute("ALTER TABLE clients ADD COLUMN ice TEXT", []);
-    let _ = conn.execute("ALTER TABLE ventes ADD COLUMN dtype TEXT DEFAULT 'facture'", []);
-    let _ = conn.execute("ALTER TABLE achats ADD COLUMN statut_livraison TEXT DEFAULT 'recu'", []);
-    let _ = conn.execute("ALTER TABLE achats ADD COLUMN statut_paiement TEXT DEFAULT 'non_paye'", []);
+    let _ = conn.execute(
+        "ALTER TABLE ventes ADD COLUMN dtype TEXT DEFAULT 'facture'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE achats ADD COLUMN statut_livraison TEXT DEFAULT 'recu'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE achats ADD COLUMN statut_paiement TEXT DEFAULT 'non_paye'",
+        [],
+    );
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN session_id INTEGER", []);
-    let _ = conn.execute("ALTER TABLE journal_caisse ADD COLUMN session_id INTEGER", []);
-    let _ = conn.execute("ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER", []);
-    let _ = conn.execute("ALTER TABLE articles ADD COLUMN suivi_lot INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE article_variantes ADD COLUMN code_barre TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE journal_caisse ADD COLUMN session_id INTEGER",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE sessions_caisse ADD COLUMN magasin_id INTEGER",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE articles ADD COLUMN suivi_lot INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE article_variantes ADD COLUMN code_barre TEXT",
+        [],
+    );
     let _ = conn.execute("ALTER TABLE utilisateurs ADD COLUMN pin_hash TEXT", []);
-    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN variante_id INTEGER", []);
+    let _ = conn.execute(
+        "ALTER TABLE vente_articles ADD COLUMN variante_id INTEGER",
+        [],
+    );
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_variantes_code_barre_unique ON article_variantes(code_barre) WHERE code_barre IS NOT NULL AND code_barre != ''",
         [],
     ).ok();
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_article_variantes_article ON article_variantes(article_id)", []);
+    let _ = conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_article_variantes_article ON article_variantes(article_id)",
+        [],
+    );
 
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN source_vente_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE clients ADD COLUMN segment TEXT", []);
@@ -433,9 +510,16 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 
     // Multi-prix (public/grossiste) et produits composés (kits)
     let _ = conn.execute("ALTER TABLE articles ADD COLUMN prix_grossiste REAL", []);
-    let _ = conn.execute("ALTER TABLE articles ADD COLUMN est_kit INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE vente_articles ADD COLUMN prix_type TEXT DEFAULT 'public'", []);
-    conn.execute_batch("
+    let _ = conn.execute(
+        "ALTER TABLE articles ADD COLUMN est_kit INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE vente_articles ADD COLUMN prix_type TEXT DEFAULT 'public'",
+        [],
+    );
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS article_composants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             article_id INTEGER NOT NULL,
@@ -462,9 +546,11 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             ecart REAL NOT NULL DEFAULT 0,
             note TEXT
         );
-    ")?;
+    ",
+    )?;
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS article_lots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             article_id INTEGER NOT NULL,
@@ -478,7 +564,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         );
         CREATE INDEX IF NOT EXISTS idx_article_lots_article ON article_lots(article_id);
         CREATE INDEX IF NOT EXISTS idx_article_lots_peremption ON article_lots(date_peremption);
-    ")?;
+    ",
+    )?;
 
     // Migration en-tête légal : l'ancien champ unique 'tax_number' (ICE/IF confondus)
     // devient 'ice' ; 'if_number'/'rc_number'/'patente' sont ajoutés en distinct.
@@ -486,10 +573,23 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         "INSERT OR IGNORE INTO settings (key, value) SELECT 'ice', value FROM settings WHERE key = 'tax_number'",
         [],
     ).ok();
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('if_number', '')", []).ok();
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('rc_number', '')", []).ok();
-    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('patente', '')", []).ok();
-    conn.execute("DELETE FROM settings WHERE key = 'tax_number'", []).ok();
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('if_number', '')",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('rc_number', '')",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('patente', '')",
+        [],
+    )
+    .ok();
+    conn.execute("DELETE FROM settings WHERE key = 'tax_number'", [])
+        .ok();
 
     conn.execute_batch("
         CREATE INDEX IF NOT EXISTS idx_articles_code_barre ON articles(code_barre);
@@ -513,27 +613,42 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     ")?;
 
     // Migration du stock existant vers le "Magasin Principal"
-    let nb_magasins: i64 = conn.query_row("SELECT count(*) FROM magasins", [], |r| r.get(0)).unwrap_or(0);
+    let nb_magasins: i64 = conn
+        .query_row("SELECT count(*) FROM magasins", [], |r| r.get(0))
+        .unwrap_or(0);
     if nb_magasins == 0 {
-        conn.execute("INSERT INTO magasins (nom, adresse) VALUES ('Magasin Principal', 'Siège central')", [])?;
+        conn.execute(
+            "INSERT INTO magasins (nom, adresse) VALUES ('Magasin Principal', 'Siège central')",
+            [],
+        )?;
         // Récupérer l'ID du magasin principal
         let magasin_id = conn.last_insert_rowid();
-        
+
         // Basculer la colonne 'stock' des articles existants vers 'article_stocks'
         conn.execute(
             "INSERT INTO article_stocks (article_id, magasin_id, quantite) 
-             SELECT id, ?1, stock FROM articles WHERE stock > 0", 
-            params![magasin_id]
+             SELECT id, ?1, stock FROM articles WHERE stock > 0",
+            params![magasin_id],
         )?;
-        
+
         // Lier les mouvements de stock historiques au magasin principal
-        let _ = conn.execute("ALTER TABLE mouvements_stock ADD COLUMN magasin_id INTEGER", []);
-        conn.execute("UPDATE mouvements_stock SET magasin_id = ?1 WHERE magasin_id IS NULL", params![magasin_id])?;
+        let _ = conn.execute(
+            "ALTER TABLE mouvements_stock ADD COLUMN magasin_id INTEGER",
+            [],
+        );
+        conn.execute(
+            "UPDATE mouvements_stock SET magasin_id = ?1 WHERE magasin_id IS NULL",
+            params![magasin_id],
+        )?;
     } else {
         // Au cas où le champ magasin_id manque sur les mouvements pour une DB déjà migrée
-        let _ = conn.execute("ALTER TABLE mouvements_stock ADD COLUMN magasin_id INTEGER", []);
+        let _ = conn.execute(
+            "ALTER TABLE mouvements_stock ADD COLUMN magasin_id INTEGER",
+            [],
+        );
     }
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS numerotation (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ntype TEXT NOT NULL UNIQUE,
@@ -545,9 +660,11 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         VALUES ('facture_client', 'FA', 0);
         INSERT OR IGNORE INTO numerotation (ntype, prefixe, dernier_numero)
         VALUES ('avoir', 'AV', 0);
-    ")?;
+    ",
+    )?;
 
-    conn.execute_batch("
+    conn.execute_batch(
+        "
         CREATE TABLE IF NOT EXISTS numerotation_v2 (
             ntype TEXT NOT NULL,
             annee INTEGER NOT NULL,
@@ -557,10 +674,15 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         );
         INSERT OR IGNORE INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero)
         SELECT ntype, annee, prefixe, dernier_numero FROM numerotation;
-    ")?;
-    let vente_paiements_sql: Option<String> = conn.query_row(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vente_paiements'", [], |r| r.get(0),
-    ).optional()?;
+    ",
+    )?;
+    let vente_paiements_sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vente_paiements'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
     if vente_paiements_sql.is_some_and(|sql| !sql.contains("'fidelite'")) {
         conn.execute_batch("ALTER TABLE vente_paiements RENAME TO vente_paiements_old;")?;
     }
@@ -589,16 +711,20 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
           AND NOT EXISTS (SELECT 1 FROM vente_paiements vp WHERE vp.vente_id = v.id);
     ")?;
     let vente_paiements_old: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vente_paiements_old'", [], |r| r.get(0),
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'vente_paiements_old'",
+        [],
+        |r| r.get(0),
     )?;
     if vente_paiements_old > 0 {
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             BEGIN;
             INSERT OR IGNORE INTO vente_paiements (id, vente_id, session_id, mode, montant)
             SELECT id, vente_id, session_id, mode, montant FROM vente_paiements_old;
             DROP TABLE vente_paiements_old;
             COMMIT;
-        ")?;
+        ",
+        )?;
     }
 
     let _ = conn.execute("ALTER TABLE ventes ADD COLUMN montant_ht REAL", []);
@@ -635,10 +761,15 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     }
 
     // Insert default tables if empty
-    let nb_tables: i64 = conn.query_row("SELECT count(*) FROM tables_resto", [], |r| r.get(0)).unwrap_or(0);
+    let nb_tables: i64 = conn
+        .query_row("SELECT count(*) FROM tables_resto", [], |r| r.get(0))
+        .unwrap_or(0);
     if nb_tables == 0 {
         for i in 1..=12 {
-            conn.execute("INSERT INTO tables_resto (nom) VALUES (?1)", params![format!("Table {}", i)])?;
+            conn.execute(
+                "INSERT INTO tables_resto (nom) VALUES (?1)",
+                params![format!("Table {}", i)],
+            )?;
         }
     }
 
@@ -659,12 +790,19 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             ("currency", "MAD"),
         ];
         for (key, value) in defaults {
-            conn.execute("INSERT INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )?;
         }
     }
 
-    let _ = conn.execute("ALTER TABLE utilisateurs ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0", []);
-    let nb_utilisateurs: i64 = conn.query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0))?;
+    let _ = conn.execute(
+        "ALTER TABLE utilisateurs ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let nb_utilisateurs: i64 =
+        conn.query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0))?;
     if nb_utilisateurs == 0 {
         conn.execute(
             "INSERT INTO utilisateurs (login, password_hash, nom, role, must_change_password) VALUES (?1, ?2, ?3, ?4, 1)",
@@ -687,7 +825,13 @@ pub fn hash_password(password: &str) -> String {
 pub fn verify_password(password: &str, hash: &str) -> bool {
     if hash.starts_with("$argon2") {
         let parsed = PasswordHash::new(hash).ok();
-        parsed.map(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok()).unwrap_or(false)
+        parsed
+            .map(|h| {
+                Argon2::default()
+                    .verify_password(password.as_bytes(), &h)
+                    .is_ok()
+            })
+            .unwrap_or(false)
     } else {
         use sha2::Digest;
         let sha_hash = hex::encode(sha2::Sha256::digest(password.as_bytes()));

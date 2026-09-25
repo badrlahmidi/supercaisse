@@ -11,12 +11,24 @@ pub(crate) struct LigneCalculee {
     pub montant_tva: f64,
 }
 
-pub(crate) fn calculer_ligne(quantite: f64, prix_unitaire_ht: f64, tva: f64, remise_ligne: f64, remise_globale: f64) -> LigneCalculee {
+pub(crate) fn calculer_ligne(
+    quantite: f64,
+    prix_unitaire_ht: f64,
+    tva: f64,
+    remise_ligne: f64,
+    remise_globale: f64,
+) -> LigneCalculee {
     let brut_ht = round2(quantite * prix_unitaire_ht * (1.0 - remise_ligne / 100.0));
     let brut_tva = round2(brut_ht * tva / 100.0);
-    let montant_ht = round2(quantite * prix_unitaire_ht * (1.0 - remise_ligne / 100.0) * (1.0 - remise_globale / 100.0));
+    let montant_ht = round2(
+        quantite * prix_unitaire_ht * (1.0 - remise_ligne / 100.0) * (1.0 - remise_globale / 100.0),
+    );
     let montant_tva = round2(montant_ht * tva / 100.0);
-    LigneCalculee { total_ligne: round2(brut_ht + brut_tva), montant_ht, montant_tva }
+    LigneCalculee {
+        total_ligne: round2(brut_ht + brut_tva),
+        montant_ht,
+        montant_tva,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,12 +45,21 @@ pub(crate) fn totaliser(lignes: &[LigneCalculee]) -> TotauxDocument {
     let montant_ht = round2(lignes.iter().map(|l| l.montant_ht).sum());
     let montant_tva = round2(lignes.iter().map(|l| l.montant_tva).sum());
     let net_ttc = round2(montant_ht + montant_tva);
-    TotauxDocument { montant_total, montant_ht, montant_tva, net_ttc, montant_remise: round2(montant_total - net_ttc) }
+    TotauxDocument {
+        montant_total,
+        montant_ht,
+        montant_tva,
+        net_ttc,
+        montant_remise: round2(montant_total - net_ttc),
+    }
 }
 
 pub(crate) fn valider_pourcentage(libelle: &str, valeur: f64) -> Result<f64, String> {
     if !valeur.is_finite() || !(0.0..=100.0).contains(&valeur) {
-        return Err(format!("{} invalide : {} (attendu entre 0 et 100)", libelle, valeur));
+        return Err(format!(
+            "{} invalide : {} (attendu entre 0 et 100)",
+            libelle, valeur
+        ));
     }
     Ok(valeur)
 }
@@ -50,13 +71,27 @@ mod tests {
     #[test]
     fn test_ligne_simple() {
         let l = calculer_ligne(2.0, 100.0, 20.0, 0.0, 0.0);
-        assert_eq!(l, LigneCalculee { total_ligne: 240.0, montant_ht: 200.0, montant_tva: 40.0 });
+        assert_eq!(
+            l,
+            LigneCalculee {
+                total_ligne: 240.0,
+                montant_ht: 200.0,
+                montant_tva: 40.0
+            }
+        );
     }
 
     #[test]
     fn test_remise_ligne_appliquee_avant_tva() {
         let l = calculer_ligne(1.0, 100.0, 20.0, 10.0, 0.0);
-        assert_eq!(l, LigneCalculee { total_ligne: 108.0, montant_ht: 90.0, montant_tva: 18.0 });
+        assert_eq!(
+            l,
+            LigneCalculee {
+                total_ligne: 108.0,
+                montant_ht: 90.0,
+                montant_tva: 18.0
+            }
+        );
     }
 
     #[test]
@@ -66,7 +101,16 @@ mod tests {
         assert_eq!(l.montant_ht, 90.0);
         assert_eq!(l.montant_tva, 18.0);
         let t = totaliser(&[l]);
-        assert_eq!(t, TotauxDocument { montant_total: 120.0, montant_ht: 90.0, montant_tva: 18.0, net_ttc: 108.0, montant_remise: 12.0 });
+        assert_eq!(
+            t,
+            TotauxDocument {
+                montant_total: 120.0,
+                montant_ht: 90.0,
+                montant_tva: 18.0,
+                net_ttc: 108.0,
+                montant_remise: 12.0
+            }
+        );
     }
 
     #[test]
@@ -79,8 +123,18 @@ mod tests {
         let t = totaliser(&lignes);
         assert_eq!(t.net_ttc, round2(t.montant_ht + t.montant_tva));
         assert_eq!(t.montant_remise, round2(t.montant_total - t.net_ttc));
-        assert_eq!(t.montant_tva, round2(lignes.iter().map(|l| l.montant_tva).sum()));
-        assert_eq!(lignes[0], LigneCalculee { total_ligne: 11.99, montant_ht: 9.49, montant_tva: 1.9 });
+        assert_eq!(
+            t.montant_tva,
+            round2(lignes.iter().map(|l| l.montant_tva).sum())
+        );
+        assert_eq!(
+            lignes[0],
+            LigneCalculee {
+                total_ligne: 11.99,
+                montant_ht: 9.49,
+                montant_tva: 1.9
+            }
+        );
     }
 
     #[test]
@@ -91,11 +145,32 @@ mod tests {
             calculer_ligne(1.0, 9.99, 0.0, 0.0, 5.0),
             calculer_ligne(7.0, 1.15, 10.0, 3.0, 5.0),
         ];
-        assert_eq!(lignes[1], LigneCalculee { total_ligne: 17.03, montant_ht: 15.13, montant_tva: 1.06 });
-        assert_eq!(lignes[3], LigneCalculee { total_ligne: 8.59, montant_ht: 7.42, montant_tva: 0.74 });
-        assert_eq!(totaliser(&lignes), TotauxDocument {
-            montant_total: 47.6, montant_ht: 41.53, montant_tva: 3.7, net_ttc: 45.23, montant_remise: 2.37,
-        });
+        assert_eq!(
+            lignes[1],
+            LigneCalculee {
+                total_ligne: 17.03,
+                montant_ht: 15.13,
+                montant_tva: 1.06
+            }
+        );
+        assert_eq!(
+            lignes[3],
+            LigneCalculee {
+                total_ligne: 8.59,
+                montant_ht: 7.42,
+                montant_tva: 0.74
+            }
+        );
+        assert_eq!(
+            totaliser(&lignes),
+            TotauxDocument {
+                montant_total: 47.6,
+                montant_ht: 41.53,
+                montant_tva: 3.7,
+                net_ttc: 45.23,
+                montant_remise: 2.37,
+            }
+        );
     }
 
     #[test]
