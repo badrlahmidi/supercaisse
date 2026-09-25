@@ -1056,7 +1056,7 @@ export default function Settings() {
             Toutes les données actuelles seront remplacées par le contenu du fichier. Une copie de la base actuelle est faite
             automatiquement avant la restauration, et tous les utilisateurs devront se reconnecter.
           </p>
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <Label>Sauvegardes disponibles</Label>
             <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
               {sauvegardesLoading ? (
@@ -1068,6 +1068,7 @@ export default function Settings() {
                   <button
                     key={s.chemin}
                     type="button"
+                    title={s.chemin}
                     onClick={() => setImportPath(s.chemin)}
                     className={`w-full px-3 py-2 text-left text-sm hover:bg-muted ${importPath === s.chemin ? "bg-muted font-medium" : ""}`}
                   >

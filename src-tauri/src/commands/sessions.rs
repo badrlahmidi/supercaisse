@@ -137,11 +137,14 @@ pub fn close_session(
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     verifier_session_propre(&conn, &me, session_id, "modifier")?;
-    close_session_impl(
-        &mut conn,
-        session_id,
-        total_especes_declare,
-        Some(me.user_id),
+    super::tracer(
+        &format!("Clôture de la session de caisse {}", session_id),
+        close_session_impl(
+            &mut conn,
+            session_id,
+            total_especes_declare,
+            Some(me.user_id),
+        ),
     )
 }
 

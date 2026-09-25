@@ -10,19 +10,34 @@ use paths::{legacy_database_candidates, prepare_database, AppDirs};
 use session::AuthState;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+
+fn journal() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let mut cibles = vec![Target::new(TargetKind::LogDir {
+        file_name: Some("supercaisse".into()),
+    })];
+    if cfg!(debug_assertions) {
+        cibles.push(Target::new(TargetKind::Stdout));
+    }
+    tauri_plugin_log::Builder::new()
+        .targets(cibles)
+        .level(log::LevelFilter::Info)
+        .level_for("tao", log::LevelFilter::Warn)
+        .level_for("wry", log::LevelFilter::Warn)
+        .timezone_strategy(TimezoneStrategy::UseLocal)
+        .rotation_strategy(RotationStrategy::KeepSome(10))
+        .max_file_size(5_000_000)
+        .build()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    commands::installer_hook_panique();
+    let resultat = tauri::Builder::default()
+        .plugin(journal())
         .manage(AuthState::default())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            log::info!("Démarrage de SuperCaisse {}", app.package_info().version);
             let data = app.path().app_data_dir()?;
             let documents = app
                 .path()
@@ -53,6 +68,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::login,
             commands::logout,
+            commands::journaliser_frontend,
             commands::get_categories,
             commands::add_category,
             commands::update_category,
@@ -152,6 +168,11 @@ pub fn run() {
             commands::get_tresorerie,
             commands::compare_fournisseur_prices,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+    if let Err(e) = resultat {
+        log::error!("Arrêt de l'application sur erreur : {}", e);
+        log::logger().flush();
+        eprintln!("SuperCaisse n'a pas pu démarrer : {}", e);
+        std::process::exit(1);
+    }
 }

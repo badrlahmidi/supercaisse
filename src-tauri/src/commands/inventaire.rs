@@ -209,7 +209,10 @@ pub fn valider_inventaire(
         &token,
         Acces::Module("inventaire", "modifier"),
     )?;
-    valider_inventaire_impl(&mut conn, inventaire_id, me.user_id)
+    super::tracer(
+        &format!("Validation de l'inventaire {}", inventaire_id),
+        valider_inventaire_impl(&mut conn, inventaire_id, me.user_id),
+    )
 }
 
 pub(crate) fn valider_inventaire_impl(

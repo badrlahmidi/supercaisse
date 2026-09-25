@@ -1,6 +1,7 @@
 import { Component, type ReactNode, type ErrorInfo } from "react"
 import { AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/ui/Button"
+import { formaterErreur, journaliser } from "@/lib/journal"
 
 interface Props {
   children: ReactNode
@@ -22,7 +23,7 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("ErrorBoundary caught:", error, errorInfo)
+    journaliser("error", `Erreur d'affichage : ${formaterErreur(error)}${errorInfo.componentStack ?? ""}`)
   }
 
   handleRetry = () => {

@@ -6,8 +6,10 @@ import { Toaster } from '@/ui/Toast'
 import { router } from '@/routes/router'
 import { initTheme } from '@/store/ui'
 import { initLocale } from '@/store/i18n'
+import { installerJournalGlobal } from '@/lib/journal'
 import './index.css'
 
+installerJournalGlobal()
 initTheme()
 initLocale()
 

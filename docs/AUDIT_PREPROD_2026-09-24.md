@@ -778,6 +778,16 @@ Côté UI, utiliser `@tauri-apps/plugin-dialog` pour choisir le fichier, avec un
 
 ### [MAJEUR] P-2 — Aucun log en production ; pas de crash handler
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. `tauri_plugin_log` est désormais actif dans toutes les versions, y compris en release. Il écrit dans le dossier de logs de l'OS (`%LOCALAPPDATA%\com.supercaisse.pos\logs\supercaisse.log` sous Windows), à l'heure locale, en rotation (5 Mo par fichier, 10 fichiers conservés), et affiche aussi sur la console en debug. `tao` et `wry` sont limités au niveau `warn`.
+>
+> Un hook de panique écrit le message et la backtrace dans le journal. Les deux `expect()` ont été retirés : `hash_password` renvoie une erreur au lieu de planter, et une erreur de démarrage est journalisée avant `exit(1)`.
+>
+> Les commandes critiques journalisent leur issue (succès ou échec, avec la cause) via `tracer()` : vente, annulation, conversion de document, clôture de session, validation d'inventaire et de transfert, sauvegarde, restauration.
+>
+> Côté frontend, les erreurs JS non gérées, les promesses rejetées et les erreurs capturées par l'`ErrorBoundary` sont transmises au même fichier par la commande `journaliser_frontend`. Cette commande ne demande pas d'être connecté, car une erreur peut survenir avant la connexion. Chaque message est limité à 4 000 caractères et nettoyé des caractères de contrôle, et le flux est plafonné à 30 messages par minute.
+>
+> Couvert par des tests Rust et Vitest, et vérifié dans l'application (xvfb) : le démarrage et une restauration refusée apparaissent dans `supercaisse.log`.
+
 **Fichier** : `src-tauri/src/lib.rs:15-21`
 **Risque** : `tauri_plugin_log` n'est activé qu'en `debug_assertions`, donc aucune trace en release. Les `expect()` de `run()` et `hash_password` font planter sans laisser de trace. Impossible de diagnostiquer un incident chez un client.
 **Fix** :

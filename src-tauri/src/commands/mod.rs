@@ -27,6 +27,7 @@ mod categories;
 mod cheques;
 mod clients;
 mod composants;
+mod diagnostic;
 mod fournisseurs;
 mod inventaire;
 mod journal;
@@ -120,6 +121,14 @@ pub(crate) fn log_audit(
     );
 }
 
+pub(crate) fn tracer<T>(operation: &str, resultat: Result<T, String>) -> Result<T, String> {
+    match &resultat {
+        Ok(_) => log::info!("{} : réussi", operation),
+        Err(e) => log::warn!("{} : échec ({})", operation, e),
+    }
+    resultat
+}
+
 pub use achats::*;
 pub use articles::*;
 pub use audit::*;
@@ -130,6 +139,7 @@ pub use categories::*;
 pub use cheques::*;
 pub use clients::*;
 pub use composants::*;
+pub use diagnostic::*;
 pub use fournisseurs::*;
 pub use inventaire::*;
 pub use journal::*;

@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_toutes_les_commandes_verifient_la_session() {
-        let publiques = ["login", "login_pin", "logout"];
+        let publiques = ["login", "login_pin", "logout", "journaliser_frontend"];
         let dossier = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
         let mut commandes = 0;
         let mut fautives = Vec::new();

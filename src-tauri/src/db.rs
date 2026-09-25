@@ -876,20 +876,28 @@ fn migration_001_base(conn: &Connection) -> Result<()> {
     if nb_utilisateurs == 0 {
         conn.execute(
             "INSERT INTO utilisateurs (login, password_hash, nom, role, must_change_password) VALUES (?1, ?2, ?3, ?4, 1)",
-            params!["admin", hash_password("admin"), "Administrateur", "admin"],
+            params![
+                "admin",
+                hash_password("admin").map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?,
+                "Administrateur",
+                "admin"
+            ],
         )?;
     }
 
     Ok(())
 }
 
-pub fn hash_password(password: &str) -> String {
+pub fn hash_password(password: &str) -> std::result::Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     argon2
         .hash_password(password.as_bytes(), &salt)
-        .expect("Erreur hachage argon2")
-        .to_string()
+        .map(|h| h.to_string())
+        .map_err(|e| {
+            log::error!("Hachage argon2 impossible : {}", e);
+            format!("Hachage du mot de passe impossible : {}", e)
+        })
 }
 
 pub fn verify_password(password: &str, hash: &str) -> bool {

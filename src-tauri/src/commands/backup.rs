@@ -198,7 +198,8 @@ pub fn backup_database(
 ) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("settings", "exporter"))?;
-    Ok(sauvegarder(&conn, &dirs, "")?.to_string_lossy().to_string())
+    let chemin = super::tracer("Sauvegarde manuelle", sauvegarder(&conn, &dirs, ""))?;
+    Ok(chemin.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -263,7 +264,10 @@ pub fn import_database(
 ) -> Result<String, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
-    let securite = restaurer(&mut conn, &dirs, Path::new(path.trim()), Some(me.user_id))?;
+    let securite = super::tracer(
+        &format!("Restauration de la base depuis {}", path.trim()),
+        restaurer(&mut conn, &dirs, Path::new(path.trim()), Some(me.user_id)),
+    )?;
     auth.fermer_tout()?;
     Ok(securite.to_string_lossy().to_string())
 }

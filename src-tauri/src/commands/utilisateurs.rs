@@ -45,7 +45,7 @@ pub fn add_utilisateur(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     valider_nouveau_mot_de_passe(&login, &password)?;
-    let hash = hash_password(&password);
+    let hash = hash_password(&password)?;
     conn.execute(
         "INSERT INTO utilisateurs (login, password_hash, nom, role) VALUES (?1, ?2, ?3, ?4)",
         params![login, hash, nom, role],
@@ -127,7 +127,7 @@ pub(crate) fn update_utilisateur_impl(
     match password {
         Some(pwd) if !pwd.is_empty() => {
             valider_nouveau_mot_de_passe(login, pwd)?;
-            let hash = hash_password(pwd);
+            let hash = hash_password(pwd)?;
             conn.execute(
                 "UPDATE utilisateurs SET login=?1, nom=?2, role=?3, password_hash=?4 WHERE id=?5",
                 params![login, nom, role, hash, id],

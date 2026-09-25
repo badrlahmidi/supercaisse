@@ -262,7 +262,10 @@ pub fn validate_transfert(
 ) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
-    validate_transfert_impl(&mut conn, transfert_id, Some(me.user_id))
+    super::tracer(
+        &format!("Validation du transfert {}", transfert_id),
+        validate_transfert_impl(&mut conn, transfert_id, Some(me.user_id)),
+    )
 }
 
 pub(crate) fn validate_transfert_impl(

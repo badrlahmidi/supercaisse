@@ -65,7 +65,7 @@ pub(crate) fn login_impl(
     if !hash.starts_with("$argon2") {
         conn.execute(
             "UPDATE utilisateurs SET password_hash = ?1 WHERE id = ?2",
-            params![hash_password(password), id],
+            params![hash_password(password)?, id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -165,7 +165,7 @@ pub(crate) fn change_password_impl(
     valider_nouveau_mot_de_passe(&login, nouveau)?;
     conn.execute(
         "UPDATE utilisateurs SET password_hash = ?1, must_change_password = 0 WHERE id = ?2",
-        params![hash_password(nouveau), user_id],
+        params![hash_password(nouveau)?, user_id],
     )
     .map_err(|e| e.to_string())?;
     log_audit(
@@ -252,7 +252,7 @@ pub fn set_user_pin(
     let hash = if pin.is_empty() {
         String::new()
     } else {
-        hash_password(&pin)
+        hash_password(&pin)?
     };
     conn.execute(
         "UPDATE utilisateurs SET pin_hash = ?1 WHERE id = ?2",
@@ -324,7 +324,7 @@ mod tests {
         {
             let conn = crate::db::init_db(&path).unwrap();
             conn.execute("INSERT INTO utilisateurs (login, password_hash, nom, role) VALUES ('gerant', ?1, 'Gérant', 'admin')",
-                params![hash_password("motdepasse-solide")]).unwrap();
+                params![hash_password("motdepasse-solide").unwrap()]).unwrap();
             delete_utilisateur_impl(&conn, 1, None).unwrap();
         }
         let conn = crate::db::init_db(&path).unwrap();

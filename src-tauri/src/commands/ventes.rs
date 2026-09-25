@@ -153,7 +153,7 @@ pub fn create_vente(
 ) -> Result<serde_json::Value, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "creer"))?;
-    create_vente_impl(
+    let resultat = create_vente_impl(
         &mut conn,
         client_id,
         Some(me.user_id),
@@ -164,7 +164,8 @@ pub fn create_vente(
         dtype,
         points_utilises,
         magasin_id,
-    )
+    );
+    super::tracer(&format!("Vente par l'utilisateur {}", me.user_id), resultat)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -509,7 +510,10 @@ pub fn annuler_vente(
 ) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
-    annuler_vente_impl(&mut conn, vente_id, Some(me.user_id), motif.as_deref())
+    super::tracer(
+        &format!("Annulation de la vente {}", vente_id),
+        annuler_vente_impl(&mut conn, vente_id, Some(me.user_id), motif.as_deref()),
+    )
 }
 
 pub(crate) fn annuler_vente_impl(
@@ -797,7 +801,10 @@ pub fn convert_document(
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
-    convert_document_impl(&mut conn, vente_id, target_type)
+    super::tracer(
+        &format!("Conversion du document {}", vente_id),
+        convert_document_impl(&mut conn, vente_id, target_type),
+    )
 }
 
 pub(crate) fn convert_document_impl(
