@@ -234,7 +234,7 @@ mod tests {
                     continue;
                 }
                 let signature = bloc.split('{').next().unwrap();
-                let corps = bloc.splitn(2, '{').nth(1).unwrap_or("");
+                let corps = bloc.split_once('{').map(|x| x.1).unwrap_or("");
                 let debut: String = corps.lines().take(4).collect::<Vec<_>>().join("\n");
                 let controle = debut.contains("autoriser(&auth, &conn, &token,") || debut.contains("auth.session(&token)?");
                 if !signature.contains("token: String") || !controle {

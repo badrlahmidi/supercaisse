@@ -17,7 +17,7 @@ pub fn backup_database(db: State<DbState>, dirs: State<AppDirs>, auth: State<Aut
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let backup_path = backup_dir.join(format!("supercaisse_{}.db", timestamp));
     let mut dst = Connection::open(&backup_path).map_err(|e| e.to_string())?;
-    let backup = Backup::new(&*conn, &mut dst).map_err(|e| e.to_string())?;
+    let backup = Backup::new(&conn, &mut dst).map_err(|e| e.to_string())?;
     backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
     Ok(backup_path.to_string_lossy().to_string())
 }
@@ -32,7 +32,7 @@ pub fn export_database(db: State<DbState>, dirs: State<AppDirs>, auth: State<Aut
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let export_path = export_dir.join(format!("supercaisse_export_{}.db", timestamp));
     let mut dst = Connection::open(&export_path).map_err(|e| e.to_string())?;
-    let backup = Backup::new(&*conn, &mut dst).map_err(|e| e.to_string())?;
+    let backup = Backup::new(&conn, &mut dst).map_err(|e| e.to_string())?;
     backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
     Ok(export_path.to_string_lossy().to_string())
 }
@@ -43,10 +43,10 @@ pub fn import_database(db: State<DbState>, auth: State<AuthState>, token: String
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     {
         let src = Connection::open(&path).map_err(|e| e.to_string())?;
-        let backup = Backup::new(&src, &mut *conn).map_err(|e| e.to_string())?;
+        let backup = Backup::new(&src, &mut conn).map_err(|e| e.to_string())?;
         backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
     }
-    log_audit(&*conn, Some(me.user_id), "importer_base",
+    log_audit(&conn, Some(me.user_id), "importer_base",
         &format!("Import base de données depuis: {}", path),
         None, None);
     Ok(())

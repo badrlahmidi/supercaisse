@@ -1,3 +1,4 @@
+import type { Settings } from "@/types"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
@@ -10,15 +11,7 @@ export interface User {
   actif: boolean
 }
 
-export interface AppSettings {
-  id: number
-  nom_magasin: string
-  adresse?: string
-  telephone?: string
-  email?: string
-  tva_defaut: number
-  devise: string
-}
+export type AppSettings = Settings
 
 export function useUsersList() {
   return useQuery({

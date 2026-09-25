@@ -117,7 +117,7 @@ mod tests {
             let conn = Connection::open(&legacy).unwrap();
             conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('vente-1');").unwrap();
             let dirs = dirs_in(&root);
-            let path = prepare_database(&dirs, &[legacy.clone()]).unwrap();
+            let path = prepare_database(&dirs, std::slice::from_ref(&legacy)).unwrap();
             let migrated = Connection::open(&path).unwrap();
             let v: String = migrated.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
             assert_eq!(v, "vente-1");

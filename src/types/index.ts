@@ -10,6 +10,7 @@ export interface Article {
   id: number
   code_barre: string | null
   designation: string
+  description?: string | null
   image_url?: string | null
   prix_achat: number
   prix_vente: number
@@ -109,6 +110,7 @@ export interface SessionCaisse {
   date_ouverture: string
   fond_initial: number
   statut: string
+  magasin_id?: number | null
 }
 
 export interface TableResto {
@@ -127,16 +129,24 @@ export interface Magasin {
 export interface Sale {
   id: number
   date: string
-  client_nom?: string
-  caissier_nom: string
+  client_id: number | null
+  caissier_id: number | null
   montant_total: number
   montant_remise: number
-  net_paye: number
   mode_paiement: string
   statut: string
-  numero_facture?: string
   dtype: string
-  articles?: SaleLine[]
+  numero_facture: string | null
+  client_nom: string | null
+  caissier_nom: string | null
+  client_telephone?: string | null
+  client_email?: string | null
+  client_ice?: string | null
+  source_vente_id?: number | null
+  source_dtype?: string | null
+  source_numero?: string | null
+  montant_ht?: number | null
+  montant_tva?: number | null
 }
 
 export interface SaleLine {
@@ -148,3 +158,5 @@ export interface SaleLine {
   tva: number
   total_ligne: number
 }
+
+export type Saisie<T> = { [K in keyof T]?: T[K] | null }

@@ -20,6 +20,8 @@ interface CartItem {
   stock_max?: number
 }
 
+type NouvelArticlePanier = Omit<CartItem, "remise_ligne" | "note"> & Partial<Pick<CartItem, "remise_ligne" | "note">>
+
 function sameLigne(item: CartItem, articleId: number, varianteId?: number | null): boolean {
   return item.article_id === articleId && (item.variante_id ?? null) === (varianteId ?? null)
 }
@@ -42,7 +44,7 @@ interface CartState {
   useLoyaltyPoints: boolean
   activeTableId: number | null
   activeTableNom: string | null
-  addItem: (item: CartItem) => void
+  addItem: (item: NouvelArticlePanier) => void
   updateQuantity: (articleId: number, quantity: number, varianteId?: number | null) => void
   removeItem: (articleId: number, varianteId?: number | null) => void
   clearCart: () => void
@@ -61,8 +63,6 @@ interface CartState {
   resumeCart: (id: string) => void
   deleteHeldCart: (id: string) => void
   setUseLoyaltyPoints: (use: boolean) => void
-  activeTableId: number | null
-  activeTableNom: string | null
   setActiveTable: (id: number | null, nom: string | null) => void
 }
 

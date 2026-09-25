@@ -1,14 +1,9 @@
+import type { SessionCaisse } from "@/types"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
 
-export interface SessionCaisse {
-  id: number
-  caissier_id: number
-  date_ouverture: string
-  fond_initial: number
-  statut: string
-}
+export type { SessionCaisse }
 
 export function useCurrentSession(caissierId?: number) {
   return useQuery({

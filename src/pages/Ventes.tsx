@@ -18,29 +18,9 @@ import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import type { Settings } from "@/types"
 import { compteDansCA } from "@/lib/ventes"
+import type { Sale } from "@/types"
 
-interface Vente {
-  id: number
-  date: string
-  client_id: number | null
-  caissier_id: number | null
-  montant_total: number
-  montant_remise: number
-  mode_paiement: string
-  statut: string
-  dtype: string
-  numero_facture: string | null
-  client_nom: string | null
-  caissier_nom: string | null
-  client_telephone?: string | null
-  client_email?: string | null
-  client_ice?: string | null
-  source_vente_id?: number | null
-  source_dtype?: string | null
-  source_numero?: string | null
-  montant_ht?: number | null
-  montant_tva?: number | null
-}
+type Vente = Sale
 
 interface VenteDetail {
   vente: Vente

@@ -193,7 +193,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   add_paiement: () => { nextId++; return nextId },
 
   get_current_session: ({ caissierId }) =>
-    mockCurrentSession?.caissier_id === caissierId && mockCurrentSession.statut === "ouverte" ? mockCurrentSession : null,
+    mockCurrentSession && mockCurrentSession.caissier_id === caissierId && mockCurrentSession.statut === "ouverte" ? mockCurrentSession : null,
   open_session: ({ caissierId, fondInitial }) => {
     nextId++
     mockCurrentSession = {

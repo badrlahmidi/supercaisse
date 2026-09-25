@@ -1,27 +1,9 @@
+import type { Article, Saisie } from "@/types"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
 
-export interface Product {
-  id: number
-  code_barre: string | null
-  designation: string
-  description?: string
-  prix_achat: number
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  categorie_nom?: string
-  fournisseur_id?: number | null
-  fournisseur_nom?: string
-  actif: boolean
-  suivi_lot?: boolean
-  prix_grossiste?: number | null
-  est_kit?: boolean
-  a_variantes?: boolean
-}
+export type Product = Article
 
 export function useProductsList(search?: string) {
   return useQuery({
@@ -42,7 +24,7 @@ export function usePOSProducts(search?: string, categoryId?: number | "all") {
 export function useCreateProduct() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: Omit<Product, "id" | "stock" | "actif" | "categorie_nom" | "fournisseur_nom">) =>
+    mutationFn: (data: Saisie<Omit<Product, "id" | "actif" | "categorie_nom" | "fournisseur_nom">> & { designation: string }) =>
       invoke<Product>("add_article", data),
     onSuccess: () => {
       toast.success("Article créé")
@@ -55,7 +37,7 @@ export function useCreateProduct() {
 export function useUpdateProduct() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...data }: Partial<Product> & { id: number }) =>
+    mutationFn: ({ id, ...data }: Saisie<Product> & { id: number }) =>
       invoke<Product>("update_article", { id, ...data, actif: true }),
     onSuccess: () => {
       toast.success("Article mis à jour")

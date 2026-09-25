@@ -36,68 +36,6 @@ pub struct Client {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Article {
-    pub id: Option<i64>,
-    pub code_barre: Option<String>,
-    pub designation: String,
-    pub description: Option<String>,
-    pub prix_achat: f64,
-    pub prix_vente: f64,
-    pub tva: f64,
-    pub stock: f64,
-    pub stock_alerte: Option<f64>,
-    pub categorie_id: Option<i64>,
-    pub fournisseur_id: Option<i64>,
-    pub actif: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Vente {
-    pub id: Option<i64>,
-    pub date: Option<String>,
-    pub client_id: Option<i64>,
-    pub caissier_id: Option<i64>,
-    pub montant_total: f64,
-    pub montant_remise: f64,
-    pub mode_paiement: String,
-    pub statut: String,
-    pub dtype: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct VenteArticle {
-    pub id: Option<i64>,
-    pub vente_id: i64,
-    pub article_id: i64,
-    pub quantite: f64,
-    pub prix_unitaire: f64,
-    pub tva: f64,
-    pub total_ligne: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Achat {
-    pub id: Option<i64>,
-    pub date: Option<String>,
-    pub fournisseur_id: Option<i64>,
-    pub reference: Option<String>,
-    pub montant_total: f64,
-    pub statut: String,
-    pub statut_livraison: String,
-    pub statut_paiement: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AchatArticle {
-    pub id: Option<i64>,
-    pub achat_id: i64,
-    pub article_id: i64,
-    pub quantite: f64,
-    pub prix_unitaire: f64,
-    pub total_ligne: f64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Utilisateur {
     pub id: Option<i64>,
     pub login: String,
@@ -105,40 +43,6 @@ pub struct Utilisateur {
     pub role: String,
     #[serde(default)]
     pub must_change_password: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Paiement {
-    pub id: Option<i64>,
-    pub client_id: i64,
-    pub date: Option<String>,
-    pub montant: f64,
-    pub ptype: String,
-    pub reference: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Cheque {
-    pub id: Option<i64>,
-    pub numero: String,
-    pub banque: String,
-    pub tireur: Option<String>,
-    pub montant: f64,
-    pub date_emission: String,
-    pub date_echeance: String,
-    pub statut: String, // en_attente, encaisse, impaye
-    pub ctype: String, // client, fournisseur
-    pub client_id: Option<i64>,
-    pub fournisseur_id: Option<i64>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct UtilisateurForm {
-    pub id: Option<i64>,
-    pub login: String,
-    pub nom: String,
-    pub role: String,
-    pub password: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -465,7 +369,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             }
         }
 
-        let manager_denied = vec!["magasins", "audit", "settings"];
+        let manager_denied = ["magasins", "audit", "settings"];
         for module in &modules {
             let allowed = if manager_denied.contains(module) { 0 } else { 1 };
             for action in &actions {

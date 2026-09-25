@@ -3,14 +3,21 @@ import { cn } from "@/lib/utils"
 
 const TabsContext = React.createContext<{ value: string; onChange: (v: string) => void } | null>(null)
 
-export function Tabs({ children, value, onValueChange, className }: {
+export function Tabs({ children, value, defaultValue, onValueChange, className }: {
   children: React.ReactNode
-  value: string
-  onValueChange: (v: string) => void
+  value?: string
+  defaultValue?: string
+  onValueChange?: (v: string) => void
   className?: string
 }) {
+  const [interne, setInterne] = React.useState(defaultValue ?? "")
+  const courant = value ?? interne
+  const onChange = (v: string) => {
+    if (value === undefined) setInterne(v)
+    onValueChange?.(v)
+  }
   return (
-    <TabsContext.Provider value={{ value, onChange: onValueChange }}>
+    <TabsContext.Provider value={{ value: courant, onChange }}>
       <div className={cn(className)}>
         {children}
       </div>

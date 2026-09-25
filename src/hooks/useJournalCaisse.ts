@@ -4,11 +4,11 @@ import { invoke } from "@/lib/tauri"
 export interface JournalEntry {
   id: number
   date: string
-  type: string
-  libelle: string
+  utilisateur_id: number | null
+  jtype: string
   montant: number
-  mode_paiement?: string
-  vente_id?: number
+  description: string | null
+  user_nom: string | null
 }
 
 export function useJournalCaisse(dateDebut?: string, dateFin?: string) {

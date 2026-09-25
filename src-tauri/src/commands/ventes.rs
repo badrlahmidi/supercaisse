@@ -596,6 +596,7 @@ pub fn convert_document(db: State<DbState>, auth: State<AuthState>, token: Strin
 pub(crate) fn convert_document_impl(conn: &mut Connection, vente_id: i64, target_type: String) -> Result<i64, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
+    #[allow(clippy::type_complexity)]
     let (source_dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture_src, source_magasin_id, montant_ht, montant_tva): (String, Option<i64>, Option<i64>, f64, f64, String, String, Option<String>, Option<i64>, Option<f64>, Option<f64>) = tx.query_row(
         "SELECT dtype, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, numero_facture, magasin_id, montant_ht, montant_tva FROM ventes WHERE id = ?1",
         params![vente_id],

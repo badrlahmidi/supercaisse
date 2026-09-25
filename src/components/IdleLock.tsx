@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { useAuth } from "@/context/AuthContext"
+import { useAuth, type SessionUser } from "@/context/AuthContext"
 import { useAppSettings } from "@/hooks/useSettings"
 import { invoke } from "@/lib/tauri"
 import { Input } from "@/ui/Input"
@@ -59,7 +59,7 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
     setError("")
     if (next.length >= 4) {
       try {
-        const result = await invoke<{ id: number; login: string; nom: string; role: string } | null>("login_pin", { pin: next })
+        const result = await invoke<SessionUser | null>("login_pin", { pin: next })
         if (result) {
           loginAs(result)
           setLocked(false)
