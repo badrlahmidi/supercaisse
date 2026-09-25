@@ -1,4 +1,5 @@
 use crate::db::*;
+use crate::paths::{ensure_dir, AppDirs};
 use base64::engine::general_purpose;
 use base64::Engine;
 use tauri::State;
@@ -106,7 +107,7 @@ pub fn print_receipt(data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn save_document_pdf(base64_data: String, filename: String) -> Result<String, String> {
+pub fn save_document_pdf(dirs: State<AppDirs>, base64_data: String, filename: String) -> Result<String, String> {
     let bytes = general_purpose::STANDARD.decode(&base64_data)
         .map_err(|e| format!("Erreur de décodage base64: {}", e))?;
 
@@ -117,10 +118,8 @@ pub fn save_document_pdf(base64_data: String, filename: String) -> Result<String
     let safe_name = if safe_name.is_empty() { "document.pdf".to_string() } else { safe_name };
     let safe_name = if safe_name.to_lowercase().ends_with(".pdf") { safe_name } else { format!("{}.pdf", safe_name) };
 
-    let docs_dir = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("documents");
-    std::fs::create_dir_all(&docs_dir).map_err(|e| e.to_string())?;
+    let docs_dir = dirs.pdf_documents();
+    ensure_dir(&docs_dir)?;
     let doc_path = docs_dir.join(safe_name);
     std::fs::write(&doc_path, &bytes).map_err(|e| format!("Erreur d'écriture du PDF: {}", e))?;
     Ok(doc_path.to_string_lossy().to_string())

@@ -998,7 +998,7 @@ export default function Settings() {
               id="import_path"
               value={importPath}
               onChange={(e) => setImportPath(e.target.value)}
-              placeholder="backups/supercaisse_20260101_120000.db"
+              placeholder="Documents/SuperCaisse/exports/supercaisse_export_20260101_120000.db"
             />
           </div>
           <DialogFooter className="gap-2">

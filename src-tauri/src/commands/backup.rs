@@ -1,4 +1,5 @@
 use crate::db::*;
+use crate::paths::{ensure_dir, AppDirs};
 use rusqlite::{backup::Backup, Connection};
 use std::time::Duration;
 use tauri::State;
@@ -6,13 +7,11 @@ use tauri::State;
 use super::log_audit;
 
 #[tauri::command]
-pub fn backup_database(db: State<DbState>) -> Result<String, String> {
+pub fn backup_database(db: State<DbState>, dirs: State<AppDirs>) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _db_path = conn.path().ok_or("Base de données non fichier")?.to_string();
-    let backup_dir = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("backups");
-    std::fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+    let backup_dir = dirs.backups();
+    ensure_dir(&backup_dir)?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let backup_path = backup_dir.join(format!("supercaisse_{}.db", timestamp));
     let mut dst = Connection::open(&backup_path).map_err(|e| e.to_string())?;
@@ -22,13 +21,11 @@ pub fn backup_database(db: State<DbState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn export_database(db: State<DbState>) -> Result<String, String> {
+pub fn export_database(db: State<DbState>, dirs: State<AppDirs>) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _db_path = conn.path().ok_or("Base de données non fichier")?.to_string();
-    let export_dir = std::env::current_dir()
-        .map_err(|e| e.to_string())?
-        .join("exports");
-    std::fs::create_dir_all(&export_dir).map_err(|e| e.to_string())?;
+    let export_dir = dirs.exports();
+    ensure_dir(&export_dir)?;
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let export_path = export_dir.join(format!("supercaisse_export_{}.db", timestamp));
     let mut dst = Connection::open(&export_path).map_err(|e| e.to_string())?;

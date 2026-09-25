@@ -1,16 +1,15 @@
 mod commands;
 mod db;
+mod paths;
 
 use db::{init_db, DbState};
+use paths::{legacy_database_candidates, prepare_database, AppDirs};
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db_path = dirs_db_path();
-    let conn = init_db(&db_path).expect("Failed to initialize database");
-
     tauri::Builder::default()
-        .manage(DbState { conn: Arc::new(Mutex::new(conn)) })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -19,6 +18,19 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            let data = app.path().app_data_dir()?;
+            let documents = app
+                .path()
+                .document_dir()
+                .map(|d| d.join("SuperCaisse"))
+                .unwrap_or_else(|_| data.clone());
+            let dirs = AppDirs { data, documents };
+            let db_path = prepare_database(&dirs, &legacy_database_candidates())?;
+            let conn = init_db(&db_path.to_string_lossy())
+                .map_err(|e| format!("Initialisation de la base {} impossible : {}", db_path.display(), e))?;
+            log::info!("Base de données : {}", db_path.display());
+            app.manage(DbState { conn: Arc::new(Mutex::new(conn)) });
+            app.manage(dirs);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -122,15 +134,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-fn dirs_db_path() -> String {
-    let app_dir = dirs_next().unwrap_or_else(|| std::path::PathBuf::from("."));
-    std::fs::create_dir_all(&app_dir).ok();
-    app_dir.join("supercaisse.db").to_string_lossy().to_string()
-}
-
-fn dirs_next() -> Option<std::path::PathBuf> {
-    // Use app data directory
-    std::env::current_dir().ok().map(|p| p.join("data"))
 }
