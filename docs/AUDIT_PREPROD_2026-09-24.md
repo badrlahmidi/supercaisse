@@ -209,11 +209,15 @@ pub fn login_pin(db: State<DbState>, login: String, pin: String) -> Result<Optio
 
 ### [MINEUR] m-1 — Énumération des logins par timing ; comparaison SHA-256 legacy non constante
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Un login inconnu, ou un compte sans PIN, déclenche la vérification d'une empreinte Argon2 factice, calculée une seule fois. Il répond donc aussi lentement qu'un mot de passe faux : un test mesure 37 µs contre 470 ms sans ce correctif. La comparaison des empreintes SHA-256 héritées se fait à temps constant (`egal_temps_constant`). Ces empreintes sont déjà converties en Argon2 à la première connexion réussie. Je n'ai pas forcé de réinitialisation au bout de N jours.
+
 **Fichier** : `src-tauri/src/commands/auth.rs:13-23`, `src-tauri/src/db.rs:703-707`
 **Risque** : un login inexistant répond immédiatement (pas de calcul Argon2) alors qu'un login existant prend environ 50 ms. La comparaison des hash SHA-256 legacy (non salés) utilise `==`.
 **Fix** : pour un login inconnu, vérifier contre un hash Argon2 factice précalculé. Utiliser `subtle::ConstantTimeEq` pour le legacy, puis forcer une réinitialisation des comptes encore en SHA-256 au bout de N jours.
 
 ### [MINEUR] m-2 — Deux mécanismes de verrouillage incohérents
+
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Le verrouillage de 15 minutes codé en dur dans `AuthContext` est supprimé. Restent deux mécanismes cohérents : le verrouillage d'écran réglable (`idle_timeout`, suivi d'un déverrouillage par mot de passe ou par PIN), et l'expiration de la session côté serveur après 1 heure d'inactivité (C-5), qui ramène à l'écran de connexion.
 
 **Fichier** : `src/context/AuthContext.tsx:27` (15 min codés en dur) vs `src/components/IdleLock.tsx:19` (`idle_timeout` des settings)
 **Fix** : supprimer `AUTO_LOCK_MS` et faire expirer la session côté Rust (C-5) selon `idle_timeout`.
@@ -1135,13 +1139,13 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 85 / 100
+## Note après corrections (25/09/2026) : 86 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85). La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
-| Sécurité | 6 / 25 | **23 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), routes et menu alignés sur la table des permissions (M-10), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** énumération par timing (m-1), double verrouillage (m-2). |
+| Sécurité | 6 / 25 | **24 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), routes et menu alignés sur la table des permissions (M-10), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). Timing de connexion uniformisé (m-1) et verrouillage unique (m-2). |
 | Intégrité données | 5 / 20 | **19 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). Plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **12 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12). **Restent :** index manquants (S-3), traçabilité `created_at` / `updated_by` (S-5). |
 | Architecture backend | 7 / 15 | **12 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** 30 commandes aux sorties non typées (M-17 en partie, entrées typées), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |

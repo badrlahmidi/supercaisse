@@ -49,6 +49,7 @@ pub(crate) fn login_impl(
         )),
     ).optional().map_err(|e| e.to_string())?;
     let Some((id, ulogin, nom, role, hash, must_change)) = result else {
+        verification_factice(password);
         return Ok(None);
     };
     if !verify_password(password, &hash) {
@@ -286,9 +287,11 @@ pub(crate) fn login_pin_impl(
         bloque,
     }) = compte
     else {
+        verification_factice(pin);
         return Ok(None);
     };
     let Some(hash) = hash.filter(|h| !h.is_empty()) else {
+        verification_factice(pin);
         return Ok(None);
     };
     if bloque {
@@ -448,6 +451,27 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn test_login_inconnu_aussi_lent_qu_un_mot_de_passe_faux() {
+        let conn = base_pin();
+        verification_factice("amorce");
+        let mesure = |login: &str| {
+            let debut = std::time::Instant::now();
+            assert!(login_impl(&conn, login, "mauvais-mot-de-passe")
+                .unwrap()
+                .is_none());
+            debut.elapsed()
+        };
+        let inconnu = (0..3).map(|_| mesure("inconnu")).min().unwrap();
+        let existant = (0..3).map(|_| mesure("karim")).min().unwrap();
+        assert!(
+            inconnu * 3 >= existant,
+            "login inconnu {:?} contre login existant {:?}",
+            inconnu,
+            existant
+        );
     }
 
     #[test]

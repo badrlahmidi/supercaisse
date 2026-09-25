@@ -1458,12 +1458,41 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     } else {
         use sha2::Digest;
         let sha_hash = hex::encode(sha2::Sha256::digest(password.as_bytes()));
-        sha_hash == hash
+        egal_temps_constant(sha_hash.as_bytes(), hash.as_bytes())
+    }
+}
+
+pub(crate) fn egal_temps_constant(a: &[u8], b: &[u8]) -> bool {
+    let mut difference = a.len() ^ b.len();
+    for i in 0..a.len().max(b.len()) {
+        let x = a.get(i).copied().unwrap_or(0);
+        let y = b.get(i).copied().unwrap_or(0);
+        difference |= usize::from(x ^ y);
+    }
+    difference == 0
+}
+
+pub(crate) fn verification_factice(password: &str) {
+    static EMPREINTE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    if let Some(empreinte) = EMPREINTE.get_or_init(|| hash_password("empreinte-factice").ok()) {
+        verify_password(password, empreinte);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_comparaison_temps_constant() {
+        assert!(super::egal_temps_constant(b"abc", b"abc"));
+        assert!(!super::egal_temps_constant(b"abc", b"abd"));
+        assert!(!super::egal_temps_constant(b"abc", b"abcd"));
+        assert!(!super::egal_temps_constant(b"", b"a"));
+        use sha2::Digest;
+        let legacy = hex::encode(sha2::Sha256::digest(b"secret"));
+        assert!(super::verify_password("secret", &legacy));
+        assert!(!super::verify_password("autre", &legacy));
+    }
+
     #[test]
     fn test_migration_unicite_renomme_les_doublons_et_resynchronise() {
         let mut conn = super::Connection::open_in_memory().unwrap();

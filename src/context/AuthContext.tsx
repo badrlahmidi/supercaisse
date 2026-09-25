@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { Navigate, useNavigate, useLocation } from "react-router-dom"
 import { invoke, onSessionExpired, setSessionToken, getSessionToken } from "@/lib/tauri"
 import { toast } from "sonner"
@@ -31,8 +31,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-const AUTO_LOCK_MS = 15 * 60 * 1000
-
 function transformPermissions(rows: Array<{ module: string; action: string; allowed: boolean }>): PermissionsMap {
   const map: PermissionsMap = {}
   for (const row of rows) {
@@ -48,7 +46,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
 
-  const lastActivity = useRef(Date.now())
 
   const loadPermissions = useCallback(async (role: string) => {
     try {
@@ -82,28 +79,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     toast.error("Session expirée", { description: "Veuillez vous reconnecter" })
     clearSession()
   }), [clearSession])
-
-  useEffect(() => {
-    if (!user) return
-    const resetActivity = () => { lastActivity.current = Date.now() }
-    const checkInactivity = () => {
-      if (Date.now() - lastActivity.current > AUTO_LOCK_MS) {
-        logout_()
-      }
-    }
-    window.addEventListener("mousedown", resetActivity)
-    window.addEventListener("keydown", resetActivity)
-    window.addEventListener("touchstart", resetActivity)
-    window.addEventListener("scroll", resetActivity, { passive: true })
-    const interval = setInterval(checkInactivity, 60000)
-    return () => {
-      window.removeEventListener("mousedown", resetActivity)
-      window.removeEventListener("keydown", resetActivity)
-      window.removeEventListener("touchstart", resetActivity)
-      window.removeEventListener("scroll", resetActivity)
-      clearInterval(interval)
-    }
-  }, [user, logout_])
 
   const loginAs = useCallback(async ({ token, ...userData }: SessionUser) => {
     if (token) {
