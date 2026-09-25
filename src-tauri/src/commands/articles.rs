@@ -205,7 +205,10 @@ pub fn delete_article(
         .map_err(|e| e.to_string())?
         .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM articles WHERE id=?1", params![id])
-        .map_err(|e| super::erreur_suppression(e, "cet article"))?;
+        .map_err(|e| {
+            super::erreur_suppression(e, "cet article")
+                .replace("…)", "…) : désactivez-le plutôt que de le supprimer, les pièces comptables devant être conservées 10 ans")
+        })?;
     log_audit(
         &conn,
         Some(me.user_id),

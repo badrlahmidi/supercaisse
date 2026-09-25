@@ -895,6 +895,34 @@ Côté UI, utiliser `@tauri-apps/plugin-dialog` pour choisir le fichier, avec un
 
 ### [MAJEUR] P-3 — Conformité DGI Maroc : points à corriger
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`, sous réserve de la validation du modèle de facture par l'expert-comptable. C-2, C-3, C-8 et S-4 étaient déjà corrigés ; s'y ajoutent :
+>
+> - **Mentions du vendeur obligatoires :** aucune facture ni aucun avoir n'est émis tant que l'ICE (15 chiffres), l'IF et le RC ne sont pas renseignés (`fiscal::verifier_mentions_vendeur`, appelé par `create_vente` et `convert_document`). Le POS affiche un bandeau tant qu'ils manquent. `update_settings` refuse un ICE qui n'a pas 15 chiffres et un IF non numérique, et le formulaire affiche l'erreur.
+> - **ICE client :** le format est validé à la saisie. L'ICE est exigé pour une facture adressée à un client des segments Professionnel, Grossiste ou Revendeur, à la vente comme à la conversion en facture.
+> - **Annulation :**
+>   - une facture ou un avoir ne peut être annulé directement que dans les 15 minutes suivant son émission, et avec un motif obligatoire ;
+>   - au-delà, le serveur refuse, et l'écran Ventes propose « Émettre un avoir » ;
+>   - BL, devis et commandes restent annulables librement.
+> - **Ticket = facture :** la vente au POS émet une facture numérotée `FA-`. Le ticket imprimé est donc une facture simplifiée qui porte toutes les mentions. Ont été corrigés :
+>   - l'intitulé du document avec son numéro fiscal, au lieu de l'id interne (« Facture #12 ») ;
+>   - le Total HT, la TVA par taux et le Total TTC, sur le ticket HTML, en ESC/POS et dans le PDF ;
+>   - l'IF, le RC et la patente du vendeur ;
+>   - la mention « Sur facture N° … » sur un avoir ;
+>   - l'en-tête « PU HT » du PDF, qui affichait « PU TTC » pour un prix HT.
+> - **Conservation :** la suppression d'un article déjà vendu invite à le désactiver ; celle d'un client rappelle l'obligation de conserver les pièces pendant 10 ans.
+> - **Bug trouvé en testant, et corrigé :** les paramètres ne pouvaient pas être enregistrés tant qu'un champ optionnel était vide, car `get_settings` renvoie `null` et le formulaire le refusait en silence. Les champs invalides sont maintenant signalés par un toast.
+>
+> Couvert par des tests Rust (formats, mentions obligatoires, ICE client B2B, délai d'annulation) et Vitest (ticket, règles fiscales, formulaire de paramètres).
+>
+> Vérifié dans l'application :
+> - facture refusée sans mentions, avec le bandeau et le message du serveur ;
+> - ICE invalide refusé, puis mentions enregistrées ;
+> - facture `FA-2026-00004` émise, avec un PDF qui porte ICE/IF/RC/Patente, PU HT, Total HT, TVA 20 % et Total TTC ;
+> - annulation d'une facture de plus de 15 minutes remplacée par l'avoir `AV-2026-00001`, dont le PDF indique « Sur facture N° FA-2026-00001 » ;
+> - motif exigé pour une facture récente.
+>
+> **Reste hors code :** faire valider le modèle de facture par l'expert-comptable, et suivre le calendrier de la facturation électronique DGI.
+
 **Fichier** : `src/lib/receipt.ts`, `commands/ventes.rs`, `commands/settings.rs`
 **Risque** :
 - Les mentions légales du vendeur (ICE, IF, RC, Patente) ne peuvent pas être enregistrées en production (C-2).

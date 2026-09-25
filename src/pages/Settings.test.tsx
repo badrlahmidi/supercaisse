@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Settings from "./Settings"
@@ -76,5 +76,26 @@ describe("Settings", () => {
     expect(await screen.findByText("Gestion des utilisateurs")).toBeInTheDocument()
     expect(screen.getByText("Administrateur")).toBeInTheDocument()
     expect(screen.getByText("Caissier Un")).toBeInTheDocument()
+  })
+
+  it("saves settings whose optional fields are null", async () => {
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "get_settings"
+        ? { ...mockSettings, shop_address: null, shop_phone: null, shop_email: null, ice: "001234567000089", if_number: "1234", rc_number: "RC 1", patente: null, receipt_footer: null, business_type: null, logo_base64: null }
+        : cmd === "update_settings" ? null : []),
+    )
+    render(<Settings />, { wrapper: Wrapper })
+    await screen.findByDisplayValue("001234567000089")
+    fireEvent.click(screen.getAllByRole("button", { name: "Enregistrer les paramètres" })[0])
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("update_settings", expect.objectContaining({ ice: "001234567000089", shop_address: "" })))
+  })
+
+  it("rejects an invalid ICE", async () => {
+    mockInvoke.mockImplementation((cmd: string) => Promise.resolve(cmd === "get_settings" ? mockSettings : []))
+    render(<Settings />, { wrapper: Wrapper })
+    await screen.findByDisplayValue("ICE123456789")
+    fireEvent.click(screen.getAllByRole("button", { name: "Enregistrer les paramètres" })[0])
+    expect(await screen.findByText("ICE invalide : 15 chiffres attendus")).toBeInTheDocument()
+    expect(mockInvoke).not.toHaveBeenCalledWith("update_settings", expect.anything())
   })
 })

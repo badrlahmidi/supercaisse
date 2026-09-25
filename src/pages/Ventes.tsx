@@ -20,6 +20,7 @@ import type { Settings } from "@/types"
 import { compteDansCA } from "@/lib/ventes"
 import type { Sale } from "@/types"
 import { sommeDH } from "@/lib/totaux"
+import { annulationDirecte, DELAI_ANNULATION_MINUTES } from "@/lib/fiscal"
 
 type Vente = Sale
 
@@ -50,6 +51,7 @@ export default function Ventes() {
 
   const { data: ventes, isLoading } = useSalesList(dateDebut, dateFin)
   const cancelMutation = useCancelSale()
+  const modeAnnulation = cancelConfirm ? annulationDirecte(cancelConfirm) : "libre"
   const queryClient = useQueryClient()
 
   const convertMutation = useMutation({
@@ -102,6 +104,8 @@ export default function Ventes() {
         venteId: detail.vente.id,
         docType: detail.vente.dtype,
         docNumero: detail.vente.numero_facture,
+        docSourceNumero: detail.vente.dtype === "avoir" ? detail.vente.source_numero ?? null : null,
+        montantHT: detail.vente.montant_ht ?? null,
         date: detail.vente.date,
         caissier: detail.vente.caissier_nom || "",
         client: detail.vente.client_nom || "Client de passage",
@@ -504,18 +508,45 @@ export default function Ventes() {
               Annuler {cancelConfirm?.numero_facture || `#${cancelConfirm?.id}`}
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Êtes-vous sûr de vouloir annuler ce document ? Si c'est une facture ou un BL, le stock, le crédit client et les points fidélité seront réajustés. <strong>Cette action est irréversible.</strong>
-          </p>
-          <div className="space-y-2">
-            <Label htmlFor="cancel_motif">Motif</Label>
-            <Input id="cancel_motif" value={cancelMotif} onChange={(e) => setCancelMotif(e.target.value)} placeholder="Erreur de saisie, retour client…" />
-          </div>
+          {modeAnnulation === "avoir" ? (
+            <p className="text-sm text-muted-foreground">
+              Ce document a été émis il y a plus de {DELAI_ANNULATION_MINUTES} minutes : il ne peut plus être annulé directement.
+              {cancelConfirm?.dtype === "avoir"
+                ? " Un avoir émis est définitif : émettez une nouvelle facture si nécessaire."
+                : " Émettez un avoir qui référence cette facture."}
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Êtes-vous sûr de vouloir annuler ce document ? Si c'est une facture ou un BL, le stock, le crédit client et les points fidélité seront réajustés. <strong>Cette action est irréversible.</strong>
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="cancel_motif">{modeAnnulation === "motif" ? "Motif (obligatoire)" : "Motif"}</Label>
+                <Input id="cancel_motif" value={cancelMotif} onChange={(e) => setCancelMotif(e.target.value)} placeholder="Erreur de saisie, retour client…" />
+              </div>
+            </>
+          )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCancelConfirm(null)}>Fermer</Button>
+            {modeAnnulation === "avoir" ? (
+              cancelConfirm?.dtype === "facture" && (
+                <Button
+                  disabled={convertMutation.isPending}
+                  onClick={() => {
+                    if (cancelConfirm) convertMutation.mutate(
+                      { venteId: cancelConfirm.id, targetType: "avoir" },
+                      { onSuccess: () => { setCancelConfirm(null); setCancelMotif("") } },
+                    )
+                  }}
+                >
+                  {convertMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
+                  Émettre un avoir
+                </Button>
+              )
+            ) : (
             <Button
               variant="destructive"
-              disabled={cancelMutation.isPending}
+              disabled={cancelMutation.isPending || (modeAnnulation === "motif" && cancelMotif.trim().length < 3)}
               onClick={() => {
                 if (cancelConfirm) cancelMutation.mutate(
                   { venteId: cancelConfirm.id, motif: cancelMotif },
@@ -526,6 +557,7 @@ export default function Ventes() {
               {cancelMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
               Annuler la vente
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

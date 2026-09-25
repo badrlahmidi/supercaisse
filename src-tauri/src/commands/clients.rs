@@ -67,6 +67,7 @@ pub fn add_client(
         .map(|m| montant_positif("Plafond de crédit", m))
         .transpose()?;
     let code = code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    let ice = super::fiscal::normaliser_ice("ICE du client", ice)?;
     let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO clients (code, nom, adresse, telephone, email, credit_plafond, ice, segment) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -128,6 +129,7 @@ pub fn update_client(
         .map(|m| montant_positif("Plafond de crédit", m))
         .transpose()?;
     let code = code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    let ice = super::fiscal::normaliser_ice("ICE du client", ice)?;
     conn.execute(
         "UPDATE clients SET code=?1, nom=?2, adresse=?3, telephone=?4, email=?5, credit_plafond=?6, ice=?7, segment=?8 WHERE id=?9",
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment, id],
@@ -153,7 +155,12 @@ pub fn delete_client(
         .map_err(|e| e.to_string())?
         .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM clients WHERE id=?1", params![id])
-        .map_err(|e| super::erreur_suppression(e, "ce client"))?;
+        .map_err(|e| {
+            super::erreur_suppression(e, "ce client").replace(
+                "…)",
+                "…) : les pièces comptables qui le mentionnent doivent être conservées 10 ans",
+            )
+        })?;
     log_audit(
         &conn,
         Some(me.user_id),

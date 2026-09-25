@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(dedie, 3.0);
         assert!(vendre(&mut conn, 1, Some(10), 1.0, 2, "facture").is_err());
         assert!(vendre(&mut conn, 1, Some(10), 4.0, 1, "facture").is_err());
-        annuler_vente_impl(&mut conn, v, None, None).unwrap();
+        annuler_vente_impl(&mut conn, v, None, Some("Test")).unwrap();
         let dedie: f64 = conn
             .query_row(
                 "SELECT stock_dedie FROM article_variantes WHERE id = 10",
@@ -472,7 +472,7 @@ mod tests {
         );
         vendre(&mut conn, 2, None, 3.0, 1, "facture").unwrap();
         assert_eq!((lot(&conn, 1), lot(&conn, 4)), (0.0, 2.0));
-        annuler_vente_impl(&mut conn, v, None, None).unwrap();
+        annuler_vente_impl(&mut conn, v, None, Some("Test")).unwrap();
         assert_eq!(
             (lot(&conn, 2), lot(&conn, 1), lot(&conn, 4)),
             (2.0, 2.0, 2.0)
@@ -487,7 +487,7 @@ mod tests {
         assert_eq!((lot(&conn, 2), lot(&conn, 1)), (0.0, 2.0));
         let avoir = convert_document_impl(&mut conn, f, "avoir".into()).unwrap();
         assert_eq!((lot(&conn, 2), lot(&conn, 1)), (2.0, 3.0));
-        annuler_vente_impl(&mut conn, avoir, None, None).unwrap();
+        annuler_vente_impl(&mut conn, avoir, None, Some("Test")).unwrap();
         assert_eq!((lot(&conn, 2), lot(&conn, 1)), (0.0, 2.0));
     }
 
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(lot(&conn, 2), 0.0);
         let f = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
         assert_eq!(lot(&conn, 2), 0.0);
-        annuler_vente_impl(&mut conn, f, None, None).unwrap();
+        annuler_vente_impl(&mut conn, f, None, Some("Test")).unwrap();
         assert_eq!(lot(&conn, 2), 2.0);
         assert_eq!(stock(&conn, 2, 1), 14.0);
     }

@@ -238,7 +238,7 @@ mod tests {
         let facture = document(&mut conn, "facture", "especes");
         convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
         let annulee = document(&mut conn, "facture", "especes");
-        annuler_vente_impl(&mut conn, annulee, None, None).unwrap();
+        annuler_vente_impl(&mut conn, annulee, None, Some("Test")).unwrap();
         document(&mut conn, "facture", "carte");
         conn
     }

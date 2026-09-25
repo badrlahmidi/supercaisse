@@ -1,6 +1,6 @@
 import { formatCurrency, formatDateTime } from "@/lib/utils"
 import { EscPosBuilder } from "./escpos"
-import { round2 } from "./totaux"
+import { round2, sommeDH } from "./totaux"
 import { jsPDF } from "jspdf"
 
 export interface ReceiptData {
@@ -22,6 +22,8 @@ export interface ReceiptData {
   receiptHeader?: string | null
   docType?: string
   docNumero?: string | null
+  docSourceNumero?: string | null
+  montantHT?: number | null
   items: Array<{
     designation: string
     quantite: number
@@ -67,6 +69,19 @@ export function ventilationTva(data: Pick<ReceiptData, "items" | "montantTotal" 
   return acc
 }
 
+export function intituleDocument(data: Pick<ReceiptData, "docType" | "docNumero" | "venteId">): string {
+  const titre = DOC_TITLES[data.docType || "facture"] || "FACTURE"
+  return `${titre} N° ${data.docNumero || `#${data.venteId}`}`
+}
+
+export function totauxFiscaux(data: Pick<ReceiptData, "items" | "montantTotal" | "montantRemise" | "netPaye" | "montantHT">) {
+  const tvaParTaux = ventilationTva(data)
+  const ttc = sommeDH([data.montantTotal, -data.montantRemise])
+  const tva = sommeDH(Object.values(tvaParTaux))
+  const ht = data.montantHT ?? sommeDH([ttc, -tva])
+  return { ht, tva, ttc, tvaParTaux }
+}
+
 export function generateReceiptHTML(data: ReceiptData): string {
   const itemsRows = data.items.map((item) => `
     <tr>
@@ -77,8 +92,8 @@ export function generateReceiptHTML(data: ReceiptData): string {
     </tr>
   `).join("")
 
-  // Calcul ventilation TVA
-  const tvaBreakdown = ventilationTva(data)
+  const fiscal = totauxFiscaux(data)
+  const tvaBreakdown = fiscal.tvaParTaux
 
   const tvaRows = Object.entries(tvaBreakdown).map(([taux, montant]) => 
     `<div class="total-line"><span>TVA ${esc(taux)}%</span><span>${formatCurrency(montant)}</span></div>`
@@ -130,7 +145,8 @@ export function generateReceiptHTML(data: ReceiptData): string {
   ${data.receiptHeader ? `<div class="center infos" style="font-style:italic;margin-top:2px">${esc(data.receiptHeader)}</div>` : ""}
   <div class="divider"></div>
   <div class="infos">
-    Facture #${esc(data.venteId)}<br>
+    <strong>${esc(intituleDocument(data))}</strong><br>
+    ${data.docSourceNumero ? `Sur facture N° ${esc(data.docSourceNumero)}<br>` : ""}
     ${formatDateTime(data.date)}<br>
     Caissier: ${esc(data.caissier)}<br>
     Client: ${esc(data.client)}
@@ -154,14 +170,12 @@ export function generateReceiptHTML(data: ReceiptData): string {
   <div class="total-line"><span>Sous-total TTC</span><span>${formatCurrency(data.montantTotal)}</span></div>
   ${data.montantRemise > 0 ? `<div class="total-line"><span>Remise</span><span>-${formatCurrency(data.montantRemise)}</span></div>` : ""}
   <div class="divider"></div>
+  <div class="total-line"><span>Total HT</span><span>${formatCurrency(fiscal.ht)}</span></div>
+  ${tvaRows}
+  <div class="total-line"><span>Total TTC</span><span>${formatCurrency(fiscal.ttc)}</span></div>
   <div class="total-line net"><span>Net à payer</span><span>${formatCurrency(data.netPaye)}</span></div>
   <div class="total-line"><span>Paiement</span><span>${esc(data.modePaiement)}</span></div>
   ${data.monnaie > 0 ? `<div class="total-line monnaie"><span>Monnaie rendue</span><span>${formatCurrency(data.monnaie)}</span></div>` : ""}
-  ${Object.keys(tvaBreakdown).length > 0 ? `
-  <div class="divider"></div>
-  <div class="infos" style="text-align:center;font-weight:bold;margin-bottom:2px">Ventilation TVA</div>
-  ${tvaRows}
-  ` : ""}
   <div class="center footer">${esc(data.receiptFooter)}</div>
 </body>
 </html>`
@@ -192,13 +206,14 @@ export function generateReceiptEscPos(data: ReceiptData): string {
 
   builder.line("--------------------------------")
     .align("left")
-    .line(`Document #${data.venteId}`)
+    .line(intituleDocument(data))
     .line(formatDateTime(data.date))
     .line(`Caissier: ${data.caissier}`)
     .line(`Client: ${data.client}`)
     
   if (data.clientIce) builder.line(`ICE Client: ${data.clientIce}`)
-  
+  if (data.docSourceNumero) builder.line(`Sur facture N° ${data.docSourceNumero}`)
+
   builder.line("--------------------------------")
   
   // En-tête tableau simplifié
@@ -231,15 +246,13 @@ export function generateReceiptEscPos(data: ReceiptData): string {
     builder.line(`Monnaie rendue: ${formatCurrency(data.monnaie)}`)
   }
 
-  // TVA
-  const tvaBreakdown = ventilationTva(data)
-
-  if (Object.keys(tvaBreakdown).length > 0) {
-    builder.line("--------------------------------")
-    for (const [taux, montant] of Object.entries(tvaBreakdown)) {
-      builder.line(`TVA ${taux}% : ${formatCurrency(montant)}`)
-    }
+  const fiscal = totauxFiscaux(data)
+  builder.line("--------------------------------")
+    .line(`Total HT: ${formatCurrency(fiscal.ht)}`)
+  for (const [taux, montant] of Object.entries(fiscal.tvaParTaux)) {
+    builder.line(`TVA ${taux}% : ${formatCurrency(montant)}`)
   }
+  builder.line(`Total TTC: ${formatCurrency(fiscal.ttc)}`)
   
   builder.line("--------------------------------")
     .align("center")
@@ -296,8 +309,9 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   doc.setFontSize(10)
   doc.text(`N° ${data.docNumero || `#${data.venteId}`}`, pageWidth - marginX, 25, { align: "right" })
   doc.text(formatDateTime(data.date), pageWidth - marginX, 30, { align: "right" })
+  if (data.docSourceNumero) doc.text(`Sur facture N° ${data.docSourceNumero}`, pageWidth - marginX, 35, { align: "right" })
 
-  y = Math.max(y, 32) + 4
+  y = Math.max(y, data.docSourceNumero ? 37 : 32) + 4
   doc.setDrawColor(r, g, b)
   doc.line(marginX, y, pageWidth - marginX, y)
   y += 7
@@ -320,7 +334,7 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
   doc.setFontSize(9)
   doc.text("Désignation", colX.designation + 1, y)
   doc.text("Qté", colX.qte, y, { align: "right" })
-  doc.text("PU TTC", colX.pu, y, { align: "right" })
+  doc.text("PU HT", colX.pu, y, { align: "right" })
   doc.text("TVA", colX.tva, y, { align: "right" })
   doc.text("Total TTC", colX.total, y, { align: "right" })
   y += 6
@@ -351,25 +365,23 @@ export function generateFacturePdfBase64(data: ReceiptData): string {
     doc.text(`-${formatCurrency(data.montantRemise)}`, totalsX, y, { align: "right" })
     y += 5
   }
+  const fiscal = totauxFiscaux(data)
+  doc.text("Total HT", totalsX - 45, y)
+  doc.text(formatCurrency(fiscal.ht), totalsX, y, { align: "right" })
+  y += 5
+  for (const [taux, montant] of Object.entries(fiscal.tvaParTaux)) {
+    doc.text(`TVA ${taux}%`, totalsX - 45, y)
+    doc.text(formatCurrency(montant), totalsX, y, { align: "right" })
+    y += 5
+  }
+  doc.text("Total TTC", totalsX - 45, y)
+  doc.text(formatCurrency(fiscal.ttc), totalsX, y, { align: "right" })
+  y += 5
   doc.setFont("helvetica", "bold")
   doc.setFontSize(11)
   doc.text("Net à payer", totalsX - 45, y)
   doc.text(formatCurrency(data.netPaye), totalsX, y, { align: "right" })
   y += 8
-
-  const tvaBreakdown = ventilationTva(data)
-
-  if (Object.keys(tvaBreakdown).length > 0) {
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(9)
-    doc.text("Ventilation TVA", marginX, y)
-    y += 5
-    doc.setFont("helvetica", "normal")
-    for (const [taux, montant] of Object.entries(tvaBreakdown)) {
-      doc.text(`TVA ${taux}% : ${formatCurrency(montant)}`, marginX, y)
-      y += 4.5
-    }
-  }
 
   doc.setFontSize(8)
   doc.setTextColor(120)

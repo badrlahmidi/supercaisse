@@ -28,6 +28,7 @@ mod cheques;
 mod clients;
 mod composants;
 mod diagnostic;
+mod fiscal;
 mod fournisseurs;
 mod inventaire;
 mod journal;

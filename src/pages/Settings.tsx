@@ -19,6 +19,7 @@ import { useAuth } from "@/context/AuthContext"
 import { Checkbox } from "@/ui/Checkbox"
 import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages } from "lucide-react"
 import { useI18nStore } from "@/store/i18n"
+import { iceSaisieValide, ifSaisieValide } from "@/lib/fiscal"
 
 
 interface User {
@@ -53,8 +54,8 @@ const settingsSchema = z.object({
   shop_address: z.string().optional(),
   shop_phone: z.string().optional(),
   shop_email: z.string().email().optional().or(z.literal("")),
-  ice: z.string().optional(),
-  if_number: z.string().optional(),
+  ice: z.string().optional().refine(iceSaisieValide, "ICE invalide : 15 chiffres attendus"),
+  if_number: z.string().optional().refine(ifSaisieValide, "IF invalide : chiffres uniquement"),
   rc_number: z.string().optional(),
   patente: z.string().optional(),
   default_tva: z.number().min(0).max(100).default(20),
@@ -210,9 +211,15 @@ export default function Settings() {
 
   useEffect(() => {
     if (settings) {
-      settingsForm.reset(settings)
+      const renseignes = Object.fromEntries(Object.entries(settings).filter(([, valeur]) => valeur !== null && valeur !== undefined))
+      settingsForm.reset({ ...settingsForm.formState.defaultValues, ...renseignes } as SettingsForm)
     }
   }, [settings])
+
+  const signalerChampsInvalides = (erreurs: Record<string, { message?: string } | undefined>) => {
+    const messages = Object.entries(erreurs).map(([champ, erreur]) => erreur?.message || champ)
+    toast.error("Paramètres non enregistrés", { description: messages.join(" · ") })
+  }
 
   const createUserMutation = useMutation({
     mutationFn: (data: UserForm) => invoke("add_utilisateur", data),
@@ -315,7 +322,7 @@ export default function Settings() {
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
-          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -362,15 +369,21 @@ export default function Settings() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="ice">ICE (Identifiant Commun de l'Entreprise)</Label>
-                    <Input {...settingsForm.register("ice")} id="ice" placeholder="15 chiffres" />
+                    <Input {...settingsForm.register("ice")} id="ice" placeholder="15 chiffres (obligatoire pour facturer)" />
+                    {settingsForm.formState.errors.ice && (
+                      <p className="text-sm text-destructive">{settingsForm.formState.errors.ice.message}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="if_number">IF (Identifiant Fiscal)</Label>
-                    <Input {...settingsForm.register("if_number")} id="if_number" placeholder="Optionnel" />
+                    <Input {...settingsForm.register("if_number")} id="if_number" placeholder="Obligatoire pour facturer" />
+                    {settingsForm.formState.errors.if_number && (
+                      <p className="text-sm text-destructive">{settingsForm.formState.errors.if_number.message}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="rc_number">RC (Registre de Commerce)</Label>
-                    <Input {...settingsForm.register("rc_number")} id="rc_number" placeholder="Optionnel" />
+                    <Input {...settingsForm.register("rc_number")} id="rc_number" placeholder="Obligatoire pour facturer" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="patente">Patente</Label>
@@ -748,7 +761,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="receipt" className="space-y-6">
-          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -936,7 +949,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="system" className="space-y-6">
-          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

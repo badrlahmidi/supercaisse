@@ -18,6 +18,7 @@ import EmptyState from "@/components/EmptyState"
 import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
 import type { Client } from "@/types"
+import { iceSaisieValide } from "@/lib/fiscal"
 
 interface MouvementFidelite {
   id: number
@@ -46,7 +47,7 @@ const clientSchema = z.object({
   adresse: z.string().optional().nullable(),
   telephone: z.string().optional().nullable(),
   email: z.union([z.literal(""), z.string().trim().email("Email invalide")]).optional().nullable(),
-  ice: z.string().optional().nullable(),
+  ice: z.string().optional().nullable().refine(iceSaisieValide, "ICE invalide : 15 chiffres attendus"),
   credit_plafond: z.number().min(0).optional().nullable(),
   segment: z.string().optional().nullable(),
 })
@@ -368,6 +369,9 @@ export default function Clients() {
               <div className="space-y-2">
                 <Label htmlFor="ice">ICE (B2B)</Label>
                 <Input {...form.register("ice")} id="ice" placeholder="Numéro ICE (15 chiffres)" />
+                {form.formState.errors.ice && (
+                  <p className="text-sm text-destructive">{form.formState.errors.ice.message}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="credit_plafond">Plafond crédit</Label>

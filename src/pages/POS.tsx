@@ -26,6 +26,7 @@ import ProductGrid from "@/components/pos/ProductGrid"
 import CartPanel from "@/components/pos/CartPanel"
 import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
 import type { Article, ArticleVariante, Category } from "@/types"
+import { estFiscal, mentionsVendeurManquantes } from "@/lib/fiscal"
 
 interface RapportX {
   session_id: number
@@ -71,6 +72,7 @@ export default function POS() {
   const [, setLastSync] = useState<Date>(new Date())
 
   const [documentType, setDocumentType] = useState<string>("facture")
+  const mentionsManquantes = mentionsVendeurManquantes(settings)
   const [variantPickerArticle, setVariantPickerArticle] = useState<Article | null>(null)
   const [showVariantPicker, setShowVariantPicker] = useState(false)
   const [showRapportX, setShowRapportX] = useState(false)
@@ -435,6 +437,7 @@ export default function POS() {
         venteId,
         docType: documentType,
         docNumero: numeroFacture,
+        montantHT: totaux.montantHT,
         date: new Date().toISOString(),
         caissier: user?.nom || "",
         client: clientName,
@@ -552,6 +555,11 @@ export default function POS() {
     <div className="flex h-screen w-full bg-background overflow-hidden">
       {/* Left Panel - Products */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {estFiscal(documentType) && mentionsManquantes.length > 0 && (
+          <div role="alert" className="flex-shrink-0 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            Mentions légales manquantes ({mentionsManquantes.join(", ")}) : aucune facture ne peut être émise. Renseignez-les dans Paramètres &gt; Général.
+          </div>
+        )}
         {/* Top Bar */}
         <div className="flex-shrink-0 border-b border-border bg-card">
           <div className="flex items-center gap-4 p-3 lg:px-6">

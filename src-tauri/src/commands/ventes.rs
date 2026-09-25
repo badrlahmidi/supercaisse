@@ -166,6 +166,9 @@ pub fn create_vente(
 ) -> Result<serde_json::Value, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "creer"))?;
+    if super::fiscal::est_fiscal(dtype.as_deref().unwrap_or("facture")) {
+        super::fiscal::verifier_mentions_vendeur(&conn)?;
+    }
     let resultat = create_vente_impl(
         &mut conn,
         client_id,
@@ -212,6 +215,9 @@ pub(crate) fn create_vente_impl(
     let document_type = dtype.unwrap_or_else(|| "facture".to_string());
     document_prefixe(&document_type)?;
     let encaisse = matches!(document_type.as_str(), "facture" | "bl");
+    if document_type == "facture" {
+        super::fiscal::verifier_ice_client(&tx, client_id)?;
+    }
 
     let remise_globale = valider_pourcentage("Remise document", remise_globale_pct.unwrap_or(0.0))?;
     let lignes = preparer_lignes(&tx, &articles, remise_globale)?;
@@ -552,6 +558,7 @@ pub(crate) fn annuler_vente_impl(
         "convertie" => return Err("Ce document a déjà été converti : annulez le document issu de la conversion ou émettez un avoir".to_string()),
         _ => {}
     }
+    super::fiscal::verifier_annulation_directe(&tx, vente_id, &dtype, motif)?;
 
     if let Some(cid) = client_id {
         match dtype.as_str() {
@@ -818,6 +825,9 @@ pub fn convert_document(
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
+    if super::fiscal::est_fiscal(&target_type) {
+        super::fiscal::verifier_mentions_vendeur(&conn)?;
+    }
     super::tracer(
         &format!("Conversion du document {}", vente_id),
         convert_document_impl(&mut conn, vente_id, target_type),
@@ -837,6 +847,9 @@ pub(crate) fn convert_document_impl(
         params![vente_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?)),
     ).map_err(|_| "Document source introuvable".to_string())?;
+    if target_type == "facture" {
+        super::fiscal::verifier_ice_client(&tx, client_id)?;
+    }
 
     if statut == "annulee" {
         return Err("Impossible de convertir un document annulé".to_string());
@@ -1390,7 +1403,7 @@ mod tests {
         assert_eq!(credit(&conn), 120.0);
         let avoir = convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
         assert_eq!(credit(&conn), 0.0);
-        annuler_vente_impl(&mut conn, avoir, None, None).unwrap();
+        annuler_vente_impl(&mut conn, avoir, None, Some("Test")).unwrap();
         assert_eq!(credit(&conn), 120.0);
     }
 
@@ -1457,7 +1470,7 @@ mod tests {
             )
             .unwrap();
         assert!(detail.contains("Motif: Erreur de saisie"));
-        assert!(annuler_vente_impl(&mut conn, facture, None, None)
+        assert!(annuler_vente_impl(&mut conn, facture, None, Some("Test"))
             .unwrap_err()
             .contains("déjà annulée"));
     }
@@ -1476,7 +1489,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(points(&conn), 56.0);
-        annuler_vente_impl(&mut conn, r["id"].as_i64().unwrap(), None, None).unwrap();
+        annuler_vente_impl(&mut conn, r["id"].as_i64().unwrap(), None, Some("Test")).unwrap();
         assert_eq!(points(&conn), 50.0);
     }
 
@@ -1485,13 +1498,13 @@ mod tests {
         let mut conn = setup();
         let bl = document_credit(&mut conn, "bl");
         let facture = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
-        assert!(annuler_vente_impl(&mut conn, bl, None, None)
+        assert!(annuler_vente_impl(&mut conn, bl, None, Some("Test"))
             .unwrap_err()
             .contains("converti"));
         let stock_avant: f64 = conn
             .query_row("SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0))
             .unwrap();
-        annuler_vente_impl(&mut conn, facture, None, None).unwrap();
+        annuler_vente_impl(&mut conn, facture, None, Some("Test")).unwrap();
         let stock_apres: f64 = conn
             .query_row("SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0))
             .unwrap();

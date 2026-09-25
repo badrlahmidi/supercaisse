@@ -93,6 +93,8 @@ pub fn update_settings(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("settings", "modifier"))?;
     let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let ice = super::fiscal::normaliser_ice("ICE", ice)?;
+    let if_number = super::fiscal::normaliser_if(if_number)?;
     let pairs: Vec<(&str, String)> = vec![
         ("shop_name", shop_name),
         ("shop_address", shop_address.unwrap_or_default()),
