@@ -74,9 +74,16 @@ const settingsSchema = z.object({
 
 type SettingsForm = z.infer<typeof settingsSchema>
 
+interface SauvegardeDisponible {
+  chemin: string
+  nom: string
+  taille: number
+  date: string | null
+}
+
 export default function Settings() {
   const queryClient = useQueryClient()
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, logout } = useAuth()
   const { locale, setLocale, t } = useI18nStore()
   const [showPassword, setShowPassword] = useState(false)
   const [activeTab, setActiveTab] = useState("general")
@@ -92,15 +99,34 @@ export default function Settings() {
     onError: (err) => toast.error("Échec de l'export", { description: String(err) }),
   })
 
+  const backupMutation = useMutation({
+    mutationFn: () => invoke<string>("backup_database"),
+    onSuccess: (path) => {
+      toast.success("Sauvegarde créée", { description: path })
+      queryClient.invalidateQueries({ queryKey: ["sauvegardes"] })
+    },
+    onError: (err) => toast.error("Échec de la sauvegarde", { description: String(err) }),
+  })
+
+  const { data: sauvegardes = [], isLoading: sauvegardesLoading } = useQuery({
+    queryKey: ["sauvegardes"],
+    queryFn: () => invoke<SauvegardeDisponible[]>("list_backups"),
+    enabled: showImportConfirm,
+  })
+
   const importMutation = useMutation({
-    mutationFn: (path: string) => invoke("import_database", { path }),
-    onSuccess: () => {
-      toast.success("Sauvegarde restaurée")
+    mutationFn: (path: string) => invoke<string>("import_database", { path }),
+    onSuccess: (securite) => {
+      toast.success("Sauvegarde restaurée", {
+        description: `Copie de la base précédente : ${securite}. Reconnectez-vous.`,
+        duration: 10000,
+      })
       setShowImportConfirm(false)
       setImportPath("")
-      queryClient.invalidateQueries()
+      queryClient.clear()
+      logout()
     },
-    onError: (err) => toast.error("Échec de la restauration", { description: String(err) }),
+    onError: (err) => toast.error("Restauration refusée", { description: String(err) }),
   })
   const [pinValue, setPinValue] = useState("")
   const [savingPin, setSavingPin] = useState(false)
@@ -986,8 +1012,18 @@ export default function Settings() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
+                  <p className="font-medium">Créer une sauvegarde</p>
+                  <p className="text-sm text-muted-foreground">Copie immédiate dans le dossier des sauvegardes (une sauvegarde automatique est faite chaque jour au démarrage, 30 conservées)</p>
+                </div>
+                <Button variant="outline" onClick={() => backupMutation.mutate()} disabled={backupMutation.isPending}>
+                  {backupMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Database className="h-4 w-4 mr-2" />}
+                  Sauvegarder
+                </Button>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
                   <p className="font-medium">Exporter la base de données</p>
-                  <p className="text-sm text-muted-foreground">Télécharger une copie complète au format SQL</p>
+                  <p className="text-sm text-muted-foreground">Copie complète de la base SQLite dans Documents/SuperCaisse/exports</p>
                 </div>
                 <Button onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
                   {exportMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
@@ -1017,10 +1053,33 @@ export default function Settings() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Toutes les données actuelles seront remplacées par le contenu du fichier. Cette action est irréversible.
+            Toutes les données actuelles seront remplacées par le contenu du fichier. Une copie de la base actuelle est faite
+            automatiquement avant la restauration, et tous les utilisateurs devront se reconnecter.
           </p>
           <div className="space-y-2">
-            <Label htmlFor="import_path">Chemin du fichier de sauvegarde (.db)</Label>
+            <Label>Sauvegardes disponibles</Label>
+            <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
+              {sauvegardesLoading ? (
+                <p className="p-3 text-sm text-muted-foreground">Chargement…</p>
+              ) : sauvegardes.length === 0 ? (
+                <p className="p-3 text-sm text-muted-foreground">Aucune sauvegarde trouvée</p>
+              ) : (
+                sauvegardes.map((s) => (
+                  <button
+                    key={s.chemin}
+                    type="button"
+                    onClick={() => setImportPath(s.chemin)}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-muted ${importPath === s.chemin ? "bg-muted font-medium" : ""}`}
+                  >
+                    <span className="block truncate">{s.nom}</span>
+                    <span className="text-xs text-muted-foreground">{s.date ?? "—"} · {(s.taille / 1024).toFixed(0)} Ko</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="import_path">Ou chemin d'un autre fichier (.db)</Label>
             <Input
               id="import_path"
               value={importPath}

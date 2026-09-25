@@ -751,6 +751,8 @@ Prévoir une migration unique au premier lancement : si `./data/supercaisse.db` 
 
 ### [MAJEUR] P-1 — `import_database` : aucune validation ni sauvegarde préalable
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Avant tout écrasement, `import_database` (admin uniquement) contrôle le fichier : `integrity_check`, présence des tables clés, version de schéma inférieure ou égale à celle de l'application, au moins un administrateur actif. Il copie ensuite la base actuelle dans `backups/avant_restauration_*.db`, restaure via l'API de sauvegarde SQLite, puis applique les migrations. Si une étape échoue, la copie est remise en place et la base actuelle est conservée. Après une restauration réussie, l'action est tracée dans le journal d'audit, toutes les sessions sont fermées et l'utilisateur est déconnecté. Une sauvegarde automatique `auto_*.db` est faite au démarrage, au plus une par jour, avec rotation sur 30 fichiers. Les copies sont écrites en `journal_mode=DELETE`, donc en un seul fichier sans `-wal`. Côté interface, un bouton « Créer une sauvegarde » a été ajouté, et la boîte de restauration liste les sauvegardes et exports disponibles (`list_backups`) en plus d'une saisie manuelle du chemin. Couvert par 4 tests Rust et vérifié de bout en bout dans l'application (xvfb) : un client créé après la sauvegarde disparaît à la restauration, se retrouve dans la copie de sécurité, et l'utilisateur est bien déconnecté. Un sélecteur de fichier natif (`plugin-dialog`) reste à ajouter.
+
 **Fichier** : `src-tauri/src/commands/backup.rs:40-52`, `src/pages/Settings.tsx:956`
 **Risque** :
 - Le frontend l'appelle sans `path`, donc sans effet (C-2).

@@ -69,6 +69,11 @@ impl AuthState {
         Ok(())
     }
 
+    pub fn fermer_tout(&self) -> Result<(), String> {
+        self.sessions.lock().map_err(|e| e.to_string())?.clear();
+        Ok(())
+    }
+
     pub fn fermer_utilisateur(&self, user_id: i64) -> Result<(), String> {
         self.sessions
             .lock()

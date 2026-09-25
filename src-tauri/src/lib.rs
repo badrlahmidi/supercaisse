@@ -39,6 +39,11 @@ pub fn run() {
                 )
             })?;
             log::info!("Base de données : {}", db_path.display());
+            match commands::sauvegarde_quotidienne(&conn, &dirs) {
+                Ok(Some(chemin)) => log::info!("Sauvegarde automatique : {}", chemin.display()),
+                Ok(None) => {}
+                Err(e) => log::error!("Sauvegarde automatique impossible : {}", e),
+            }
             app.manage(DbState {
                 conn: Arc::new(Mutex::new(conn)),
             });
@@ -112,6 +117,7 @@ pub fn run() {
             commands::backup_database,
             commands::export_database,
             commands::import_database,
+            commands::list_backups,
             commands::get_current_session,
             commands::open_session,
             commands::close_session,
