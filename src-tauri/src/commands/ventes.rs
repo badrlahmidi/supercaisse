@@ -1479,6 +1479,7 @@ mod tests {
                 INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne) VALUES (1, 1, 1, 100, 20, 120);
                 INSERT INTO ventes (id, montant_total, montant_remise, mode_paiement, dtype) VALUES (2, -100, -12, 'especes', 'avoir');
                 INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, tva, total_ligne) VALUES (2, 1, 1, 100, 20, -120);
+                PRAGMA user_version = 0;
             ").unwrap();
         }
         let conn = crate::db::init_db(&path_str).unwrap();

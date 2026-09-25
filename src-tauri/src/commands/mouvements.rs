@@ -580,6 +580,7 @@ mod tests {
                 INSERT INTO articles (id, designation) VALUES (1, 'T-shirt');
                 INSERT INTO article_variantes (id, article_id, taille, stock_dedie) VALUES (1, 1, 'M', 7);
                 DROP TABLE article_variante_stocks;
+                PRAGMA user_version = 0;
             ",
             )
             .unwrap();

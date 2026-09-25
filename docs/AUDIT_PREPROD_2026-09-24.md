@@ -456,6 +456,13 @@ adjust_article_stock(&tx, *article_id, magasin_id, *ecart, true)?;
 
 ### [MAJEUR] S-1 — Migrations non versionnées et erreurs silencieuses
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+> - Le schéma est versionné par `PRAGMA user_version`. L'initialisation existante devient la migration v1 (idempotente, elle met à niveau toute base existante).
+> - Les migrations suivantes s'ajoutent à la liste `MIGRATIONS` ; chacune s'exécute dans une transaction avec la mise à jour de version, et n'est jamais modifiée après publication.
+> - Une base créée par une version plus récente est refusée avec un message clair.
+> - Les 32 `ALTER TABLE` passent par `ajouter_colonne`, qui vérifie la colonne et propage les vraies erreurs. Plus aucun `let _ =` ni `.ok()` dans l'initialisation.
+> - Couvert par 5 tests Rust ; migration v0 → v1 vérifiée en lançant l'application sur une base existante.
+
 **Fichier** : `src-tauri/src/db.rs:491-629`
 **Risque** :
 - 27 `let _ = conn.execute("ALTER TABLE …")` sont exécutés à chaque démarrage, et toute erreur est ignorée : disque plein, base verrouillée, faute de frappe.
@@ -531,6 +538,8 @@ CREATE INDEX IF NOT EXISTS idx_article_stocks_mag  ON article_stocks(magasin_id)
 **Fix** : `ALTER TABLE … ADD COLUMN created_at TEXT DEFAULT (datetime('now','localtime'))`, plus `updated_at` et `updated_by`, maintenus par le code des commandes `update_*` (l'utilisateur vient de la session, voir C-5).
 
 ### [MINEUR] M-12 — Migration du stock initial : stocks négatifs ou nuls perdus
+
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms` (`stock != 0`).
 
 **Fichier** : `src-tauri/src/db.rs:617-621`
 **Risque** : `WHERE stock > 0` ignore les articles à stock négatif. Au premier `adjust_article_stock`, `articles.stock` est recalculé depuis `article_stocks` et la dette de stock disparaît.

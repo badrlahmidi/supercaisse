@@ -474,6 +474,7 @@ mod tests {
                 INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (1, 1, 1, 100, 120);
                 INSERT INTO ventes (id, mode_paiement, montant_remise, session_id, dtype, statut) VALUES (2, 'especes', 0, 2, 'facture', 'validee');
                 INSERT INTO vente_articles (vente_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (2, 1, 1, 100, 120);
+                PRAGMA user_version = 0;
             ").unwrap();
         }
         let conn = crate::db::init_db(&path_str).unwrap();
