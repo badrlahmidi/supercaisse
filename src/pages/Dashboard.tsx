@@ -39,19 +39,6 @@ interface Stats {
   top_clients: Array<{ nom: string; depense: number }>
 }
 
-interface Vente {
-  id: number
-  date: string
-  client_id: number | null
-  caissier_id: number | null
-  montant_total: number
-  montant_remise: number
-  mode_paiement: string
-  statut: string
-  client_nom: string | null
-  caissier_nom: string | null
-}
-
 const statCards = [
   { key: "ca_jour", label: "CA Aujourd'hui", icon: Banknote, color: "text-emerald-500", bg: "bg-emerald-500/10" },
   { key: "ca_mois", label: "CA ce Mois", icon: TrendingUp, color: "text-primary", bg: "bg-primary/10" },

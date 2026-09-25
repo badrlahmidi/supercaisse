@@ -930,6 +930,24 @@ new QueryClient({
 
 ### [SUGGESTION] F-3 — Accessibilité et lint
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`, sauf le contraste des badges en mode sombre, qui n'a pas été mesuré. Le lint passe de 57 avertissements à 0. `npm run lint` utilise désormais `--deny-warnings`, donc la CI refuse tout nouvel avertissement.
+>
+> - **Code mort :** 22 imports, variables et interfaces inutilisés supprimés, dont les props `cashAmount` et `change` de `CartPanel` et `getNextStatus` dans Cuisine.
+> - **Routeur :** les 30 pages en chargement différé sont déclarées dans `src/routes/pages.tsx`, pour que le Fast Refresh fonctionne. `badgeVariants` n'est plus exporté.
+> - **Hooks :**
+>   - les valeurs par défaut des Paramètres sont une constante de module ;
+>   - l'effet qui les applique est déplacé après `useForm` ;
+>   - la mise à jour des raccourcis du POS s'exécute à chaque rendu, ce qui était déjà son comportement réel.
+> - **Accessibilité :**
+>   - le plugin `jsx-a11y` d'oxlint est activé ;
+>   - libellés reliés à leur champ (Journal d'audit, ouverture de session) ;
+>   - `CardTitle` rend explicitement son contenu ;
+>   - le panneau des tickets en attente est une `aside` nommée, fermée par un vrai bouton ;
+>   - `aria-keyshortcuts` est posé sur Valider (F5), Mettre en attente (F7) et Tickets en attente (F8).
+> - **Exceptions assumées, déclarées dans `.oxlintrc.json` :**
+>   - `no-autofocus` est désactivé : l'autofocus de la connexion, de l'écran de verrouillage et des dialogues est voulu pour un POS utilisé au clavier ;
+>   - `only-export-components` est désactivé pour `src/context/*.tsx`, qui exporte un provider et son hook.
+
 **Fichier** : `src/pages/Inventaire.tsx:16`, `src/pages/AuditLog.tsx:10`
 **Fix** :
 - Corriger les 2 warnings oxlint (imports inutilisés).
@@ -1211,9 +1229,9 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 93 / 100
+## Note après corrections (25/09/2026) : 94 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86), S-3 et S-5 (→ 88), M-18 (→ 89), M-19 (→ 90), F-1 (→ 91), F-2 (→ 92), P-6 (→ 93). La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82) et M-10 (→ 84), puis M-2 (→ 85), m-1 et m-2 (→ 86), S-3 et S-5 (→ 88), M-18 (→ 89), M-19 (→ 90), F-1 (→ 91), F-2 (→ 92), P-6 (→ 93), F-3 (→ 94). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
@@ -1221,7 +1239,7 @@ Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-
 | Intégrité données | 5 / 20 | **19 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). Plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **14 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12), index (S-3), traçabilité création et modification sur les tables maîtres (S-5). Le point manquant tient à l'absence de test de montée de version sur une copie de base réelle de production. |
 | Architecture backend | 7 / 15 | **14 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), un seul système de caisse (M-18), pagination et totaux côté serveur (M-19), 145 tests Rust. **Restent :** 27 commandes aux sorties non typées (M-17 en partie, entrées typées), catalogue chargé en entier au POS. |
-| Frontend | 5 / 15 | **14 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 159 tests Vitest, formulaires Clients et Paramètres réparés, recherche du POS réparée (M-19), panier propre à chaque utilisateur (F-1), erreurs toujours signalées (F-2). **Restent :** 57 avertissements de lint (F-3). |
+| Frontend | 5 / 15 | **15 / 15** | Plus de mock en production (C-1), contrat d'appel vérifié par test (C-2), `tsc -b` sans erreur, 159 tests Vitest, formulaires Clients et Paramètres réparés, recherche du POS réparée (M-19), panier propre à chaque utilisateur (F-1), erreurs toujours signalées (F-2), lint à zéro avertissement avec règles d'accessibilité, bloquant en CI (F-3). |
 | Production readiness | 3 / 10 | **8 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5), impression sans collision et bundle découpé (P-6). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
 
 **Avant la mise en production :**

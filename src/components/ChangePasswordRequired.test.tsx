@@ -23,7 +23,7 @@ function Connexion({ user, children }: { user: SessionUser; children: ReactNode 
   const [pret, setPret] = useState(false)
   useEffect(() => {
     loginAs(user).then(() => setPret(true))
-  }, [])
+  }, [loginAs, user])
   return pret ? <>{children}</> : null
 }
 

@@ -15,7 +15,7 @@ import { Button } from "@/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
-import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee, Store, BarChart3 } from "lucide-react"
+import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, LockOpen, Coffee, Store, BarChart3 } from "lucide-react"
 import { formatCurrency, cn } from "@/lib/utils"
 import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -25,7 +25,7 @@ import CategoryPills from "@/components/pos/CategoryPills"
 import ProductGrid from "@/components/pos/ProductGrid"
 import CartPanel from "@/components/pos/CartPanel"
 import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
-import type { Article, ArticleVariante, Category } from "@/types"
+import type { Article, ArticleVariante } from "@/types"
 import { estFiscal, mentionsVendeurManquantes } from "@/lib/fiscal"
 import type { LigneVenteSaisie } from "@/types/generated/LigneVenteSaisie"
 import type { ModePaiement } from "@/types/generated/ModePaiement"
@@ -106,7 +106,6 @@ export default function POS() {
   const resumeCart = useCartStore((s) => s.resumeCart)
   const deleteHeldCart = useCartStore((s) => s.deleteHeldCart)
   const useLoyaltyPoints = useCartStore((s) => s.useLoyaltyPoints)
-  const setUseLoyaltyPoints = useCartStore((s) => s.setUseLoyaltyPoints)
   const activeTableId = useCartStore((s) => s.activeTableId)
   const activeTableNom = useCartStore((s) => s.activeTableNom)
   const setActiveTable = useCartStore((s) => s.setActiveTable)
@@ -332,7 +331,7 @@ export default function POS() {
 
   useEffect(() => {
     handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode }
-  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode])
+  })
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -506,12 +505,12 @@ export default function POS() {
           </p>
           {magasins.length > 1 && (
             <div className="space-y-2 text-left">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label htmlFor="session-boutique" className="text-sm font-medium flex items-center gap-2">
                 <Store className="h-4 w-4" />
                 Boutique
               </label>
               <Select value={selectedMagasinId} onValueChange={setSelectedMagasinId}>
-                <SelectTrigger className="h-12">
+                <SelectTrigger id="session-boutique" className="h-12">
                   <SelectValue placeholder="Sélectionner une boutique" />
                 </SelectTrigger>
                 <SelectContent>
@@ -523,8 +522,9 @@ export default function POS() {
             </div>
           )}
           <div className="space-y-2 text-left">
-            <label className="text-sm font-medium">Fond de caisse initial (DH)</label>
+            <label htmlFor="session-fond" className="text-sm font-medium">Fond de caisse initial (DH)</label>
             <Input
+              id="session-fond"
               type="number"
               value={fondInitial}
               onChange={(e) => setFondInitial(e.target.value)}
@@ -593,6 +593,7 @@ export default function POS() {
               className="relative"
               onClick={handleHoldCart}
               title="Mettre en attente (F7)"
+              aria-keyshortcuts="F7"
             >
               <PauseCircle className="h-5 w-5" />
             </Button>
@@ -602,6 +603,7 @@ export default function POS() {
               className="relative"
               onClick={() => setShowHeldPanel((p) => !p)}
               title="Tickets en attente (F8)"
+              aria-keyshortcuts="F8"
             >
               <PlayCircle className="h-5 w-5" />
               {heldCarts.length > 0 && (
@@ -682,8 +684,6 @@ export default function POS() {
         netAmount={netAmount}
         discount={discount}
         discountAmount={discountAmount}
-        cashAmount={cashAmount}
-        change={change}
         itemCount={itemCount}
         onUpdateQuantity={updateQuantity}
         onRemoveItem={removeFromCart}
@@ -704,11 +704,14 @@ export default function POS() {
 
       {/* Held Tickets Panel */}
       {showHeldPanel && (
-        <div className="absolute inset-0 z-50 flex justify-end" onClick={() => setShowHeldPanel(false)}>
-          <div
-            className="relative w-80 h-full bg-card border-l border-border shadow-2xl flex flex-col animate-slide-in-right"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="absolute inset-0 z-50 flex justify-end">
+          <button
+            type="button"
+            aria-label="Fermer les tickets en attente"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setShowHeldPanel(false)}
+          />
+          <aside aria-label="Tickets en attente" className="relative w-80 h-full bg-card border-l border-border shadow-2xl flex flex-col animate-slide-in-right">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <PauseCircle className="h-5 w-5 text-primary" />
@@ -790,7 +793,7 @@ export default function POS() {
                 F7 — Mettre en attente · F8 — Ouvrir ce panneau
               </p>
             </div>
-          </div>
+          </aside>
         </div>
       )}
 

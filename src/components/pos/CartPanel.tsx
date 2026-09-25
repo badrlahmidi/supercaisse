@@ -5,7 +5,7 @@ import { Badge } from "@/ui/Badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
 import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
-import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
+import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, ChefHat, FileText } from "lucide-react"
 import type { Article, Client } from "@/types"
 import { calculerLigne, round2, sommeDH } from "@/lib/totaux"
 import type { ModePaiement } from "@/types/generated/ModePaiement"
@@ -38,8 +38,6 @@ interface CartPanelProps {
   netAmount: number
   discount: number
   discountAmount: number
-  cashAmount: number
-  change: number
   itemCount: number
   onUpdateQuantity: (articleId: number, quantity: number, maxStock?: number, varianteId?: number | null) => void
   onRemoveItem: (articleId: number, varianteId?: number | null) => void
@@ -70,7 +68,7 @@ const QUICK_AMOUNTS = [10, 20, 50, 100, 200, 500]
 
 export default function CartPanel({
   articles, clients, processing, lastReceipt,
-  subtotal, totalTVA, netAmount, discount, discountAmount, cashAmount, change, itemCount,
+  subtotal, totalTVA, netAmount, discount, discountAmount, itemCount,
   onUpdateQuantity, onRemoveItem, onClearCart, onValidateSale, onPrintLastReceipt, onGeneratePdf, generatingPdf,
   documentType, setDocumentType, isLoyaltyActive, ptsValueDH, ptsEarned, loyaltyDiscount, ptsToUse, isRestaurant
 }: CartPanelProps) {
@@ -563,6 +561,7 @@ export default function CartPanel({
             <Button
               className="flex-1 h-11 bg-success hover:bg-success-hover text-success-foreground font-semibold"
               onClick={onValidateSale}
+              aria-keyshortcuts="F5"
               disabled={cart.length === 0 || processing || (isSplit ? splitsTotal < netAmount : paymentMode === "especes" && (parseFloat(cashGiven) || 0) < netAmount)}
             >
               {processing ? (

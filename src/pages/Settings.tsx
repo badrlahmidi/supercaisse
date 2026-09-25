@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/ui/Dialog"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/ui/Table"
 import { Badge } from "@/ui/Badge"
-import { useForm } from "react-hook-form"
+import { useForm, type DefaultValues } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -89,6 +89,20 @@ interface SauvegardeDisponible {
   nom: string
   taille: number
   date: string | null
+}
+
+const VALEURS_PAR_DEFAUT: DefaultValues<SettingsForm> = {
+  shop_name: "SuperCaisse",
+  shop_address: "",
+  shop_phone: "",
+  shop_email: "",
+  ice: "",
+  if_number: "",
+  rc_number: "",
+  patente: "",
+  default_tva: 20,
+  receipt_footer: "Merci de votre visite",
+  currency: "MAD",
 }
 
 export default function Settings() {
@@ -218,13 +232,6 @@ export default function Settings() {
     onError: (err) => toast.error(String(err)),
   })
 
-  useEffect(() => {
-    if (settings) {
-      const renseignes = Object.fromEntries(Object.entries(settings).filter(([, valeur]) => valeur !== null && valeur !== undefined))
-      settingsForm.reset({ ...settingsForm.formState.defaultValues, ...renseignes } as SettingsForm)
-    }
-  }, [settings])
-
   const signalerChampsInvalides = (erreurs: Record<string, { message?: string } | undefined>) => {
     const messages = Object.entries(erreurs).map(([champ, erreur]) => erreur?.message || champ)
     toast.error("Paramètres non enregistrés", { description: messages.join(" · ") })
@@ -272,20 +279,15 @@ export default function Settings() {
 
   const settingsForm = useForm<SettingsForm>({
     resolver: zodResolver(settingsSchema),
-    defaultValues: {
-      shop_name: "SuperCaisse",
-      shop_address: "",
-      shop_phone: "",
-      shop_email: "",
-      ice: "",
-      if_number: "",
-      rc_number: "",
-      patente: "",
-      default_tva: 20,
-      receipt_footer: "Merci de votre visite",
-      currency: "MAD",
-    },
+    defaultValues: VALEURS_PAR_DEFAUT,
   })
+
+  useEffect(() => {
+    if (settings) {
+      const renseignes = Object.fromEntries(Object.entries(settings).filter(([, valeur]) => valeur !== null && valeur !== undefined))
+      settingsForm.reset({ ...VALEURS_PAR_DEFAUT, ...renseignes } as SettingsForm)
+    }
+  }, [settings, settingsForm])
 
   const handleUserSubmit = (data: UserForm) => {
     const userData = {

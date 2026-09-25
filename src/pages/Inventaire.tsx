@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
-import { Card, CardContent, CardHeader, CardTitle } from "@/ui/Card"
+import { Card, CardContent } from "@/ui/Card"
 import { Button } from "@/ui/Button"
 import { Input } from "@/ui/Input"
 import { Label } from "@/ui/Label"
@@ -13,7 +13,7 @@ import { toast } from "sonner"
 import { Plus, ClipboardCheck, Loader2, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import { formatDate, formatDateTime } from "@/lib/utils"
+import { formatDateTime } from "@/lib/utils"
 
 interface Inventaire {
   id: number

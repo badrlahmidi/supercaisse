@@ -16,19 +16,6 @@ import { Plus, Search, Loader2, Trash2, SearchX } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import type { Article, Fournisseur } from "@/types"
-
-interface Achat {
-  id: number
-  date: string
-  fournisseur_id: number | null
-  reference: string | null
-  montant_total: number
-  statut: string
-  statut_livraison: string
-  statut_paiement: string
-  fournisseur_nom: string | null
-}
 
 const achatSchema = z.object({
   fournisseur_id: z.number().min(1, "Fournisseur requis"),

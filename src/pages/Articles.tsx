@@ -24,7 +24,7 @@ import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { useDebounce } from "@/hooks/useDebounce"
-import type { Article, ArticleVariante, ArticleComposant, Category, Fournisseur } from "@/types"
+import type { Article, ArticleVariante, ArticleComposant } from "@/types"
 
 const varianteSchema = z.object({
   taille: z.string().optional(),

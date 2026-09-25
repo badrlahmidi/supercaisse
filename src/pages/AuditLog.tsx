@@ -7,7 +7,7 @@ import { Badge } from "@/ui/Badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/ui/Table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/Card"
-import { Shield, Search, Download } from "lucide-react"
+import { Shield, Download } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 
 interface AuditEntry {
@@ -87,17 +87,17 @@ export default function AuditLog() {
         <CardContent>
           <div className="flex flex-wrap gap-4">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Du</label>
-              <Input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-40" />
+              <label htmlFor="audit-debut" className="text-xs font-medium text-muted-foreground">Du</label>
+              <Input id="audit-debut" type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-40" />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Au</label>
-              <Input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-40" />
+              <label htmlFor="audit-fin" className="text-xs font-medium text-muted-foreground">Au</label>
+              <Input id="audit-fin" type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-40" />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Action</label>
+              <label htmlFor="audit-action" className="text-xs font-medium text-muted-foreground">Action</label>
               <Select value={actionFilter} onValueChange={setActionFilter}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger id="audit-action" className="w-48">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
