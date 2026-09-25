@@ -46,6 +46,34 @@ pub(crate) fn adjust_article_stock(conn: &Connection, article_id: i64, magasin_i
     Ok(())
 }
 
+pub(crate) fn document_prefixe(dtype: &str) -> Result<&'static str, String> {
+    match dtype {
+        "facture" => Ok("FA"),
+        "bl" => Ok("BL"),
+        "devis" => Ok("DE"),
+        "commande" => Ok("CO"),
+        "avoir" => Ok("AV"),
+        _ => Err(format!("Type de document inconnu : {}", dtype)),
+    }
+}
+
+pub(crate) fn next_numero_document(conn: &Connection, dtype: &str, annee: i32) -> Result<String, String> {
+    let prefixe = document_prefixe(dtype)?;
+    let numero: i64 = conn.query_row(
+        "INSERT INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero) VALUES (?1, ?2, ?3, 1)
+         ON CONFLICT(ntype, annee) DO UPDATE SET dernier_numero = dernier_numero + 1
+         RETURNING dernier_numero",
+        params![format!("{}_client", dtype), annee, prefixe],
+        |r| r.get(0),
+    ).map_err(|e| format!("Numérotation {} {} impossible: {}", dtype, annee, e))?;
+    Ok(format!("{}-{}-{:05}", prefixe, annee, numero))
+}
+
+pub(crate) fn annee_courante() -> i32 {
+    use chrono::Datelike;
+    chrono::Local::now().year()
+}
+
 pub(crate) fn log_audit(conn: &Connection, utilisateur_id: Option<i64>, action: &str, detail: &str, reference_type: Option<&str>, reference_id: Option<i64>) {
     let _ = conn.execute(
         "INSERT INTO audit_log (utilisateur_id, action, detail, reference_type, reference_id) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -106,6 +134,98 @@ mod tests {
     fn test_default_magasin_id() {
         let conn = setup_test_db();
         assert_eq!(default_magasin_id(&conn).unwrap(), 1);
+    }
+
+    fn init_full_db() -> Connection {
+        crate::db::init_db(":memory:").unwrap()
+    }
+
+    #[test]
+    fn test_numero_document_increments() {
+        let conn = init_full_db();
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00001");
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00002");
+    }
+
+    #[test]
+    fn test_numero_document_changement_annee() {
+        let conn = init_full_db();
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00001");
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00002");
+        assert_eq!(next_numero_document(&conn, "facture", 2027).unwrap(), "FA-2027-00001");
+        assert_eq!(next_numero_document(&conn, "facture", 2027).unwrap(), "FA-2027-00002");
+        assert_eq!(next_numero_document(&conn, "facture", 2028).unwrap(), "FA-2028-00001");
+    }
+
+    #[test]
+    fn test_numero_document_sequences_par_type() {
+        let conn = init_full_db();
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00001");
+        assert_eq!(next_numero_document(&conn, "avoir", 2026).unwrap(), "AV-2026-00001");
+        assert_eq!(next_numero_document(&conn, "bl", 2026).unwrap(), "BL-2026-00001");
+        assert_eq!(next_numero_document(&conn, "devis", 2026).unwrap(), "DE-2026-00001");
+        assert_eq!(next_numero_document(&conn, "commande", 2026).unwrap(), "CO-2026-00001");
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00002");
+    }
+
+    #[test]
+    fn test_numero_document_type_inconnu() {
+        let conn = init_full_db();
+        assert!(next_numero_document(&conn, "ticket", 2026).is_err());
+    }
+
+    #[test]
+    fn test_numero_document_rollback_transaction() {
+        let mut conn = init_full_db();
+        {
+            let tx = conn.transaction().unwrap();
+            assert_eq!(next_numero_document(&tx, "facture", 2026).unwrap(), "FA-2026-00001");
+        }
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00001");
+    }
+
+    #[test]
+    fn test_migration_numerotation_existante() {
+        let path = std::env::temp_dir().join(format!(
+            "supercaisse_test_numerotation_{}_{}.db",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let path_str = path.to_string_lossy().to_string();
+        {
+            let legacy = Connection::open(&path).unwrap();
+            legacy.execute_batch("
+                CREATE TABLE numerotation (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ntype TEXT NOT NULL UNIQUE,
+                    annee INTEGER NOT NULL,
+                    prefixe TEXT NOT NULL,
+                    dernier_numero INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO numerotation (ntype, annee, prefixe, dernier_numero) VALUES ('facture_client', 2026, 'FA', 42);
+                INSERT INTO numerotation (ntype, annee, prefixe, dernier_numero) VALUES ('avoir_client', 2026, 'AV', 3);
+            ").unwrap();
+        }
+        let conn = crate::db::init_db(&path_str).unwrap();
+        assert_eq!(next_numero_document(&conn, "facture", 2026).unwrap(), "FA-2026-00043");
+        assert_eq!(next_numero_document(&conn, "avoir", 2026).unwrap(), "AV-2026-00004");
+        assert_eq!(next_numero_document(&conn, "facture", 2027).unwrap(), "FA-2027-00001");
+        drop(conn);
+        let reopened = crate::db::init_db(&path_str).unwrap();
+        assert_eq!(next_numero_document(&reopened, "facture", 2026).unwrap(), "FA-2026-00044");
+        drop(reopened);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{}", path_str, suffix));
+        }
+    }
+
+    #[test]
+    fn test_numero_facture_unique() {
+        let conn = init_full_db();
+        conn.execute("INSERT INTO ventes (numero_facture) VALUES ('FA-2026-00001')", []).unwrap();
+        assert!(conn.execute("INSERT INTO ventes (numero_facture) VALUES ('FA-2026-00001')", []).is_err());
+        conn.execute("INSERT INTO ventes (numero_facture) VALUES (NULL)", []).unwrap();
+        conn.execute("INSERT INTO ventes (numero_facture) VALUES (NULL)", []).unwrap();
     }
 
     #[test]

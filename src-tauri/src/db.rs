@@ -641,6 +641,24 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         VALUES ('avoir', 'AV', 0);
     ")?;
 
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS numerotation_v2 (
+            ntype TEXT NOT NULL,
+            annee INTEGER NOT NULL,
+            prefixe TEXT NOT NULL,
+            dernier_numero INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (ntype, annee)
+        );
+        INSERT OR IGNORE INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero)
+        SELECT ntype, annee, prefixe, dernier_numero FROM numerotation;
+    ")?;
+    if let Err(e) = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ventes_numero_facture_unique ON ventes(numero_facture) WHERE numero_facture IS NOT NULL",
+        [],
+    ) {
+        log::warn!("Index d'unicité des numéros de document non créé (doublons existants ?) : {}", e);
+    }
+
     // Insert default tables if empty
     let nb_tables: i64 = conn.query_row("SELECT count(*) FROM tables_resto", [], |r| r.get(0)).unwrap_or(0);
     if nb_tables == 0 {

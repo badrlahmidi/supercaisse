@@ -2,7 +2,7 @@ use crate::db::*;
 use rusqlite::{params, Connection};
 use tauri::State;
 
-use super::{default_magasin_id, adjust_article_stock, log_audit};
+use super::{default_magasin_id, adjust_article_stock, log_audit, document_prefixe, next_numero_document, annee_courante};
 
 fn get_composants(tx: &Connection, article_id: i64) -> Result<Vec<(i64, f64)>, String> {
     let mut stmt = tx.prepare("SELECT composant_id, quantite FROM article_composants WHERE article_id = ?1")
@@ -45,14 +45,7 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
     let net_a_payer = montant_total - montant_remise;
     let document_type = dtype.unwrap_or_else(|| "facture".to_string());
 
-    let prefixe = match document_type.as_str() {
-        "devis" => "DE",
-        "commande" => "CO",
-        "bl" => "BL",
-        "avoir" => "AV",
-        _ => "FA"
-    };
-    let ntype = format!("{}_client", document_type);
+    document_prefixe(&document_type)?;
 
     let mut credit_demandé = 0.0;
     if mode_paiement == "credit" {
@@ -87,23 +80,7 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         }
     }
 
-    let annee = chrono::Local::now().format("%Y").to_string();
-    let annee_i: i64 = annee.parse().unwrap_or(2026);
-    tx.execute(
-        "INSERT INTO numerotation (ntype, annee, prefixe, dernier_numero) VALUES (?1, ?2, ?3, 0)
-         ON CONFLICT(ntype) DO UPDATE SET dernier_numero = dernier_numero",
-        params![ntype, annee_i, prefixe],
-    ).ok();
-    tx.execute(
-        "UPDATE numerotation SET dernier_numero = dernier_numero + 1 WHERE ntype = ?1 AND annee = ?2",
-        params![ntype, annee_i],
-    ).map_err(|e| e.to_string())?;
-    let dernier_numero: i64 = tx.query_row(
-        "SELECT dernier_numero FROM numerotation WHERE ntype = ?1 AND annee = ?2",
-        params![ntype, annee_i],
-        |r| r.get(0),
-    ).map_err(|e| e.to_string())?;
-    let numero_facture = format!("{}-{}-{:05}", prefixe, annee, dernier_numero);
+    let numero_facture = next_numero_document(&tx, &document_type, annee_courante())?;
 
     let current_session_id: Option<i64> = if let Some(cid) = caissier_id {
         tx.query_row(
@@ -435,31 +412,7 @@ pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) 
       .map_err(|e| e.to_string())?;
     drop(stmt);
 
-    let prefixe = match target_type.as_str() {
-        "devis" => "DE",
-        "commande" => "CO",
-        "bl" => "BL",
-        "avoir" => "AV",
-        _ => "FA",
-    };
-    let ntype = format!("{}_client", target_type);
-    let annee = chrono::Local::now().format("%Y").to_string();
-    let annee_i: i64 = annee.parse().unwrap_or(2026);
-    tx.execute(
-        "INSERT INTO numerotation (ntype, annee, prefixe, dernier_numero) VALUES (?1, ?2, ?3, 0)
-         ON CONFLICT(ntype) DO UPDATE SET dernier_numero = dernier_numero",
-        params![ntype, annee_i, prefixe],
-    ).ok();
-    tx.execute(
-        "UPDATE numerotation SET dernier_numero = dernier_numero + 1 WHERE ntype = ?1 AND annee = ?2",
-        params![ntype, annee_i],
-    ).map_err(|e| e.to_string())?;
-    let dernier_numero: i64 = tx.query_row(
-        "SELECT dernier_numero FROM numerotation WHERE ntype = ?1 AND annee = ?2",
-        params![ntype, annee_i],
-        |r| r.get(0),
-    ).map_err(|e| e.to_string())?;
-    let numero_facture = format!("{}-{}-{:05}", prefixe, annee, dernier_numero);
+    let numero_facture = next_numero_document(&tx, &target_type, annee_courante())?;
 
     let new_montant_total = if target_type == "avoir" { -montant_total.abs() } else { montant_total };
     let new_montant_remise = if target_type == "avoir" { -montant_remise.abs() } else { montant_remise };

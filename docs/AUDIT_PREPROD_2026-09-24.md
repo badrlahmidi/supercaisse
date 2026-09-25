@@ -188,6 +188,8 @@ pub fn login_pin(db: State<DbState>, login: String, pin: String) -> Result<Optio
 
 ### [CRITIQUE] C-3 — Numérotation : toutes les ventes échouent à partir du 1er janvier 2027
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Nouvelle table `numerotation_v2` à clé `(ntype, annee)` alimentée depuis l'ancienne table au démarrage, helper unique `next_numero_document` (incrément atomique `RETURNING`) utilisé par `create_vente` et `convert_document`, type de document inconnu refusé, index unique sur `ventes.numero_facture` (S-4). Couvert par 7 tests Rust.
+
 **Fichier** : `src-tauri/src/commands/ventes.rs:90-106` et `:446-462`, `src-tauri/src/db.rs:631-642`
 **Risque** : `numerotation.ntype` est `UNIQUE`, mais la ligne est filtrée par `(ntype, annee)`. Au changement d'année :
 - l'`INSERT ... ON CONFLICT(ntype)` ne fait rien, car la ligne 2026 existe ;
