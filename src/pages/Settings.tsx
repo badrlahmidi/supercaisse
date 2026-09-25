@@ -39,7 +39,7 @@ const userSchema = z.object({
   login: z.string().min(3, "Login minimum 3 caractères"),
   nom: z.string().min(1, "Nom requis"),
   role: z.enum(["admin", "manager", "caissier"]),
-  password: z.string().min(6, "Mot de passe minimum 6 caractères").optional(),
+  password: z.string().min(8, "Mot de passe minimum 8 caractères").optional().or(z.literal("")),
   confirmPassword: z.string().optional(),
 }).refine((data) => !data.password || data.password === data.confirmPassword, {
   message: "Les mots de passe ne correspondent pas",

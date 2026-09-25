@@ -9,13 +9,7 @@ import { Card, CardContent } from "@/ui/Card"
 import { ShoppingCart, Lock, User, Eye, EyeOff, ShieldCheck, BarChart3, Package, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { invoke } from "@/lib/tauri"
-
-interface User {
-  id: number
-  login: string
-  nom: string
-  role: string
-}
+import { useAuth, type User as AuthUser } from "@/context/AuthContext"
 
 const loginSchema = z.object({
   login: z.string().min(1, "Le login est requis"),
@@ -34,6 +28,7 @@ const features = [
 export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { loginAs } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -51,9 +46,9 @@ export default function Login() {
   const onSubmit = async (data: LoginForm) => {
     setIsLoading(true)
     try {
-      const user = await invoke<User | null>("login", { login: data.login, password: data.password })
+      const user = await invoke<AuthUser | null>("login", { login: data.login, password: data.password })
       if (user) {
-        localStorage.setItem("supercaisse_user", JSON.stringify(user))
+        await loginAs(user)
         toast.success(`Bienvenue ${user.nom}`)
         navigate(from, { replace: true })
       } else {
@@ -188,11 +183,13 @@ export default function Login() {
                 </Button>
               </form>
 
-              <div className="mt-8 pt-6 border-t border-border text-center">
-                <p className="text-sm text-muted-foreground">
-                  Compte par défaut : <code className="text-foreground font-mono font-medium bg-muted px-2 py-0.5 rounded">admin / admin</code>
-                </p>
-              </div>
+              {import.meta.env.DEV && (
+                <div className="mt-8 pt-6 border-t border-border text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Compte par défaut : <code className="text-foreground font-mono font-medium bg-muted px-2 py-0.5 rounded">admin / admin</code>
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

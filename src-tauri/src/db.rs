@@ -103,6 +103,8 @@ pub struct Utilisateur {
     pub login: String,
     pub nom: String,
     pub role: String,
+    #[serde(default)]
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -712,17 +714,12 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         }
     }
 
-    // Create default admin if not exists
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM utilisateurs WHERE login = 'admin'",
-        [],
-        |r| r.get(0),
-    )?;
-    if count == 0 {
-        let hash = hash_password("admin");
+    let _ = conn.execute("ALTER TABLE utilisateurs ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0", []);
+    let nb_utilisateurs: i64 = conn.query_row("SELECT COUNT(*) FROM utilisateurs", [], |r| r.get(0))?;
+    if nb_utilisateurs == 0 {
         conn.execute(
-            "INSERT INTO utilisateurs (login, password_hash, nom, role) VALUES (?1, ?2, ?3, ?4)",
-            params!["admin", hash, "Administrateur", "admin"],
+            "INSERT INTO utilisateurs (login, password_hash, nom, role, must_change_password) VALUES (?1, ?2, ?3, ?4, 1)",
+            params!["admin", hash_password("admin"), "Administrateur", "admin"],
         )?;
     }
 
@@ -746,36 +743,5 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
         use sha2::Digest;
         let sha_hash = hex::encode(sha2::Sha256::digest(password.as_bytes()));
         sha_hash == hash
-    }
-}
-
-pub fn authenticate(conn: &mut Connection, login: &str, password: &str) -> Result<Option<Utilisateur>, String> {
-    let mut stmt = conn.prepare(
-        "SELECT id, login, nom, role, password_hash FROM utilisateurs WHERE login = ?1"
-    ).map_err(|e| e.to_string())?;
-    let result = stmt.query_row(params![login], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-        ))
-    }).ok();
-    match result {
-        None => Ok(None),
-        Some((id, ulogin, nom, role, hash)) => {
-            if !verify_password(password, &hash) {
-                return Ok(None);
-            }
-            if !hash.starts_with("$argon2") {
-                let new_hash = hash_password(password);
-                let _ = conn.execute(
-                    "UPDATE utilisateurs SET password_hash = ?1 WHERE id = ?2",
-                    params![new_hash, id],
-                );
-            }
-            Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role }))
-        }
     }
 }

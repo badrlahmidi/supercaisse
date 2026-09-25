@@ -89,6 +89,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
     const user = mockUsers.find(u => u.login === login && password === "admin")
     return user || null
   },
+  change_password: () => undefined,
 
   get_categories: () => mockCategories,
   add_category: ({ nom, description }) => { nextId++; mockCategories.push({ id: nextId, nom: nom as string, description: description as string | null }); return nextId },

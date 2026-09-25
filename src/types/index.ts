@@ -3,6 +3,7 @@ export interface User {
   login: string
   nom: string
   role: "admin" | "manager" | "caissier"
+  must_change_password?: boolean
 }
 
 export interface Article {

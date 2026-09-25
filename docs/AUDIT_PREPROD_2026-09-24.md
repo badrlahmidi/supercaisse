@@ -97,6 +97,15 @@ Côté frontend, conserver le jeton **en mémoire** (et non en `localStorage`) e
 
 ### [CRITIQUE] C-7 — Compte `admin/admin` recréé automatiquement s'il est renommé ou supprimé
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+> - Le compte `admin/admin` n'est créé que si la table `utilisateurs` est vide, marqué `must_change_password`.
+> - Toute connexion avec un mot de passe faible (« admin », identique au login, moins de 8 caractères) active ce marqueur, y compris sur les bases existantes.
+> - L'application bloque toutes les pages derrière un écran de changement de mot de passe (commande `change_password`).
+> - Il est impossible de supprimer ou rétrograder le dernier administrateur.
+> - L'indication « admin / admin » de l'écran de connexion n'apparaît plus qu'en développement.
+> - Corrige aussi la connexion, qui contournait `AuthContext` (renvoi vers /login jusqu'au rechargement, permissions non chargées).
+> - Le marqueur reste contournable via `localStorage` tant que C-5 n'est pas traité.
+
 **Fichier** : `src-tauri/src/db.rs:674-685`
 **Risque** : au démarrage, s'il n'existe aucun utilisateur dont le **login** vaut `admin`, un compte `admin` / mot de passe `admin` est créé. Un gérant qui renomme le compte administrateur par sécurité se retrouve donc avec un nouvel admin/admin au redémarrage suivant. Rien n'impose non plus de changer le mot de passe initial.
 **Fix** :

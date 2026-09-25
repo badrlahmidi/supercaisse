@@ -1,12 +1,14 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { Navigate, useNavigate, useLocation } from "react-router-dom"
 import { invoke } from "@/lib/tauri"
+import ChangePasswordRequired from "@/components/ChangePasswordRequired"
 
 export interface User {
   id: number
   login: string
   nom: string
   role: "admin" | "manager" | "caissier"
+  must_change_password?: boolean
 }
 
 type PermissionsMap = Record<string, Record<string, boolean>>
@@ -14,7 +16,8 @@ type PermissionsMap = Record<string, Record<string, boolean>>
 interface AuthContextType {
   user: User | null
   login: (login: string, password: string) => Promise<void>
-  loginAs: (userData: User) => void
+  loginAs: (userData: User) => Promise<void>
+  completePasswordChange: () => void
   logout: () => void
   isLoading: boolean
   hasPermission: (roles: string[]) => boolean
@@ -107,9 +110,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate("/pos")
   }, [navigate, loadPermissions])
 
-  const loginAs = useCallback((userData: User) => {
+  const loginAs = useCallback(async (userData: User) => {
     setUser(userData)
     localStorage.setItem("supercaisse_user", JSON.stringify(userData))
+    await loadPermissions(userData.role)
+  }, [loadPermissions])
+
+  const completePasswordChange = useCallback(() => {
+    setUser((current) => {
+      if (!current) return current
+      const updated = { ...current, must_change_password: false }
+      localStorage.setItem("supercaisse_user", JSON.stringify(updated))
+      return updated
+    })
   }, [])
 
   const logout = useCallback(() => {
@@ -136,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, loginAs, logout, isLoading, hasPermission, permissions, hasModulePermission }}>
+    <AuthContext.Provider value={{ user, login, loginAs, completePasswordChange, logout, isLoading, hasPermission, permissions, hasModulePermission }}>
       {children}
     </AuthContext.Provider>
   )
@@ -156,6 +169,10 @@ export function ProtectedRoute({ children, allowedRoles }: { children: ReactNode
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />
+  }
+
+  if (user.must_change_password) {
+    return <ChangePasswordRequired />
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
