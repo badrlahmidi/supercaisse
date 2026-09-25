@@ -73,7 +73,9 @@ describe("Login", () => {
     await user.click(screen.getByRole("button", { name: /se connecter/i }))
     await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_permissions", { role: "admin" }))
     expect(setSessionToken).toHaveBeenCalledWith("tok-login")
-    expect(localStorage.length).toBe(0)
+    const cles = Object.keys(localStorage)
+    expect(cles.filter((c) => !c.startsWith("supercaisse-cart-"))).toEqual([])
+    expect(cles.map((c) => localStorage.getItem(c)).join("")).not.toContain("tok-login")
   })
 
 })

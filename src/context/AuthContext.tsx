@@ -4,6 +4,7 @@ import { invoke, onSessionExpired, setSessionToken, getSessionToken } from "@/li
 import { toast } from "sonner"
 import ChangePasswordRequired from "@/components/ChangePasswordRequired"
 import { accesAutorise, routeAccueil } from "@/routes/acces"
+import { basculerPanier } from "@/store/cart"
 
 export interface User {
   id: number
@@ -63,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearSession = useCallback(() => {
     setSessionToken(null)
+    void basculerPanier(null)
     setUser(null)
     setPermissions({})
     navigate("/login")
@@ -87,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setSessionToken(token)
     }
+    await basculerPanier(userData.id)
     setUser(userData)
     await loadPermissions(userData.role)
   }, [loadPermissions])

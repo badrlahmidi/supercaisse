@@ -67,19 +67,29 @@ interface CartState {
   setActiveTable: (id: number | null, nom: string | null) => void
 }
 
+const PANIER_VIDE = {
+  items: [] as CartItem[],
+  selectedClient: null,
+  paymentMode: "especes" as ModePaiement,
+  discountPercent: "0",
+  cashGiven: "",
+  paymentSplits: [] as PaymentSplit[],
+  heldCarts: [] as HeldCart[],
+  useLoyaltyPoints: false,
+  activeTableId: null,
+  activeTableNom: null,
+}
+
+const CLE_PARTAGEE_OBSOLETE = "supercaisse-cart"
+
+export function clePanier(userId: number | null): string {
+  return userId ? `supercaisse-cart-${userId}` : "supercaisse-cart-anonyme"
+}
+
 export const useCartStore = create<CartState>()(
   persist(
     (set) => ({
-      items: [],
-      selectedClient: null,
-      paymentMode: "especes",
-      discountPercent: "0",
-      cashGiven: "",
-      paymentSplits: [],
-      heldCarts: [],
-      useLoyaltyPoints: false,
-      activeTableId: null,
-      activeTableNom: null,
+      ...PANIER_VIDE,
       setActiveTable: (id, nom) => set({ activeTableId: id, activeTableNom: nom }),
       addItem: (item) =>
         set((state) => {
@@ -186,8 +196,26 @@ export const useCartStore = create<CartState>()(
       setUseLoyaltyPoints: (use) => set({ useLoyaltyPoints: use }),
     }),
     {
-      name: "supercaisse-cart",
+      name: clePanier(null),
       version: 2,
     }
   )
 )
+
+export async function basculerPanier(userId: number | null): Promise<void> {
+  const nom = clePanier(userId)
+  if (useCartStore.persist.getOptions().name === nom) return
+  useCartStore.persist.setOptions({ name: nom })
+  let enregistre = false
+  try {
+    localStorage.removeItem(CLE_PARTAGEE_OBSOLETE)
+    enregistre = localStorage.getItem(nom) !== null
+  } catch {
+    enregistre = false
+  }
+  if (enregistre) {
+    await useCartStore.persist.rehydrate()
+  } else {
+    useCartStore.setState(PANIER_VIDE)
+  }
+}
