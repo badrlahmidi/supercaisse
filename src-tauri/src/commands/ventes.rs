@@ -122,6 +122,53 @@ fn preparer_lignes(
         .collect()
 }
 
+pub(crate) fn verifier_plafond_remise(
+    tx: &Connection,
+    caissier_id: Option<i64>,
+    articles: &[LigneVenteSaisie],
+    remise_globale: f64,
+) -> Result<(), String> {
+    let Some(id) = caissier_id else {
+        return Ok(());
+    };
+    let role: Option<String> = tx
+        .query_row(
+            "SELECT role FROM utilisateurs WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let cle = match role.as_deref() {
+        Some("caissier") => "remise_max_caissier",
+        Some("manager") => "remise_max_manager",
+        _ => return Ok(()),
+    };
+    let plafond = lire_setting(tx, cle)?
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(if cle == "remise_max_caissier" {
+            10.0
+        } else {
+            100.0
+        });
+    let effective = |remise_ligne: f64| {
+        100.0 * (1.0 - (1.0 - remise_ligne / 100.0) * (1.0 - remise_globale / 100.0))
+    };
+    let max = articles
+        .iter()
+        .map(|a| effective(a.remise_ligne.unwrap_or(0.0)))
+        .fold(effective(0.0), f64::max);
+    if max > plafond + 1e-9 {
+        return Err(format!(
+            "Remise de {:.2} % supérieure au plafond de {:.2} % autorisé pour le rôle {} : faites valider la vente par un responsable",
+            max,
+            plafond,
+            role.unwrap_or_default()
+        ));
+    }
+    Ok(())
+}
+
 fn lire_setting(tx: &Connection, key: &str) -> Result<Option<String>, String> {
     tx.query_row(
         "SELECT value FROM settings WHERE key = ?1",
@@ -203,6 +250,7 @@ pub(crate) fn create_vente_impl(
 
     let remise_globale = valider_pourcentage("Remise document", remise_globale_pct.unwrap_or(0.0))?;
     let lignes = preparer_lignes(&tx, &articles, remise_globale)?;
+    verifier_plafond_remise(&tx, caissier_id, &articles, remise_globale)?;
     let calculs: Vec<LigneCalculee> = lignes.iter().map(|l| l.calcul).collect();
     let totaux = totaliser(&calculs);
 
@@ -1055,6 +1103,41 @@ pub(crate) fn vendre_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_plafond_de_remise_par_role() {
+        let mut conn = setup();
+        conn.execute_batch(
+            "INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES
+                (2, 'caissier', 'x', 'Caissier', 'caissier'),
+                (3, 'gerant', 'x', 'Gérant', 'manager');
+             UPDATE settings SET value = '20' WHERE key = 'remise_max_manager';",
+        )
+        .unwrap();
+        let vendre_par = |conn: &mut Connection, caissier: i64, remise_ligne: f64, remise: f64| {
+            let net = round2(240.0 * (1.0 - remise_ligne / 100.0) * (1.0 - remise / 100.0));
+            vendre_json(
+                conn,
+                None,
+                Some(caissier),
+                vec![json!({ "article_id": 1, "quantite": 2, "remise_ligne": remise_ligne })],
+                Some(remise),
+                "especes".into(),
+                Some(vec![json!({ "mode": "especes", "montant": net })]),
+                Some("facture".into()),
+                None,
+                Some(1),
+            )
+        };
+        vendre_par(&mut conn, 2, 10.0, 0.0).unwrap();
+        vendre_par(&mut conn, 2, 0.0, 10.0).unwrap();
+        let err = vendre_par(&mut conn, 2, 5.0, 6.0).unwrap_err();
+        assert!(err.contains("plafond de 10.00 %"), "{err}");
+        assert!(vendre_par(&mut conn, 2, 15.0, 0.0).is_err());
+        vendre_par(&mut conn, 3, 20.0, 0.0).unwrap();
+        assert!(vendre_par(&mut conn, 3, 0.0, 25.0).is_err());
+        vendre_par(&mut conn, 1, 50.0, 50.0).unwrap();
+    }
 
     #[test]
     fn test_mode_de_vente_valide() {

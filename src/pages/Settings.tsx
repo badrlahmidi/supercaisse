@@ -50,6 +50,12 @@ const userSchema = z.object({
 
 type UserForm = z.infer<typeof userSchema>
 
+function pourcentageValide(valeur: string | undefined): boolean {
+  if (!valeur?.trim()) return true
+  const pct = Number(valeur.replace(",", "."))
+  return Number.isFinite(pct) && pct >= 0 && pct <= 100
+}
+
 const settingsSchema = z.object({
   shop_name: z.string().min(1),
   shop_address: z.string().optional(),
@@ -65,6 +71,8 @@ const settingsSchema = z.object({
   printer_name: z.string().optional().default("POS-80"),
   fidelite_actif: z.string().optional().default("true"),
   autoriser_stock_negatif: z.enum(["true", "false"]).optional().default("false"),
+  remise_max_caissier: z.string().optional().default("10").refine(pourcentageValide, "Pourcentage entre 0 et 100 attendu"),
+  remise_max_manager: z.string().optional().default("100").refine(pourcentageValide, "Pourcentage entre 0 et 100 attendu"),
   fidelite_dh_pour_1_point: z.string().optional().default("100"),
   fidelite_valeur_1_point: z.string().optional().default("1"),
   business_type: z.enum(["standard", "restaurant"]).default("standard"),
@@ -474,6 +482,31 @@ export default function Settings() {
                       <SelectItem value="true">Oui</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Remises</CardTitle>
+                <CardDescription>
+                  Remise maximale par ligne, remise document comprise. L'administrateur n'est pas plafonné.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="remise_max_caissier">Caissier (%)</Label>
+                  <Input {...settingsForm.register("remise_max_caissier")} id="remise_max_caissier" inputMode="decimal" placeholder="10" />
+                  {settingsForm.formState.errors.remise_max_caissier && (
+                    <p className="text-sm text-destructive">{settingsForm.formState.errors.remise_max_caissier.message}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="remise_max_manager">Manager (%)</Label>
+                  <Input {...settingsForm.register("remise_max_manager")} id="remise_max_manager" inputMode="decimal" placeholder="100" />
+                  {settingsForm.formState.errors.remise_max_manager && (
+                    <p className="text-sm text-destructive">{settingsForm.formState.errors.remise_max_manager.message}</p>
+                  )}
                 </div>
               </CardContent>
             </Card>

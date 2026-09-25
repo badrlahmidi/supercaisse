@@ -50,6 +50,8 @@ pub fn get_settings(
         printer_name: map.get("printer_name").filter(|s| !s.is_empty()).cloned(),
         fidelite_actif: map.get("fidelite_actif").cloned(),
         autoriser_stock_negatif: map.get("autoriser_stock_negatif").cloned(),
+        remise_max_caissier: map.get("remise_max_caissier").cloned(),
+        remise_max_manager: map.get("remise_max_manager").cloned(),
         fidelite_dh_pour_1_point: map.get("fidelite_dh_pour_1_point").cloned(),
         fidelite_valeur_1_point: map.get("fidelite_valeur_1_point").cloned(),
         business_type: map.get("business_type").cloned(),
@@ -89,13 +91,30 @@ pub fn update_settings(
     receipt_header: Option<String>,
     doc_primary_color: Option<String>,
     autoriser_stock_negatif: Option<String>,
+    remise_max_caissier: Option<String>,
+    remise_max_manager: Option<String>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("settings", "modifier"))?;
     let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let ice = super::fiscal::normaliser_ice("ICE", ice)?;
     let if_number = super::fiscal::normaliser_if(if_number)?;
+    let plafond = |libelle: &str, valeur: Option<String>, defaut: &str| -> Result<String, String> {
+        let texte = valeur
+            .map(|v| v.trim().replace(',', "."))
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| defaut.to_string());
+        let pct = texte
+            .parse::<f64>()
+            .map_err(|_| format!("{} invalide : {}", libelle, texte))?;
+        super::calcul::valider_pourcentage(libelle, pct)?;
+        Ok(texte)
+    };
+    let remise_max_caissier = plafond("Remise maximale du caissier", remise_max_caissier, "10")?;
+    let remise_max_manager = plafond("Remise maximale du manager", remise_max_manager, "100")?;
     let pairs: Vec<(&str, String)> = vec![
+        ("remise_max_caissier", remise_max_caissier),
+        ("remise_max_manager", remise_max_manager),
         ("shop_name", shop_name),
         ("shop_address", shop_address.unwrap_or_default()),
         ("shop_phone", shop_phone.unwrap_or_default()),

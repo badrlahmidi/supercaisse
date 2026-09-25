@@ -97,6 +97,8 @@ export interface Settings {
   business_type: string
   fidelite_actif: string
   autoriser_stock_negatif?: string
+  remise_max_caissier?: string
+  remise_max_manager?: string
   fidelite_dh_pour_1_point: string
   fidelite_valeur_1_point: string
   idle_timeout: string

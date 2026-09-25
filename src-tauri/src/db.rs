@@ -64,6 +64,8 @@ pub struct Settings {
     pub printer_name: Option<String>,
     pub fidelite_actif: Option<String>,
     pub autoriser_stock_negatif: Option<String>,
+    pub remise_max_caissier: Option<String>,
+    pub remise_max_manager: Option<String>,
     pub fidelite_dh_pour_1_point: Option<String>,
     pub fidelite_valeur_1_point: Option<String>,
     pub business_type: Option<String>,
@@ -143,6 +145,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_003_contraintes,
     migration_004_unicite,
     migration_005_verrouillage_pin,
+    migration_006_plafonds_remise,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -696,6 +699,13 @@ fn migration_005_verrouillage_pin(conn: &Connection) -> Result<()> {
     )?;
     ajouter_colonne(conn, "utilisateurs", "pin_bloque_jusqua", "TEXT")?;
     Ok(())
+}
+
+fn migration_006_plafonds_remise(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('remise_max_caissier', '10');
+         INSERT OR IGNORE INTO settings (key, value) VALUES ('remise_max_manager', '100');",
+    )
 }
 
 fn migration_001_base(conn: &Connection) -> Result<()> {

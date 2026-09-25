@@ -73,6 +73,8 @@ const mockSettings: Settings = {
   business_type: "standard",
   fidelite_actif: "true",
   autoriser_stock_negatif: "false",
+  remise_max_caissier: "10",
+  remise_max_manager: "100",
   fidelite_dh_pour_1_point: "100",
   fidelite_valeur_1_point: "1",
   idle_timeout: "300",
