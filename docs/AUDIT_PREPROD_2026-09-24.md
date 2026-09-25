@@ -124,6 +124,8 @@ if nb_users == 0 {
 
 ### [MAJEUR] M-7 — XSS dans le ticket HTML, escaladable en accès IPC complet
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Toutes les valeurs texte du ticket HTML sont échappées (`esc`), le logo n'est inséré que s'il est du base64 valide (HTML et PDF). En production, la CSP n'autorise plus `'unsafe-inline'` pour les scripts et ajoute `object-src 'none'`, `base-uri`, `form-action` et `frame-ancestors`. Le développement garde une `devCsp` permissive pour Vite. Couvert par 3 tests Vitest et vérifié sur un build release (l'application s'affiche normalement).
+
 **Fichier** : `src/lib/receipt.ts:50,105-114,158`, `src-tauri/tauri.conf.json:26`
 **Risque** :
 - `generateReceiptHTML` interpole sans échappement `item.designation`, `shopName`, `shopAddress`, `receiptHeader`, etc.
@@ -144,6 +146,8 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 Retirer ensuite `'unsafe-inline'` de `script-src` : Vite ne génère pas de script inline en build. Il faut aussi valider `logoBase64` avec `/^[A-Za-z0-9+/=]+$/`.
 
 ### [MAJEUR] M-8 — Injection de commande Windows via `printer_name`
+
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. `valider_imprimante` n'accepte qu'un nom simple (lettres, chiffres, espace, `-_.`), un partage `\\hôte\partage` ou un périphérique `/dev/(usb/)lpN|ttyUSBN|ttyACMN|ttySN`. Plus aucun shell : écriture directe sur le partage ou le périphérique, ou `lp` avec arguments séparés et `--`. Le nom est aussi validé à l'enregistrement des paramètres. Couvert par 2 tests Rust, dont 14 tentatives d'injection.
 
 **Fichier** : `src-tauri/src/commands/print.rs:44-54`
 **Risque** : `printer_name` provient des settings, modifiables par n'importe quel appelant IPC (C-5). Il est concaténé dans une chaîne passée à `cmd /c`, donc une valeur comme `POS" & powershell -enc ... & "` exécute du code arbitraire sur le poste de caisse.

@@ -66,7 +66,11 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
         ("default_tva", default_tva.to_string()),
         ("receipt_footer", receipt_footer.unwrap_or_default()),
         ("currency", currency),
-        ("printer_name", printer_name.unwrap_or_else(|| "POS-80".to_string())),
+        ("printer_name", {
+            let nom = printer_name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "POS-80".to_string());
+            super::print::valider_imprimante(&nom)?;
+            nom.trim().to_string()
+        }),
         ("business_type", business_type.unwrap_or_else(|| "standard".to_string())),
         ("fidelite_actif", fidelite_actif.unwrap_or_else(|| "true".to_string())),
         ("fidelite_dh_pour_1_point", fidelite_dh_pour_1_point.unwrap_or_else(|| "100".to_string())),

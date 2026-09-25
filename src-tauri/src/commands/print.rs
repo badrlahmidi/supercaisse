@@ -26,6 +26,51 @@ pub fn print_ticket(texte: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) enum CibleImpression {
+    Partage(String),
+    Peripherique(String),
+    Cups(String),
+}
+
+fn nom_simple_valide(nom: &str) -> bool {
+    !nom.is_empty()
+        && nom.len() <= 64
+        && !nom.starts_with(['-', '.', ' '])
+        && nom.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-' | '.'))
+}
+
+pub(crate) fn valider_imprimante(nom: &str) -> Result<CibleImpression, String> {
+    let nom = nom.trim();
+    let invalide = || format!("Nom d'imprimante invalide : « {} » (lettres, chiffres, espace, - _ . uniquement)", nom);
+    if let Some(reste) = nom.strip_prefix(r"\\") {
+        let (hote, partage) = reste.split_once('\\').ok_or_else(invalide)?;
+        let hote_valide = !hote.is_empty() && hote.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+        if hote_valide && nom_simple_valide(partage) {
+            return Ok(CibleImpression::Partage(nom.to_string()));
+        }
+        return Err(invalide());
+    }
+    if let Some(dev) = nom.strip_prefix("/dev/") {
+        let dev = dev.strip_prefix("usb/").unwrap_or(dev);
+        let valide = ["lp", "ttyUSB", "ttyACM", "ttyS"].iter().any(|p| {
+            dev.strip_prefix(p).is_some_and(|n| !n.is_empty() && n.len() <= 3 && n.chars().all(|c| c.is_ascii_digit()))
+        });
+        if valide {
+            return Ok(CibleImpression::Peripherique(nom.to_string()));
+        }
+        return Err(invalide());
+    }
+    if nom_simple_valide(nom) {
+        return Ok(if cfg!(target_os = "windows") {
+            CibleImpression::Partage(format!(r"\\localhost\{}", nom))
+        } else {
+            CibleImpression::Cups(nom.to_string())
+        });
+    }
+    Err(invalide())
+}
+
 #[tauri::command]
 pub fn print_escpos(db: State<DbState>, base64_data: String) -> Result<(), String> {
     let printer_name: String = {
@@ -33,41 +78,28 @@ pub fn print_escpos(db: State<DbState>, base64_data: String) -> Result<(), Strin
         conn.query_row("SELECT value FROM settings WHERE key = 'printer_name'", [], |r| r.get(0))
             .unwrap_or_else(|_| "POS-80".to_string())
     };
+    let cible = valider_imprimante(&printer_name)?;
 
     let bytes = general_purpose::STANDARD.decode(base64_data)
         .map_err(|e| format!("Erreur de décodage base64: {}", e))?;
 
-    let path = std::env::temp_dir().join("ticket_escpos.bin");
-    std::fs::write(&path, &bytes).map_err(|e| format!("Erreur d'écriture du flux binaire: {}", e))?;
-
-    let path_str = path.to_string_lossy().to_string();
-
-    if cfg!(target_os = "windows") {
-        let printer_path = if printer_name.starts_with("\\\\") {
-            printer_name.clone()
-        } else {
-            format!("\\\\localhost\\{}", printer_name)
-        };
-        let args = format!("COPY /B \"{}\" \"{}\"", path_str, printer_path);
-        let output = std::process::Command::new("cmd")
-            .args(["/c", &args])
-            .output()
-            .map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Erreur d'impression ESC/POS: {}", err));
+    match cible {
+        CibleImpression::Partage(chemin) | CibleImpression::Peripherique(chemin) => {
+            std::fs::write(&chemin, &bytes)
+                .map_err(|e| format!("Erreur d'impression ESC/POS vers {}: {}", chemin, e))?;
         }
-    } else if printer_name.starts_with("/dev/") {
-        std::fs::write(&printer_name, &bytes)
-            .map_err(|e| format!("Erreur écriture vers {}: {}", printer_name, e))?;
-    } else {
-        let output = std::process::Command::new("lp")
-            .args(["-d", &printer_name, "-o", "raw", &path_str])
-            .output()
-            .map_err(|e| format!("Erreur lp: {}", e))?;
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Erreur d'impression ESC/POS: {}", err));
+        CibleImpression::Cups(nom) => {
+            let path = std::env::temp_dir().join(format!("ticket_escpos_{}.bin", std::process::id()));
+            std::fs::write(&path, &bytes).map_err(|e| format!("Erreur d'écriture du flux binaire: {}", e))?;
+            let output = std::process::Command::new("lp")
+                .arg("-d").arg(&nom).arg("-o").arg("raw").arg("--").arg(&path)
+                .output()
+                .map_err(|e| format!("Erreur lp: {}", e))?;
+            let _ = std::fs::remove_file(&path);
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Erreur d'impression ESC/POS: {}", err));
+            }
         }
     }
 
@@ -123,4 +155,40 @@ pub fn save_document_pdf(dirs: State<AppDirs>, base64_data: String, filename: St
     let doc_path = docs_dir.join(safe_name);
     std::fs::write(&doc_path, &bytes).map_err(|e| format!("Erreur d'écriture du PDF: {}", e))?;
     Ok(doc_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_noms_valides() {
+        assert!(valider_imprimante("POS-80").is_ok());
+        assert!(valider_imprimante("EPSON TM-T20II").is_ok());
+        assert_eq!(valider_imprimante(r"\\caisse-02\POS 80").unwrap(), CibleImpression::Partage(r"\\caisse-02\POS 80".into()));
+        assert_eq!(valider_imprimante("/dev/usb/lp0").unwrap(), CibleImpression::Peripherique("/dev/usb/lp0".into()));
+        assert_eq!(valider_imprimante("/dev/ttyUSB1").unwrap(), CibleImpression::Peripherique("/dev/ttyUSB1".into()));
+    }
+
+    #[test]
+    fn test_injections_refusees() {
+        for nom in [
+            r#"POS" & calc & ""#,
+            "POS & powershell -enc AAAA",
+            "POS | del *",
+            "POS`whoami`",
+            "$(reboot)",
+            "-o raw",
+            "..",
+            r"\\localhost\..\..\Windows",
+            r"\\host&calc\POS",
+            "/dev/../home/user/.bashrc",
+            "/dev/sda",
+            "/dev/lp0; rm -rf /",
+            "",
+            "POS\nPOS",
+        ] {
+            assert!(valider_imprimante(nom).is_err(), "accepté à tort : {nom}");
+        }
+    }
 }
