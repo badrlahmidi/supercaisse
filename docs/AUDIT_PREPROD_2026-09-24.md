@@ -404,6 +404,12 @@ Rendre le stock négatif configurable (setting `autoriser_stock_negatif`). Ratta
 
 ### [MAJEUR] M-5 — Inventaire : les mouvements survenus pendant le comptage sont écrasés
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+> - Au comptage d'une ligne, le stock théorique est relevé à cet instant et l'écart calculé par rapport à lui.
+> - La validation applique l'écart (`adjust_article_stock`) au lieu d'écraser le stock : les ventes et mouvements postérieurs au comptage sont conservés.
+> - Lignes verrouillées après validation, quantité comptée ≥ 0, un seul inventaire en cours par magasin, création transactionnelle.
+> - Couvert par 3 tests Rust.
+
 **Fichier** : `src-tauri/src/commands/inventaire.rs:147-158`
 **Risque** :
 - `valider_inventaire` fait `SET quantite = stock_compte`. Toute vente, réception ou transfert survenu entre `create_inventaire` et la validation est perdu, puisque le mouvement est enregistré mais le stock écrasé.
