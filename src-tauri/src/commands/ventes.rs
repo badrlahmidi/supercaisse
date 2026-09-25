@@ -294,20 +294,117 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
     }))
 }
 
+fn credit_propre(tx: &Connection, vente_id: i64) -> Result<f64, String> {
+    let (mode_paiement, montant_total, montant_remise): (String, f64, f64) = tx.query_row(
+        "SELECT mode_paiement, montant_total, montant_remise FROM ventes WHERE id = ?1",
+        params![vente_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).map_err(|e| e.to_string())?;
+    let (nb_paiements, credit_paye): (i64, f64) = tx.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN mode = 'credit' THEN montant END), 0) FROM vente_paiements WHERE vente_id = ?1",
+        params![vente_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|e| e.to_string())?;
+    if nb_paiements > 0 {
+        return Ok(credit_paye);
+    }
+    Ok(if mode_paiement == "credit" { round2((montant_total - montant_remise).abs()) } else { 0.0 })
+}
+
+pub(crate) fn credit_porte(tx: &Connection, vente_id: i64) -> Result<f64, String> {
+    let (dtype, source): (String, Option<i64>) = tx.query_row(
+        "SELECT COALESCE(dtype, 'facture'), source_vente_id FROM ventes WHERE id = ?1",
+        params![vente_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    ).map_err(|e| e.to_string())?;
+    if !matches!(dtype.as_str(), "facture" | "bl") {
+        return Ok(0.0);
+    }
+    if let Some(src) = source {
+        let src_dtype: String = tx.query_row(
+            "SELECT COALESCE(dtype, 'facture') FROM ventes WHERE id = ?1", params![src], |r| r.get(0),
+        ).map_err(|e| e.to_string())?;
+        if matches!(src_dtype.as_str(), "facture" | "bl") {
+            return credit_porte(tx, src);
+        }
+    }
+    credit_propre(tx, vente_id)
+}
+
+fn credit_repris_par_avoir(tx: &Connection, avoir_id: i64) -> Result<f64, String> {
+    let (source, montant_total, montant_remise): (Option<i64>, f64, f64) = tx.query_row(
+        "SELECT source_vente_id, montant_total, montant_remise FROM ventes WHERE id = ?1",
+        params![avoir_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).map_err(|e| e.to_string())?;
+    let Some(src) = source else { return Ok(0.0) };
+    Ok(credit_porte(tx, src)?.min(round2((montant_total - montant_remise).abs())))
+}
+
+fn verifier_plafond(tx: &Connection, client_id: i64, montant: f64) -> Result<(), String> {
+    let (actuel, plafond): (f64, Option<f64>) = tx.query_row(
+        "SELECT COALESCE(credit_actuel, 0), credit_plafond FROM clients WHERE id = ?1",
+        params![client_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(|e| e.to_string())?;
+    if let Some(plaf) = plafond {
+        if plaf > 0.0 && actuel + montant > plaf + TOLERANCE_MONTANT {
+            return Err(format!("Plafond de crédit dépassé. Crédit actuel: {}, Plafond: {}, Demandé: {}", actuel, plaf, montant));
+        }
+    }
+    Ok(())
+}
+
+fn ajuster_credit(tx: &Connection, client_id: i64, delta: f64) -> Result<(), String> {
+    if delta != 0.0 {
+        tx.execute("UPDATE clients SET credit_actuel = COALESCE(credit_actuel, 0) + ?1 WHERE id = ?2", params![round2(delta), client_id])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn annuler_vente(db: State<DbState>, auth: State<AuthState>, token: String, vente_id: i64) -> Result<(), String> {
+pub fn annuler_vente(db: State<DbState>, auth: State<AuthState>, token: String, vente_id: i64, motif: Option<String>) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
+    annuler_vente_impl(&mut conn, vente_id, Some(me.user_id), motif.as_deref())
+}
+
+pub(crate) fn annuler_vente_impl(conn: &mut Connection, vente_id: i64, auteur: Option<i64>, motif: Option<&str>) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let (statut, dtype, vente_magasin_id): (String, String, Option<i64>) = tx.query_row(
-        "SELECT statut, COALESCE(dtype, 'facture'), magasin_id FROM ventes WHERE id = ?1",
+    let (statut, dtype, vente_magasin_id, client_id): (String, String, Option<i64>, Option<i64>) = tx.query_row(
+        "SELECT statut, COALESCE(dtype, 'facture'), magasin_id, client_id FROM ventes WHERE id = ?1",
         params![vente_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).map_err(|e| e.to_string())?;
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).optional().map_err(|e| e.to_string())?.ok_or("Document introuvable")?;
 
-    if statut == "annulee" {
-        return Err("Cette vente est déjà annulée".to_string());
+    match statut.as_str() {
+        "annulee" => return Err("Cette vente est déjà annulée".to_string()),
+        "convertie" => return Err("Ce document a déjà été converti : annulez le document issu de la conversion ou émettez un avoir".to_string()),
+        _ => {}
+    }
+
+    if let Some(cid) = client_id {
+        match dtype.as_str() {
+            "facture" | "bl" => ajuster_credit(&tx, cid, -credit_porte(&tx, vente_id)?)?,
+            "avoir" => ajuster_credit(&tx, cid, credit_repris_par_avoir(&tx, vente_id)?)?,
+            _ => {}
+        }
+        let mouvements: Vec<(String, f64)> = {
+            let mut stmt = tx.prepare(
+                "SELECT mtype, COALESCE(SUM(points), 0) FROM mouvements_fidelite WHERE vente_id = ?1 AND mtype IN ('gain', 'depense') GROUP BY mtype"
+            ).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![vente_id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?;
+            rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?
+        };
+        for (mtype, points) in mouvements {
+            let (delta, annulation) = if mtype == "gain" { (-points, "annulation_gain") } else { (points, "annulation_depense") };
+            tx.execute("UPDATE clients SET points_fidelite = COALESCE(points_fidelite, 0) + ?1 WHERE id = ?2", params![delta, cid])
+                .map_err(|e| e.to_string())?;
+            tx.execute("INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, ?4)", params![cid, vente_id, points, annulation])
+                .map_err(|e| e.to_string())?;
+        }
     }
 
     let stock_was_deducted = dtype == "facture" || dtype == "bl";
@@ -366,11 +463,12 @@ pub fn annuler_vente(db: State<DbState>, auth: State<AuthState>, token: String, 
         "SELECT numero_facture FROM ventes WHERE id = ?1", params![vente_id], |r| r.get(0)
     ).ok();
     let montant: f64 = tx.query_row(
-        "SELECT montant_total FROM ventes WHERE id = ?1", params![vente_id], |r| r.get(0)
-    ).unwrap_or(0.0);
+        "SELECT montant_total - montant_remise FROM ventes WHERE id = ?1", params![vente_id], |r| r.get(0)
+    ).map_err(|e| e.to_string())?;
     tx.execute("UPDATE ventes SET statut = 'annulee' WHERE id = ?1", params![vente_id]).map_err(|e| e.to_string())?;
-    log_audit(&tx, Some(me.user_id), "annuler_vente",
-        &format!("Annulation vente #{} ({}) - Montant: {:.2}", vente_id, numero_facture.unwrap_or_default(), montant),
+    let motif = motif.map(str::trim).filter(|m| !m.is_empty()).map(|m| format!(" - Motif: {}", m)).unwrap_or_default();
+    log_audit(&tx, auteur, "annuler_vente",
+        &format!("Annulation {} #{} ({}) - Montant: {:.2}{}", dtype, vente_id, numero_facture.unwrap_or_default(), montant, motif),
         Some("vente"), Some(vente_id));
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -628,23 +726,17 @@ pub(crate) fn convert_document_impl(conn: &mut Connection, vente_id: i64, target
         params![vente_id],
     ).map_err(|e| e.to_string())?;
 
-    let net_amount = (montant_total - montant_remise).abs();
-    if mode_paiement == "credit" && (target_type == "facture" || target_type == "bl") {
-        if let Some(cid) = client_id {
-            tx.execute(
-                "UPDATE clients SET credit_actuel = credit_actuel + ?1 WHERE id = ?2",
-                params![net_amount, cid],
-            ).map_err(|e| e.to_string())?;
-        }
-    }
-    if target_type == "avoir" {
-        if let Some(cid) = client_id {
-            if mode_paiement == "credit" {
-                tx.execute(
-                    "UPDATE clients SET credit_actuel = credit_actuel - ?1 WHERE id = ?2",
-                    params![net_amount, cid],
-                ).map_err(|e| e.to_string())?;
+    if let Some(cid) = client_id {
+        match target_type.as_str() {
+            "facture" | "bl" if !matches!(source_dtype.as_str(), "facture" | "bl") => {
+                let credit = credit_porte(&tx, new_vente_id)?;
+                if credit > 0.0 {
+                    verifier_plafond(&tx, cid, credit)?;
+                    ajuster_credit(&tx, cid, credit)?;
+                }
             }
+            "avoir" => ajuster_credit(&tx, cid, -credit_repris_par_avoir(&tx, new_vente_id)?)?,
+            _ => {}
         }
     }
 
@@ -798,6 +890,86 @@ mod tests {
         let (ht, tva): (f64, f64) = conn.query_row("SELECT montant_ht, montant_tva FROM vente_articles WHERE vente_id = ?1", params![avoir], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!((ht, tva), (-90.0, -18.0));
         assert!(avoir > facture);
+    }
+
+    fn credit(conn: &Connection) -> f64 {
+        conn.query_row("SELECT credit_actuel FROM clients WHERE id = 1", [], |r| r.get(0)).unwrap()
+    }
+
+    fn points(conn: &Connection) -> f64 {
+        conn.query_row("SELECT points_fidelite FROM clients WHERE id = 1", [], |r| r.get(0)).unwrap()
+    }
+
+    fn document_credit(conn: &mut Connection, dtype: &str) -> i64 {
+        create_vente_impl(conn, Some(1), Some(1), vec![json!({ "article_id": 1, "quantite": 1 })], None, "credit".into(),
+            None, Some(dtype.into()), None, None).unwrap()["id"].as_i64().unwrap()
+    }
+
+    #[test]
+    fn test_bl_converti_en_facture_credit_compte_une_fois() {
+        let mut conn = setup();
+        let bl = document_credit(&mut conn, "bl");
+        assert_eq!(credit(&conn), 120.0);
+        let facture = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
+        assert_eq!(credit(&conn), 120.0);
+        let avoir = convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
+        assert_eq!(credit(&conn), 0.0);
+        annuler_vente_impl(&mut conn, avoir, None, None).unwrap();
+        assert_eq!(credit(&conn), 120.0);
+    }
+
+    #[test]
+    fn test_devis_a_credit_converti_verifie_le_plafond() {
+        let mut conn = setup();
+        conn.execute("UPDATE clients SET credit_plafond = 100 WHERE id = 1", []).unwrap();
+        let devis = create_vente_impl(&mut conn, Some(1), Some(1), vec![json!({ "article_id": 2, "quantite": 1 })], None, "credit".into(),
+            None, Some("devis".into()), None, None).unwrap()["id"].as_i64().unwrap();
+        conn.execute("UPDATE vente_articles SET quantite = 12, total_ligne = 120, montant_ht = 120 WHERE vente_id = ?1", params![devis]).unwrap();
+        conn.execute("UPDATE ventes SET montant_total = 120, montant_ht = 120 WHERE id = ?1", params![devis]).unwrap();
+        assert!(convert_document_impl(&mut conn, devis, "facture".into()).unwrap_err().contains("Plafond"));
+        assert_eq!(credit(&conn), 0.0);
+        conn.execute("UPDATE clients SET credit_plafond = 500 WHERE id = 1", []).unwrap();
+        convert_document_impl(&mut conn, devis, "facture".into()).unwrap();
+        assert_eq!(credit(&conn), 120.0);
+    }
+
+    #[test]
+    fn test_annulation_reverse_le_credit_et_les_points() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 1 }]), None,
+            json!([{ "mode": "credit", "montant": 90 }, { "mode": "fidelite", "montant": 30 }]), "facture", Some(30.0)).unwrap();
+        assert_eq!(credit(&conn), 90.0);
+        assert_eq!(points(&conn), 50.0 - 30.0 + 0.0);
+        let facture = r["id"].as_i64().unwrap();
+        annuler_vente_impl(&mut conn, facture, Some(1), Some("Erreur de saisie")).unwrap();
+        assert_eq!(credit(&conn), 0.0);
+        assert_eq!(points(&conn), 50.0);
+        let detail: String = conn.query_row("SELECT detail FROM audit_log WHERE action = 'annuler_vente'", [], |r| r.get(0)).unwrap();
+        assert!(detail.contains("Motif: Erreur de saisie"));
+        assert!(annuler_vente_impl(&mut conn, facture, None, None).unwrap_err().contains("déjà annulée"));
+    }
+
+    #[test]
+    fn test_annulation_reverse_les_points_gagnes() {
+        let mut conn = setup();
+        let r = vendre(&mut conn, Some(1), json!([{ "article_id": 1, "quantite": 5 }]), None,
+            json!([{ "mode": "especes", "montant": 600 }]), "facture", None).unwrap();
+        assert_eq!(points(&conn), 56.0);
+        annuler_vente_impl(&mut conn, r["id"].as_i64().unwrap(), None, None).unwrap();
+        assert_eq!(points(&conn), 50.0);
+    }
+
+    #[test]
+    fn test_document_converti_non_annulable() {
+        let mut conn = setup();
+        let bl = document_credit(&mut conn, "bl");
+        let facture = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
+        assert!(annuler_vente_impl(&mut conn, bl, None, None).unwrap_err().contains("converti"));
+        let stock_avant: f64 = conn.query_row("SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0)).unwrap();
+        annuler_vente_impl(&mut conn, facture, None, None).unwrap();
+        let stock_apres: f64 = conn.query_row("SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(stock_apres, stock_avant + 1.0);
+        assert_eq!(credit(&conn), 0.0);
     }
 
     #[test]

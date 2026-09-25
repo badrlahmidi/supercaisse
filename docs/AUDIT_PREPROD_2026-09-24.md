@@ -345,6 +345,12 @@ fn round2(x: f64) -> f64 { (x * 100.0).round() / 100.0 }
 
 ### [MAJEUR] M-3 — Crédit client : double comptabilisation et annulation non reversée
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+> - `credit_porte` calcule le crédit porté par un document : paiements `credit` enregistrés, sinon mode `credit`. Une facture issue d'un BL hérite du crédit du BL au lieu de le recompter.
+> - La conversion devis → facture/BL à crédit vérifie le plafond. Un avoir déduit au plus le crédit porté par sa source.
+> - `annuler_vente` refuse les documents déjà convertis (émettre un avoir), reverse le crédit client (y compris l'annulation d'un avoir) et les points fidélité gagnés ou dépensés, et enregistre un motif optionnel saisi dans l'écran Ventes.
+> - Couvert par 5 tests Rust.
+
 **Fichier** : `src-tauri/src/commands/ventes.rs:82-84,206-284,546-554`
 **Risque** :
 - Un BL à crédit incrémente `credit_actuel` à sa création, puis la conversion BL → facture l'incrémente **une seconde fois** (`convert_document`, `target_type == "facture"`, sans tester `source_dtype`).

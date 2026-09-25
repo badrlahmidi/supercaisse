@@ -48,9 +48,11 @@ export function useCreateSale() {
 export function useCancelSale() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (venteId: number) => invoke("annuler_vente", { venteId }),
+    mutationFn: ({ venteId, motif }: { venteId: number; motif?: string }) =>
+      invoke("annuler_vente", { venteId, motif: motif?.trim() || null }),
     onSuccess: () => {
-      toast.success("Vente annulée", { description: "Le stock a été réajusté" })
+      toast.success("Vente annulée", { description: "Stock, crédit client et points fidélité réajustés" })
+      qc.invalidateQueries({ queryKey: ["clients"] })
       qc.invalidateQueries({ queryKey: ["ventes"] })
       qc.invalidateQueries({ queryKey: ["stats"] })
       qc.invalidateQueries({ queryKey: ["articles"] })

@@ -63,6 +63,7 @@ export default function Ventes() {
   const [selectedVente, setSelectedVente] = useState<VenteDetail | null>(null)
   const [showDetail, setShowDetail] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState<Vente | null>(null)
+  const [cancelMotif, setCancelMotif] = useState("")
   const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null)
 
   const { data: ventes, isLoading } = useSalesList(dateDebut, dateFin)
@@ -513,7 +514,7 @@ export default function Ventes() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!cancelConfirm} onOpenChange={() => setCancelConfirm(null)}>
+      <Dialog open={!!cancelConfirm} onOpenChange={() => { setCancelConfirm(null); setCancelMotif("") }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
@@ -522,15 +523,22 @@ export default function Ventes() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Êtes-vous sûr de vouloir annuler ce document ? Si c'est une facture ou un BL, le stock sera réajusté. <strong>Cette action est irréversible.</strong>
+            Êtes-vous sûr de vouloir annuler ce document ? Si c'est une facture ou un BL, le stock, le crédit client et les points fidélité seront réajustés. <strong>Cette action est irréversible.</strong>
           </p>
+          <div className="space-y-2">
+            <Label htmlFor="cancel_motif">Motif</Label>
+            <Input id="cancel_motif" value={cancelMotif} onChange={(e) => setCancelMotif(e.target.value)} placeholder="Erreur de saisie, retour client…" />
+          </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCancelConfirm(null)}>Fermer</Button>
             <Button
               variant="destructive"
               disabled={cancelMutation.isPending}
               onClick={() => {
-                if (cancelConfirm) cancelMutation.mutate(cancelConfirm.id, { onSuccess: () => setCancelConfirm(null) })
+                if (cancelConfirm) cancelMutation.mutate(
+                  { venteId: cancelConfirm.id, motif: cancelMotif },
+                  { onSuccess: () => { setCancelConfirm(null); setCancelMotif("") } },
+                )
               }}
             >
               {cancelMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
