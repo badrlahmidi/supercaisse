@@ -171,7 +171,20 @@ std::fs::write(&printer_path, &bytes).map_err(|e| format!("Erreur impression: {e
 
 ### [MAJEUR] M-9 — PIN : brute-force illimité, collisions, coût O(n × Argon2)
 
-> **Statut : non corrigé**, hormis deux points : les permissions sont rechargées après `loginAs`, et le hachage Argon2 ne tourne plus sur le thread principal (M-15). **Restent :** limite de tentatives sur `login_pin`, unicité des PIN, et identifiant ou PIN plus long.
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+>
+> - **Identifiant + PIN :** `login_pin(login, pin)` ne vérifie que le compte désigné, avec un seul hachage Argon2 (qui ne tourne plus sur le thread principal). Une collision de PIN entre deux comptes n'a donc plus d'effet, puisque l'identité vient de l'identifiant. C'est pourquoi l'unicité des PIN n'est pas exigée : la vérifier indiquerait à l'administrateur le PIN d'un autre compte.
+> - **Limite de tentatives :** après 5 échecs, le PIN est bloqué 5 minutes. Le compteur et l'échéance sont stockés en base (migration v5), donc un redémarrage ne les efface pas. Chaque échec est tracé dans l'audit (`echec_pin`, puis `blocage_pin`). Un succès par PIN ou par mot de passe remet le compteur à zéro. Le mot de passe reste utilisable pendant le blocage.
+> - **Format :** le PIN compte de 4 à 6 chiffres. Les PIN triviaux (chiffres identiques ou qui se suivent : 0000, 1234, 9876…) sont refusés à l'enregistrement.
+> - **Écran de verrouillage :** il présente le compte courant et les comptes dotés d'un PIN (commande `get_comptes_pin`, réservée à une session ouverte), une saisie de 4 à 6 chiffres avec un bouton de validation, et le message de blocage envoyé par le serveur. Les permissions sont rechargées après le changement d'utilisateur. Au passage, le déverrouillage par mot de passe ouvrait une session serveur puis en jetait le jeton ; il utilise maintenant `loginAs`.
+>
+> Couvert par des tests Rust (format, PIN lié à l'identifiant, blocage et expiration, remise à zéro) et Vitest (écran de verrouillage).
+>
+> Vérifié dans l'application :
+> - PIN `1234` refusé à l'enregistrement, puis PIN `4826` enregistré ;
+> - verrouillage automatique ;
+> - 5 PIN faux, puis bon PIN refusé avec le message de blocage (audit et verrou en base) ;
+> - à l'expiration du blocage, bascule sur le compte caissier avec un menu restreint.
 
 **Fichier** : `src-tauri/src/commands/auth.rs:47-67`, `src/components/IdleLock.tsx:62`
 **Risque** :
@@ -1100,13 +1113,13 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 3. **Sprint 2 (environ 1,5 semaine)** : C-5 (sessions et autorisations backend), M-9, M-10, M-15 et M-16.
 4. **Sprint 3** : M-1 (centimes), M-4, S-2, P-3 (validation expert-comptable), P-5 (updater), puis les MINEURS.
 
-## Note après corrections (25/09/2026) : 79 / 100
+## Note après corrections (25/09/2026) : 82 / 100
 
-Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79). La note initiale de 33/100 est conservée plus bas pour mémoire.
+Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-4uflms` au commit `a1d8763`, mis à jour après M-17 (78 → 79) puis M-9 (→ 82). La note initiale de 33/100 est conservée plus bas pour mémoire.
 
 | Axe | Avant | Après | Justification |
 |-----|-------|-------|---------------|
-| Sécurité | 6 / 25 | **19 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** brute-force et collisions du PIN (M-9, majeur), routeur non aligné sur les permissions (M-10, UI seulement), énumération par timing (m-1), double verrouillage (m-2). |
+| Sécurité | 6 / 25 | **22 / 25** | Sessions à jeton côté serveur, autorisation par module relue en base (C-5), PIN lié à l'identifiant avec blocage (M-9), mot de passe initial à changer (C-7), XSS et CSP stricte (M-7), injection d'imprimante (M-8). **Restent :** routeur non aligné sur les permissions (M-10, UI seulement), énumération par timing (m-1), double verrouillage (m-2). |
 | Intégrité données | 5 / 20 | **18 / 20** | Numérotation annuelle (C-3), caisse (C-4), HT/TTC (C-8), montants au centime (M-1), crédit (M-3), stock par magasin, lots et variantes (M-4), inventaire (M-5), CA (M-6), prix recalculés côté serveur (M-2). **Reste :** plafond de remise par rôle (M-2). |
 | Schéma BDD | 7 / 15 | **12 / 15** | Migrations versionnées et transactionnelles (S-1), clés étrangères et `CHECK` (S-2), unicité des numéros et des codes (S-4), stock initial (M-12). **Restent :** index manquants (S-3), traçabilité `created_at` / `updated_by` (S-5). |
 | Architecture backend | 7 / 15 | **12 / 15** | Commandes hors du thread principal et lectures en parallèle (M-15), plus aucune erreur avalée et audit transactionnel (M-16), 110 tests Rust. **Restent :** 30 commandes aux sorties non typées (M-17 en partie, entrées typées), code mort et double système caisse/session (M-18), pagination (M-19, filtre de date corrigé). |
@@ -1114,10 +1127,9 @@ Recalcul sur la même grille, pour l'état de la branche `claude/hopeful-clarke-
 | Production readiness | 3 / 10 | **7 / 10** | Base dans `app_data_dir` (C-6), restauration sûre et sauvegarde quotidienne (P-1), journaux et hook de panique (P-2), mentions DGI (P-3), CI (P-4 en partie), versions alignées et mises à jour signées (P-5). **Restent :** clé de signature et secrets à créer, modèle de facture à faire valider par l'expert-comptable, fichiers d'impression à nom fixe (P-6), et surtout **aucun test sur Windows**, la plateforme cible : les vérifications de bout en bout ont été faites sous Linux (xvfb). |
 
 **Avant la mise en production :**
-1. Corriger M-9 (PIN).
-2. Faire une recette complète sur un poste Windows réel : installation, impression ESC/POS et PowerShell, chemins `AppData`, mise à jour signée.
-3. Créer la clé de signature (voir `docs/RELEASE.md`).
-4. Faire valider la facture par l'expert-comptable.
+1. Faire une recette complète sur un poste Windows réel : installation, impression ESC/POS et PowerShell, chemins `AppData`, mise à jour signée.
+2. Créer la clé de signature (voir `docs/RELEASE.md`).
+3. Faire valider la facture par l'expert-comptable.
 
 Les points mineurs restants ne bloquent pas la mise en production.
 

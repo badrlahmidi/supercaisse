@@ -239,6 +239,7 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_releve_client: () => ({ client_id: 1, nom: "Client", credit_actuel: 0, credit_plafond: 0, ventes: [], paiements: [] }),
   get_audit_log: () => [],
   login_pin: () => null,
+  get_comptes_pin: () => [],
   set_user_pin: () => {},
   get_rapport_detaille: () => ({ ca_total: 0, total_remises: 0, nb_ventes: 0, marge_brute: 0, tva_collectee: 0, top_articles: [], rotation_stock: [], ventes_par_jour: [], par_mode: [] }),
   create_inventaire: () => ({ id: 1, nb_articles: 0 }),

@@ -79,6 +79,11 @@ pub(crate) fn login_impl(
         )
         .map_err(|e| e.to_string())?;
     }
+    conn.execute(
+        "UPDATE utilisateurs SET pin_echecs = 0, pin_bloque_jusqua = NULL WHERE id = ?1 AND (pin_echecs != 0 OR pin_bloque_jusqua IS NOT NULL)",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
     log_audit(
         conn,
         Some(id),
@@ -203,46 +208,183 @@ pub fn change_password(
     )
 }
 
+pub(crate) const PIN_ESSAIS_MAX: i64 = 5;
+pub(crate) const PIN_BLOCAGE_MINUTES: i64 = 5;
+
+pub(crate) fn valider_pin(pin: &str) -> Result<(), String> {
+    if !(4..=6).contains(&pin.len()) || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return Err("Le PIN doit comporter de 4 à 6 chiffres".to_string());
+    }
+    let chiffres: Vec<i32> = pin.bytes().map(|b| (b - b'0') as i32).collect();
+    let pas: Vec<i32> = chiffres.windows(2).map(|w| w[1] - w[0]).collect();
+    let constant = pas.iter().all(|p| *p == 0);
+    let suite = pas.iter().all(|p| *p == 1) || pas.iter().all(|p| *p == -1);
+    if constant || suite {
+        return Err(
+            "PIN trop simple : évitez les chiffres identiques ou qui se suivent".to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command(async)]
 pub fn login_pin(
     db: State<DbState>,
     auth: State<AuthState>,
+    login: String,
     pin: String,
 ) -> Result<Option<Connexion>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    ouvrir_session(&auth, login_pin_impl(&conn, &pin)?)
+    ouvrir_session(&auth, login_pin_impl(&conn, &login, &pin)?)
 }
 
-pub(crate) fn login_pin_impl(conn: &Connection, pin: &str) -> Result<Option<Utilisateur>, String> {
-    let mut stmt = conn.prepare(
-        "SELECT id, login, nom, role, pin_hash, must_change_password FROM utilisateurs WHERE pin_hash IS NOT NULL AND pin_hash != ''"
-    ).map_err(|e| e.to_string())?;
-    let users: Vec<(i64, String, String, String, String, bool)> = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, bool>(5)?,
-            ))
+struct ComptePinStocke {
+    id: i64,
+    login: String,
+    nom: String,
+    role: String,
+    hash: Option<String>,
+    must_change_password: bool,
+    echecs: i64,
+    bloque: bool,
+}
+
+pub(crate) fn login_pin_impl(
+    conn: &Connection,
+    login: &str,
+    pin: &str,
+) -> Result<Option<Utilisateur>, String> {
+    let compte = conn
+        .query_row(
+            "SELECT id, login, nom, role, pin_hash, must_change_password, pin_echecs,
+                    COALESCE(pin_bloque_jusqua > datetime('now', 'localtime'), 0)
+             FROM utilisateurs WHERE login = ?1",
+            params![login.trim()],
+            |r| {
+                Ok(ComptePinStocke {
+                    id: r.get(0)?,
+                    login: r.get(1)?,
+                    nom: r.get(2)?,
+                    role: r.get(3)?,
+                    hash: r.get(4)?,
+                    must_change_password: r.get(5)?,
+                    echecs: r.get(6)?,
+                    bloque: r.get(7)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(ComptePinStocke {
+        id,
+        login: ulogin,
+        nom,
+        role,
+        hash,
+        must_change_password,
+        echecs,
+        bloque,
+    }) = compte
+    else {
+        return Ok(None);
+    };
+    let Some(hash) = hash.filter(|h| !h.is_empty()) else {
+        return Ok(None);
+    };
+    if bloque {
+        return Err(format!(
+            "PIN bloqué après {} essais incorrects : réessayez dans {} minutes ou utilisez le mot de passe",
+            PIN_ESSAIS_MAX, PIN_BLOCAGE_MINUTES
+        ));
+    }
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    if !verify_password(pin, &hash) {
+        let echecs = echecs + 1;
+        if echecs >= PIN_ESSAIS_MAX {
+            tx.execute(
+                &format!(
+                    "UPDATE utilisateurs SET pin_echecs = 0, pin_bloque_jusqua = datetime('now', 'localtime', '+{} minutes') WHERE id = ?1",
+                    PIN_BLOCAGE_MINUTES
+                ),
+                params![id],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            tx.execute(
+                "UPDATE utilisateurs SET pin_echecs = ?1 WHERE id = ?2",
+                params![echecs, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        log_audit(
+            &tx,
+            Some(id),
+            if echecs >= PIN_ESSAIS_MAX {
+                "blocage_pin"
+            } else {
+                "echec_pin"
+            },
+            &format!(
+                "PIN incorrect pour {} ({}/{})",
+                ulogin, echecs, PIN_ESSAIS_MAX
+            ),
+            Some("utilisateur"),
+            Some(id),
+        )?;
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(None);
+    }
+    tx.execute(
+        "UPDATE utilisateurs SET pin_echecs = 0, pin_bloque_jusqua = NULL WHERE id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    log_audit(
+        &tx,
+        Some(id),
+        "connexion_pin",
+        &format!("Connexion par PIN : {} ({})", nom, role),
+        Some("utilisateur"),
+        Some(id),
+    )?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(Some(Utilisateur {
+        id: Some(id),
+        login: ulogin,
+        nom,
+        role,
+        must_change_password,
+    }))
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ComptePin {
+    pub login: String,
+    pub nom: String,
+}
+
+#[tauri::command(async)]
+pub fn get_comptes_pin(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+) -> Result<Vec<ComptePin>, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let mut stmt = conn
+        .prepare("SELECT login, nom FROM utilisateurs WHERE pin_hash IS NOT NULL AND pin_hash != '' ORDER BY nom")
+        .map_err(|e| e.to_string())?;
+    let comptes = stmt
+        .query_map([], |r| {
+            Ok(ComptePin {
+                login: r.get(0)?,
+                nom: r.get(1)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.to_string())?;
-    for (id, ulogin, nom, role, hash, must_change_password) in users {
-        if verify_password(pin, &hash) {
-            return Ok(Some(Utilisateur {
-                id: Some(id),
-                login: ulogin,
-                nom,
-                role,
-                must_change_password,
-            }));
-        }
-    }
-    Ok(None)
+        .map_err(|e| e.to_string());
+    comptes
 }
 
 #[tauri::command(async)]
@@ -258,10 +400,11 @@ pub fn set_user_pin(
     let hash = if pin.is_empty() {
         String::new()
     } else {
+        valider_pin(&pin)?;
         hash_password(&pin)?
     };
     conn.execute(
-        "UPDATE utilisateurs SET pin_hash = ?1 WHERE id = ?2",
+        "UPDATE utilisateurs SET pin_hash = ?1, pin_echecs = 0, pin_bloque_jusqua = NULL WHERE id = ?2",
         params![hash, user_id],
     )
     .map_err(|e| e.to_string())?;
@@ -292,6 +435,98 @@ mod tests {
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{}", path, suffix));
         }
+    }
+
+    fn base_pin() -> Connection {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        let h = hash_password("4826").unwrap();
+        conn.execute(
+            "INSERT INTO utilisateurs (id, login, password_hash, nom, role, pin_hash) VALUES
+                (2, 'karim', ?1, 'Karim', 'caissier', ?2),
+                (3, 'gerant', ?1, 'Gérant', 'manager', ?2)",
+            params![hash_password("motdepasse-solide").unwrap(), h],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_format_du_pin() {
+        for ok in ["4826", "48261", "482619", "1357"] {
+            assert!(valider_pin(ok).is_ok(), "{ok}");
+        }
+        for ko in [
+            "123", "1234567", "12a4", "0000", "1234", "4321", "987654", "111111",
+        ] {
+            assert!(valider_pin(ko).is_err(), "{ko}");
+        }
+    }
+
+    #[test]
+    fn test_pin_lie_a_l_identifiant() {
+        let conn = base_pin();
+        assert_eq!(
+            login_pin_impl(&conn, "karim", "4826")
+                .unwrap()
+                .unwrap()
+                .role,
+            "caissier"
+        );
+        assert_eq!(
+            login_pin_impl(&conn, "gerant", "4826")
+                .unwrap()
+                .unwrap()
+                .role,
+            "manager"
+        );
+        assert!(login_pin_impl(&conn, "inconnu", "4826").unwrap().is_none());
+        assert!(login_pin_impl(&conn, "admin", "4826").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_blocage_apres_cinq_echecs() {
+        let conn = base_pin();
+        for _ in 0..PIN_ESSAIS_MAX {
+            assert!(login_pin_impl(&conn, "karim", "9999").unwrap().is_none());
+        }
+        let err = login_pin_impl(&conn, "karim", "4826").unwrap_err();
+        assert!(err.contains("bloqué"), "{err}");
+        assert!(login_pin_impl(&conn, "gerant", "4826").unwrap().is_some());
+        let (echecs, blocages): (i64, i64) = conn
+            .query_row(
+                "SELECT SUM(action = 'echec_pin'), SUM(action = 'blocage_pin') FROM audit_log WHERE utilisateur_id = 2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((echecs, blocages), (PIN_ESSAIS_MAX - 1, 1));
+        conn.execute(
+            "UPDATE utilisateurs SET pin_bloque_jusqua = datetime('now', 'localtime', '-1 minutes') WHERE id = 2",
+            [],
+        )
+        .unwrap();
+        assert!(login_pin_impl(&conn, "karim", "4826").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_succes_remet_le_compteur_a_zero() {
+        let conn = base_pin();
+        for _ in 0..3 {
+            login_pin_impl(&conn, "karim", "9999").unwrap();
+        }
+        login_pin_impl(&conn, "karim", "4826").unwrap().unwrap();
+        for _ in 0..PIN_ESSAIS_MAX - 1 {
+            login_pin_impl(&conn, "karim", "9999").unwrap();
+        }
+        assert!(login_pin_impl(&conn, "karim", "4826").unwrap().is_some());
+        for _ in 0..PIN_ESSAIS_MAX {
+            login_pin_impl(&conn, "karim", "9999").unwrap();
+        }
+        assert!(login_pin_impl(&conn, "karim", "4826").is_err());
+        login_impl(&conn, "karim", "motdepasse-solide")
+            .unwrap()
+            .unwrap();
+        assert!(login_pin_impl(&conn, "karim", "4826").unwrap().is_some());
     }
 
     #[test]

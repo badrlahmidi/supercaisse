@@ -142,6 +142,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_002_montants_au_centime,
     migration_003_contraintes,
     migration_004_unicite,
+    migration_005_verrouillage_pin,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -684,6 +685,17 @@ fn migration_004_unicite(conn: &Connection) -> Result<()> {
          CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_code_unique ON clients(code) WHERE code IS NOT NULL;",
     )?;
     crate::commands::resynchroniser_numerotation(conn)
+}
+
+fn migration_005_verrouillage_pin(conn: &Connection) -> Result<()> {
+    ajouter_colonne(
+        conn,
+        "utilisateurs",
+        "pin_echecs",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ajouter_colonne(conn, "utilisateurs", "pin_bloque_jusqua", "TEXT")?;
+    Ok(())
 }
 
 fn migration_001_base(conn: &Connection) -> Result<()> {

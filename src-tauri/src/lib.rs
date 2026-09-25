@@ -152,6 +152,7 @@ pub fn run() {
             commands::get_releve_client,
             commands::get_audit_log,
             commands::login_pin,
+            commands::get_comptes_pin,
             commands::change_password,
             commands::set_user_pin,
             commands::get_rapport_detaille,

@@ -63,9 +63,9 @@ describe("invoke", () => {
     tauriInvokeMock.mockResolvedValue(null)
     setSessionToken("abc123")
     await invoke("login", { login: "admin", password: "x" })
-    await invoke("login_pin", { pin: "1234" })
+    await invoke("login_pin", { login: "karim", pin: "4826" })
     expect(tauriInvokeMock).toHaveBeenCalledWith("login", { login: "admin", password: "x" })
-    expect(tauriInvokeMock).toHaveBeenCalledWith("login_pin", { pin: "1234" })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("login_pin", { login: "karim", pin: "4826" })
   })
 
   it("forgets the token and notifies listeners when the session expired", async () => {

@@ -634,17 +634,17 @@ export default function Settings() {
                   </Button>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="pin">PIN rapide (4 chiffres, optionnel)</Label>
+                  <Label htmlFor="pin">PIN rapide (4 à 6 chiffres, optionnel)</Label>
                   <div className="flex gap-2">
                     <Input
                       type="text"
                       inputMode="numeric"
-                      maxLength={4}
+                      maxLength={6}
                       pattern="[0-9]*"
-                      placeholder="ex: 1234"
+                      placeholder="ex : 4826"
                       id="pin"
                       value={pinValue}
-                      onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 6))}
                       className="max-w-[120px]"
                     />
                     {editingUser && (
@@ -652,9 +652,9 @@ export default function Settings() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={pinValue.length !== 4 || savingPin}
+                        disabled={pinValue.length < 4 || savingPin}
                         onClick={async () => {
-                          if (!editingUser || pinValue.length !== 4) return
+                          if (!editingUser || pinValue.length < 4) return
                           setSavingPin(true)
                           try {
                             await invoke("set_user_pin", { userId: editingUser.id, pin: pinValue })
@@ -671,7 +671,7 @@ export default function Settings() {
                       </Button>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">Permet le changement rapide de caissier sans saisir le mot de passe complet</p>
+                  <p className="text-xs text-muted-foreground">Changement rapide de caissier depuis l'écran de verrouillage. Évitez les chiffres identiques ou qui se suivent ; 5 erreurs bloquent le PIN 5 minutes.</p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setShowUserForm(false)}>

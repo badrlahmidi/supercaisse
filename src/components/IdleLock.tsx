@@ -1,10 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { useAuth, type SessionUser } from "@/context/AuthContext"
 import { useAppSettings } from "@/hooks/useSettings"
 import { invoke } from "@/lib/tauri"
 import { Input } from "@/ui/Input"
 import { Button } from "@/ui/Button"
-import { Lock, Delete } from "lucide-react"
+import { Lock, Delete, Check } from "lucide-react"
+
+interface ComptePin {
+  login: string
+  nom: string
+}
+
+const PIN_LONGUEUR_MIN = 4
+const PIN_LONGUEUR_MAX = 6
 
 export default function IdleLock({ children }: { children: React.ReactNode }) {
   const { user, loginAs } = useAuth()
@@ -14,7 +23,27 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
   const [pin, setPin] = useState("")
   const [error, setError] = useState("")
   const [mode, setMode] = useState<"password" | "pin">("pin")
+  const [compte, setCompte] = useState("")
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const { data: comptes = [] } = useQuery({
+    queryKey: ["comptes-pin"],
+    queryFn: () => invoke<ComptePin[]>("get_comptes_pin"),
+    enabled: locked,
+    retry: false,
+  })
+  const loginPin = compte || user?.login || ""
+  const choix = user && !comptes.some((c) => c.login === user.login)
+    ? [{ login: user.login, nom: user.nom }, ...comptes]
+    : comptes
+
+  const deverrouiller = useCallback(() => {
+    setLocked(false)
+    setPassword("")
+    setPin("")
+    setError("")
+    setCompte("")
+  }, [])
 
   const timeout = parseInt(settings?.idle_timeout || "300", 10) * 1000
 
@@ -38,44 +67,40 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
   const handleUnlockPassword = async () => {
     if (!user) return
     try {
-      const result = await invoke<{ id: number } | null>("login", { login: user.login, password })
+      const result = await invoke<SessionUser | null>("login", { login: user.login, password })
       if (result) {
-        setLocked(false)
-        setPassword("")
-        setPin("")
-        setError("")
+        await loginAs(result)
+        deverrouiller()
         resetTimer()
       } else {
         setError("Mot de passe incorrect")
       }
-    } catch {
-      setError("Erreur de connexion")
+    } catch (err) {
+      setError(String(err))
     }
   }
 
-  const handlePinDigit = async (digit: string) => {
-    const next = pin + digit
-    setPin(next)
-    setError("")
-    if (next.length >= 4) {
-      try {
-        const result = await invoke<SessionUser | null>("login_pin", { pin: next })
-        if (result) {
-          loginAs(result)
-          setLocked(false)
-          setPin("")
-          setPassword("")
-          setError("")
-          resetTimer()
-        } else {
-          setError("PIN incorrect")
-          setPin("")
-        }
-      } catch {
-        setError("Erreur de connexion")
+  const validerPin = async () => {
+    if (pin.length < PIN_LONGUEUR_MIN || !loginPin) return
+    try {
+      const result = await invoke<SessionUser | null>("login_pin", { login: loginPin, pin })
+      if (result) {
+        await loginAs(result)
+        deverrouiller()
+        resetTimer()
+      } else {
+        setError("PIN incorrect")
         setPin("")
       }
+    } catch (err) {
+      setError(String(err))
+      setPin("")
     }
+  }
+
+  const handlePinDigit = (digit: string) => {
+    setError("")
+    setPin((actuel) => (actuel.length < PIN_LONGUEUR_MAX ? actuel + digit : actuel))
   }
 
   if (!locked || !user) return <>{children}</>
@@ -129,8 +154,20 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
             </form>
           ) : (
             <div className="space-y-4">
+              {choix.length > 1 && (
+                <select
+                  aria-label="Compte"
+                  value={loginPin}
+                  onChange={(e) => { setCompte(e.target.value); setPin(""); setError("") }}
+                  className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                >
+                  {choix.map((c) => (
+                    <option key={c.login} value={c.login}>{c.nom}</option>
+                  ))}
+                </select>
+              )}
               <div className="flex justify-center gap-2">
-                {[0, 1, 2, 3].map((i) => (
+                {Array.from({ length: PIN_LONGUEUR_MAX }, (_, i) => i).map((i) => (
                   <div
                     key={i}
                     className={`h-4 w-4 rounded-full border-2 transition-colors ${
@@ -140,7 +177,7 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
                 ))}
               </div>
               {error && <p className="text-sm text-destructive text-center">{error}</p>}
-              <p className="text-xs text-muted-foreground text-center">Saisir le PIN à 4 chiffres (tout utilisateur)</p>
+              <p className="text-xs text-muted-foreground text-center">PIN de {PIN_LONGUEUR_MIN} à {PIN_LONGUEUR_MAX} chiffres, puis valider</p>
               <div className="grid grid-cols-3 gap-2">
                 {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
                   <Button
@@ -152,7 +189,14 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
                     {d}
                   </Button>
                 ))}
-                <div />
+                <Button
+                  variant="ghost"
+                  className="h-14"
+                  aria-label="Effacer"
+                  onClick={() => { setPin(""); setError("") }}
+                >
+                  <Delete className="h-5 w-5" />
+                </Button>
                 <Button
                   variant="outline"
                   className="h-14 text-xl font-bold"
@@ -161,11 +205,12 @@ export default function IdleLock({ children }: { children: React.ReactNode }) {
                   0
                 </Button>
                 <Button
-                  variant="ghost"
                   className="h-14"
-                  onClick={() => { setPin(""); setError("") }}
+                  aria-label="Valider le PIN"
+                  disabled={pin.length < PIN_LONGUEUR_MIN}
+                  onClick={validerPin}
                 >
-                  <Delete className="h-5 w-5" />
+                  <Check className="h-5 w-5" />
                 </Button>
               </div>
             </div>
