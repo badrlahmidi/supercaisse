@@ -13,6 +13,31 @@ fn get_composants(tx: &Connection, article_id: i64) -> Result<Vec<(i64, f64)>, S
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
 }
 
+const MODES_PAIEMENT: [&str; 6] = ["especes", "carte", "cb", "cheque", "virement", "credit"];
+
+pub(crate) fn normaliser_paiements(mode_paiement: &str, splits: Option<&[serde_json::Value]>, montant_par_defaut: f64) -> Result<Vec<(String, f64)>, String> {
+    let paiements: Vec<(String, f64)> = match splits {
+        Some(list) if !list.is_empty() => list
+            .iter()
+            .map(|s| {
+                let mode = s["mode"].as_str().ok_or("Mode de paiement manquant")?.to_string();
+                let montant = s["montant"].as_f64().ok_or_else(|| format!("Montant manquant pour le paiement {}", mode))?;
+                Ok((mode, montant))
+            })
+            .collect::<Result<_, String>>()?,
+        _ => vec![(mode_paiement.to_string(), montant_par_defaut.max(0.0))],
+    };
+    for (mode, montant) in &paiements {
+        if !MODES_PAIEMENT.contains(&mode.as_str()) {
+            return Err(format!("Mode de paiement inconnu : {}", mode));
+        }
+        if !montant.is_finite() || *montant < 0.0 {
+            return Err(format!("Montant invalide pour le paiement {} : {}", mode, montant));
+        }
+    }
+    Ok(paiements)
+}
+
 #[tauri::command]
 pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Option<i64>,
     articles: Vec<serde_json::Value>, montant_remise: f64, mode_paiement: String,
@@ -21,6 +46,17 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
     magasin_id: Option<i64>
 ) -> Result<serde_json::Value, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    create_vente_impl(&mut conn, client_id, caissier_id, articles, montant_remise, mode_paiement,
+        splits, dtype, points_utilises, points_gagnes, magasin_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, caissier_id: Option<i64>,
+    articles: Vec<serde_json::Value>, montant_remise: f64, mode_paiement: String,
+    splits: Option<Vec<serde_json::Value>>, dtype: Option<String>,
+    points_utilises: Option<f64>, points_gagnes: Option<f64>,
+    magasin_id: Option<i64>
+) -> Result<serde_json::Value, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = match magasin_id {
         Some(id) => id,
@@ -36,27 +72,22 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         }
     };
     let mut montant_total = 0.0;
+    let mut total_ttc_lignes = 0.0;
     for a in &articles {
         let qte = a["quantite"].as_f64().unwrap_or(0.0);
         let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
+        let tva = a["tva"].as_f64().unwrap_or(0.0);
+        let remise_ligne = a["remise_ligne"].as_f64().unwrap_or(0.0);
         montant_total += qte * pu;
+        total_ttc_lignes += qte * pu * (1.0 + tva / 100.0) * (1.0 - remise_ligne / 100.0);
     }
 
-    let net_a_payer = montant_total - montant_remise;
     let document_type = dtype.unwrap_or_else(|| "facture".to_string());
 
     document_prefixe(&document_type)?;
 
-    let mut credit_demandé = 0.0;
-    if mode_paiement == "credit" {
-        credit_demandé = net_a_payer;
-    } else if let Some(ref split_list) = splits {
-        for s in split_list {
-            if s["mode"].as_str().unwrap_or("") == "credit" {
-                credit_demandé += s["montant"].as_f64().unwrap_or(0.0);
-            }
-        }
-    }
+    let paiements = normaliser_paiements(&mode_paiement, splits.as_deref(), total_ttc_lignes - montant_remise)?;
+    let credit_demandé: f64 = paiements.iter().filter(|(m, _)| m == "credit").map(|(_, montant)| montant).sum();
 
     if credit_demandé > 0.0 {
         if let Some(cid) = client_id {
@@ -156,15 +187,18 @@ pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Opt
         }
     }
 
-    if let Some(ref split_list) = splits {
-        if split_list.len() > 1 {
-            for s in split_list {
-                let mode = s["mode"].as_str().unwrap_or("inconnu").to_string();
-                let montant = s["montant"].as_f64().unwrap_or(0.0);
-                let desc = format!("Split vente #{}: {}", vente_id, mode);
+    if matches!(document_type.as_str(), "facture" | "bl") {
+        for (mode, montant) in &paiements {
+            tx.execute(
+                "INSERT INTO vente_paiements (vente_id, session_id, mode, montant) VALUES (?1, ?2, ?3, ?4)",
+                params![vente_id, current_session_id, mode, montant],
+            ).map_err(|e| e.to_string())?;
+        }
+        if paiements.len() > 1 {
+            for (mode, montant) in &paiements {
                 tx.execute(
-                    "INSERT INTO journal_caisse (utilisateur_id, jtype, montant, description) VALUES (?1, 'encaissement', ?2, ?3)",
-                    params![caissier_id, montant, desc],
+                    "INSERT INTO journal_caisse (utilisateur_id, jtype, montant, description, session_id) VALUES (?1, 'encaissement', ?2, ?3, ?4)",
+                    params![caissier_id, montant, format!("Split vente #{}: {}", vente_id, mode), current_session_id],
                 ).map_err(|e| e.to_string())?;
             }
         }

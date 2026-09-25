@@ -1,0 +1,26 @@
+import { describe, it, expect } from "vitest"
+import { buildPaiements } from "./paiements"
+
+describe("buildPaiements", () => {
+  it("returns a single payment for the net amount when not split", () => {
+    expect(buildPaiements([], "especes", 120.004)).toEqual([{ mode: "especes", montant: 120 }])
+  })
+
+  it("maps split amounts to montant", () => {
+    expect(buildPaiements([{ mode: "especes", amount: 50 }, { mode: "carte", amount: 70 }], "especes", 120)).toEqual([
+      { mode: "especes", montant: 50 },
+      { mode: "carte", montant: 70 },
+    ])
+  })
+
+  it("removes the change given back from the cash part", () => {
+    expect(buildPaiements([{ mode: "carte", amount: 70 }, { mode: "especes", amount: 100 }], "especes", 120)).toEqual([
+      { mode: "carte", montant: 70 },
+      { mode: "especes", montant: 50 },
+    ])
+  })
+
+  it("never records a negative amount", () => {
+    expect(buildPaiements([], "credit", -5)).toEqual([{ mode: "credit", montant: 0 }])
+  })
+})

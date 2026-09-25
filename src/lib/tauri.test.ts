@@ -70,13 +70,15 @@ interface RustCommand {
   all: string[]
 }
 
-function splitTopLevel(input: string, sep: string): string[] {
+function splitTopLevel(input: string, sep: string, angleBrackets = true): string[] {
+  const opening = angleBrackets ? "<([{" : "([{"
+  const closing = angleBrackets ? ">)]}" : ")]}"
   const parts: string[] = []
   let depth = 0
   let current = ""
   for (const ch of input) {
-    if ("<([{".includes(ch)) depth++
-    if (">)]}".includes(ch)) depth--
+    if (opening.includes(ch)) depth++
+    if (closing.includes(ch)) depth--
     if (ch === sep && depth === 0) {
       parts.push(current)
       current = ""
@@ -171,7 +173,7 @@ function findInvokeCalls(): InvokeCall[] {
         continue
       }
       const body = src.slice(i + 1, matchClose(src, i))
-      const segments = splitTopLevel(body, ",").map((s) => s.trim()).filter(Boolean)
+      const segments = splitTopLevel(body, ",", false).map((s) => s.trim()).filter(Boolean)
       if (segments.some((s) => s.startsWith("..."))) {
         calls.push({ location, cmd: m[1], keys: null })
         continue

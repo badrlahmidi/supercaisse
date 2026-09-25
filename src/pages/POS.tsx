@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@/lib/tauri"
+import { buildPaiements } from "@/lib/paiements"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/context/AuthContext"
 import { usePOSProducts } from "@/hooks/useProducts"
@@ -400,14 +401,13 @@ export default function POS() {
         prix_type: i.prix_type || "public",
       }))
       const isSplit = paymentSplits.length > 0
-      const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
       return invoke<{ id: number; numero_facture: string }>("create_vente", {
         clientId: selectedClient,
         caissierId: user?.id ?? 0,
         articles: items,
         montantRemise: discountAmount,
         modePaiement: isSplit ? paymentSplits.map((s) => s.mode).join("+") : paymentMode,
-        splits: isSplit ? paymentSplits : null,
+        splits: buildPaiements(paymentSplits, paymentMode, netAmount),
         dtype: documentType,
         points_utilises: ptsToUse,
         points_gagnes: ptsEarned,

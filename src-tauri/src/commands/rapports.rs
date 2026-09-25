@@ -38,7 +38,10 @@ pub fn get_rapport_x(db: State<DbState>, session_id: i64) -> Result<serde_json::
     ).unwrap_or(0.0);
 
     let mut stmt = conn.prepare(
-        "SELECT mode_paiement, COALESCE(SUM(montant_total - montant_remise), 0), COUNT(*) FROM ventes WHERE session_id = ?1 AND statut != 'annulee' GROUP BY mode_paiement"
+        "SELECT vp.mode, COALESCE(SUM(vp.montant), 0), COUNT(DISTINCT vp.vente_id)
+         FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+         WHERE vp.session_id = ?1 AND v.statut != 'annulee'
+         GROUP BY vp.mode ORDER BY vp.mode"
     ).map_err(|e| e.to_string())?;
     let par_mode = stmt.query_map(params![session_id], |r| {
         Ok(serde_json::json!({

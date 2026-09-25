@@ -652,6 +652,30 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         INSERT OR IGNORE INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero)
         SELECT ntype, annee, prefixe, dernier_numero FROM numerotation;
     ")?;
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS vente_paiements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vente_id INTEGER NOT NULL,
+            session_id INTEGER,
+            mode TEXT NOT NULL CHECK (mode IN ('especes','carte','cb','cheque','virement','credit')),
+            montant REAL NOT NULL CHECK (montant >= 0),
+            FOREIGN KEY (vente_id) REFERENCES ventes(id),
+            FOREIGN KEY (session_id) REFERENCES sessions_caisse(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_vente_paiements_vente ON vente_paiements(vente_id);
+        CREATE INDEX IF NOT EXISTS idx_vente_paiements_session ON vente_paiements(session_id, mode);
+        CREATE INDEX IF NOT EXISTS idx_ventes_session ON ventes(session_id);
+
+        INSERT INTO vente_paiements (vente_id, session_id, mode, montant)
+        SELECT v.id, v.session_id, v.mode_paiement,
+               MAX(0, COALESCE((SELECT SUM(va.total_ligne) FROM vente_articles va WHERE va.vente_id = v.id), 0) - v.montant_remise)
+        FROM ventes v
+        JOIN sessions_caisse s ON s.id = v.session_id AND s.statut = 'ouverte'
+        WHERE v.statut != 'annulee'
+          AND COALESCE(v.dtype, 'facture') IN ('facture', 'bl')
+          AND v.mode_paiement IN ('especes','carte','cb','cheque','virement','credit')
+          AND NOT EXISTS (SELECT 1 FROM vente_paiements vp WHERE vp.vente_id = v.id);
+    ")?;
     if let Err(e) = conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ventes_numero_facture_unique ON ventes(numero_facture) WHERE numero_facture IS NOT NULL",
         [],

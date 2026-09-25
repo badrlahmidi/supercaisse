@@ -226,6 +226,8 @@ Ajouter également `CREATE UNIQUE INDEX idx_ventes_numero ON ventes(numero_factu
 
 ### [CRITIQUE] C-4 — Clôture de session : l'espèces attendu ignore toutes les ventes
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Nouvelle table `vente_paiements` (mode, montant, session) alimentée par `create_vente` pour les factures et BL. Le POS envoie toujours la ventilation `{mode, montant}`, monnaie rendue déduite. `close_session` calcule l'espèces attendu à partir des paiements espèces de la session hors ventes annulées, et propage les erreurs SQL. Le rapport X ventile par mode réel. Les ventes des sessions ouvertes au moment de la mise à jour sont reprises. Corrige aussi le paiement fractionné à crédit : clé `amount` au lieu de `montant`, donc plafond contourné et dette non enregistrée. Couvert par 7 tests Rust et 4 tests Vitest.
+
 **Fichier** : `src-tauri/src/commands/sessions.rs:75-79`
 **Risque** :
 - La requête filtre `paiements.ptype`, alors que la colonne s'appelle `type`. L'erreur SQL `no such column: ptype` (reproduite) est avalée par `unwrap_or(0.0)`.
@@ -654,6 +656,8 @@ new QueryClient({
 ## Couche 6 — Production Readiness
 
 ### [CRITIQUE] C-6 — Base de données dans le répertoire courant (`./data`)
+
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Base dans `app_data_dir()` (`%APPDATA%\com.supercaisse.pos` sous Windows), sauvegardes dans son sous-dossier `backups`, exports et PDF dans `Documents\SuperCaisse`. Au premier lancement, une ancienne base `./data/supercaisse.db` (dossier courant ou dossier de l'exécutable) est copiée via l'API de sauvegarde SQLite, sans jamais écraser une base existante ; l'ancien fichier est conservé. Couvert par 3 tests Rust et vérifié en lançant l'application (xvfb).
 
 **Fichier** : `src-tauri/src/lib.rs:127-136`, `commands/backup.rs:12,28`, `commands/print.rs:120`
 **Risque** : `std::env::current_dir()/data/supercaisse.db`.
