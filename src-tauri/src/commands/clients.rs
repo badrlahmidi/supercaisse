@@ -1,10 +1,21 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
 use super::calcul::montant_positif;
 use super::log_audit;
+
+fn erreur_code_client(erreur: rusqlite::Error, code: Option<&str>) -> String {
+    match (&erreur, code) {
+        (rusqlite::Error::SqliteFailure(e, _), Some(code))
+            if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
+        {
+            format!("Le code client « {} » est déjà utilisé", code)
+        }
+        _ => erreur.to_string(),
+    }
+}
 
 #[tauri::command(async)]
 pub fn get_clients(
@@ -55,11 +66,45 @@ pub fn add_client(
     let credit_plafond = credit_plafond
         .map(|m| montant_positif("Plafond de crédit", m))
         .transpose()?;
+    let code = code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO clients (code, nom, adresse, telephone, email, credit_plafond, ice, segment) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment],
-    ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    ).map_err(|e| erreur_code_client(e, code.as_deref()))?;
+    let id = conn.last_insert_rowid();
+    if code.is_none() {
+        attribuer_code_client(&conn, id)?;
+    }
+    conn.commit().map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+pub(crate) fn attribuer_code_client(conn: &Connection, id: i64) -> Result<String, String> {
+    let base = format!("CLI-{:05}", id);
+    for essai in 0..100 {
+        let code = if essai == 0 {
+            base.clone()
+        } else {
+            format!("{}-{}", base, essai)
+        };
+        let libre: bool = conn
+            .query_row(
+                "SELECT COUNT(*) = 0 FROM clients WHERE code = ?1",
+                params![code],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if libre {
+            conn.execute(
+                "UPDATE clients SET code = ?1 WHERE id = ?2",
+                params![code, id],
+            )
+            .map_err(|e| e.to_string())?;
+            return Ok(code);
+        }
+    }
+    Err(format!("Impossible d'attribuer un code au client {}", id))
 }
 
 #[tauri::command(async)]
@@ -82,10 +127,11 @@ pub fn update_client(
     let credit_plafond = credit_plafond
         .map(|m| montant_positif("Plafond de crédit", m))
         .transpose()?;
+    let code = code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
     conn.execute(
         "UPDATE clients SET code=?1, nom=?2, adresse=?3, telephone=?4, email=?5, credit_plafond=?6, ice=?7, segment=?8 WHERE id=?9",
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment, id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| erreur_code_client(e, code.as_deref()))?;
     Ok(())
 }
 
@@ -221,4 +267,33 @@ pub fn get_mouvements_fidelite(
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_code_client_genere_sans_collision() {
+        let conn = init_db(":memory:").unwrap();
+        conn.execute(
+            "INSERT INTO clients (id, nom, code) VALUES (1, 'Saisi', 'CLI-00002')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO clients (id, nom) VALUES (2, 'Auto')", [])
+            .unwrap();
+        assert_eq!(attribuer_code_client(&conn, 2).unwrap(), "CLI-00002-1");
+        conn.execute("INSERT INTO clients (id, nom) VALUES (3, 'Auto')", [])
+            .unwrap();
+        assert_eq!(attribuer_code_client(&conn, 3).unwrap(), "CLI-00003");
+        let err = conn
+            .execute(
+                "INSERT INTO clients (nom, code) VALUES ('X', 'CLI-00003')",
+                [],
+            )
+            .map_err(|e| erreur_code_client(e, Some("CLI-00003")))
+            .unwrap_err();
+        assert_eq!(err, "Le code client « CLI-00003 » est déjà utilisé");
+    }
 }

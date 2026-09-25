@@ -141,6 +141,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_001_base,
     migration_002_montants_au_centime,
     migration_003_contraintes,
+    migration_004_unicite,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -648,6 +649,41 @@ fn reconstruire_table(conn: &Connection, r: &Reconstruction) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn migration_004_unicite(conn: &Connection) -> Result<()> {
+    let numeros = conn.execute(
+        "UPDATE ventes SET numero_facture = numero_facture || '-DOUBLON-' || id
+         WHERE numero_facture IS NOT NULL
+           AND id NOT IN (SELECT MIN(id) FROM ventes WHERE numero_facture IS NOT NULL GROUP BY numero_facture)",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE clients SET code = NULLIF(trim(code), '') WHERE code IS NOT NULL AND code != trim(code) OR code = ''",
+        [],
+    )?;
+    let codes = conn.execute(
+        "UPDATE clients SET code = code || '-' || id
+         WHERE code IS NOT NULL
+           AND id NOT IN (SELECT MIN(id) FROM clients WHERE code IS NOT NULL GROUP BY code)",
+        [],
+    )?;
+    if numeros + codes > 0 {
+        let detail = format!(
+            "Doublons renommés avant ajout des contraintes d'unicité : {} numéro(s) de document (suffixe -DOUBLON-<id>), {} code(s) client (suffixe -<id>)",
+            numeros, codes
+        );
+        log::warn!("{}", detail);
+        conn.execute(
+            "INSERT INTO audit_log (utilisateur_id, action, detail) VALUES (NULL, 'correction_doublons', ?1)",
+            params![detail],
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_ventes_numero_facture_unique ON ventes(numero_facture) WHERE numero_facture IS NOT NULL;
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_code_unique ON clients(code) WHERE code IS NOT NULL;",
+    )?;
+    crate::commands::resynchroniser_numerotation(conn)
 }
 
 fn migration_001_base(conn: &Connection) -> Result<()> {
@@ -1406,6 +1442,93 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_migration_unicite_renomme_les_doublons_et_resynchronise() {
+        let mut conn = super::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        super::appliquer_migrations(&mut conn, &super::MIGRATIONS[..3]).unwrap();
+        conn.execute_batch(
+            "
+            DROP INDEX idx_ventes_numero_facture_unique;
+            INSERT INTO ventes (id, montant_total, numero_facture) VALUES
+                (1, 10, 'FA-2026-00012'), (2, 10, 'FA-2026-00012'), (3, 10, 'FA-2026-00003'), (4, 10, 'AV-2025-00007');
+            INSERT OR REPLACE INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero) VALUES ('facture_client', 2026, 'FA', 2);
+            INSERT INTO clients (id, nom, code) VALUES (1, 'A', 'C001'), (2, 'B', ' C001 '), (3, 'C', ''), (4, 'D', 'C002');
+            ",
+        )
+        .unwrap();
+        super::migrer(&mut conn).unwrap();
+        let numero: String = conn
+            .query_row("SELECT numero_facture FROM ventes WHERE id = 2", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(numero, "FA-2026-00012-DOUBLON-2");
+        let codes: Vec<Option<String>> = conn
+            .prepare("SELECT code FROM clients ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(
+            codes,
+            vec![
+                Some("C001".into()),
+                Some("C001-2".into()),
+                None,
+                Some("C002".into())
+            ]
+        );
+        let audit: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = 'correction_doublons'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(audit, 1);
+        assert_eq!(
+            crate::commands::next_numero_document(&conn, "facture", 2026).unwrap(),
+            "FA-2026-00013"
+        );
+        assert_eq!(
+            crate::commands::next_numero_document(&conn, "avoir", 2025).unwrap(),
+            "AV-2025-00008"
+        );
+        assert!(conn
+            .execute(
+                "INSERT INTO ventes (montant_total, numero_facture) VALUES (1, 'FA-2026-00003')",
+                []
+            )
+            .is_err());
+        assert!(conn
+            .execute("INSERT INTO clients (nom, code) VALUES ('E', 'C002')", [])
+            .is_err());
+        conn.execute(
+            "INSERT INTO clients (nom, code) VALUES ('F', NULL), ('G', NULL)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_compteur_en_retard_ne_bloque_pas_la_vente() {
+        let conn = super::init_db(":memory:").unwrap();
+        conn.execute_batch(
+            "INSERT INTO ventes (montant_total, numero_facture) VALUES (10, 'BL-2026-00001'), (10, 'BL-2026-00002');",
+        )
+        .unwrap();
+        assert_eq!(
+            crate::commands::next_numero_document(&conn, "bl", 2026).unwrap(),
+            "BL-2026-00003"
+        );
+        assert_eq!(
+            crate::commands::next_numero_document(&conn, "bl", 2026).unwrap(),
+            "BL-2026-00004"
+        );
+    }
+
     fn base_v2() -> super::Connection {
         let mut conn = super::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();

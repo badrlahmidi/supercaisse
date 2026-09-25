@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import Clients from "./Clients"
@@ -57,5 +57,18 @@ describe("Clients", () => {
     render(<Clients />, { wrapper: Wrapper })
     expect(await screen.findByText("Jean Dupont")).toBeInTheDocument()
     expect(screen.getByText("Marie Curie")).toBeInTheDocument()
+  })
+
+  it("creates a client without an email", async () => {
+    mockInvoke.mockImplementation((cmd: string) => Promise.resolve(cmd === "add_client" ? 3 : []))
+    render(<Clients />, { wrapper: Wrapper })
+    await screen.findByText("Aucun client trouvé")
+    fireEvent.click(screen.getByRole("button", { name: /Nouveau client/ }))
+    fireEvent.change(await screen.findByPlaceholderText("Nom complet"), { target: { value: "Sans Email" } })
+    fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }))
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("add_client", expect.objectContaining({ nom: "Sans Email" })),
+    )
+    expect(screen.queryByText("Email invalide")).not.toBeInTheDocument()
   })
 })

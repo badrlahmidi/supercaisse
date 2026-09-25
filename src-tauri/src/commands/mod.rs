@@ -92,14 +92,68 @@ pub(crate) fn next_numero_document(
     annee: i32,
 ) -> Result<String, String> {
     let prefixe = document_prefixe(dtype)?;
-    let numero: i64 = conn.query_row(
-        "INSERT INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero) VALUES (?1, ?2, ?3, 1)
-         ON CONFLICT(ntype, annee) DO UPDATE SET dernier_numero = dernier_numero + 1
-         RETURNING dernier_numero",
-        params![format!("{}_client", dtype), annee, prefixe],
-        |r| r.get(0),
-    ).map_err(|e| format!("Numérotation {} {} impossible: {}", dtype, annee, e))?;
-    Ok(format!("{}-{}-{:05}", prefixe, annee, numero))
+    let incrementer = || -> Result<String, String> {
+        let numero: i64 = conn.query_row(
+            "INSERT INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero) VALUES (?1, ?2, ?3, 1)
+             ON CONFLICT(ntype, annee) DO UPDATE SET dernier_numero = dernier_numero + 1
+             RETURNING dernier_numero",
+            params![format!("{}_client", dtype), annee, prefixe],
+            |r| r.get(0),
+        ).map_err(|e| format!("Numérotation {} {} impossible: {}", dtype, annee, e))?;
+        Ok(format!("{}-{}-{:05}", prefixe, annee, numero))
+    };
+    let deja_attribue = |numero: &str| -> Result<bool, String> {
+        conn.query_row(
+            "SELECT COUNT(*) > 0 FROM ventes WHERE numero_facture = ?1",
+            params![numero],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+    };
+    let numero = incrementer()?;
+    if !deja_attribue(&numero)? {
+        return Ok(numero);
+    }
+    log::warn!(
+        "Compteur de numérotation en retard ({} déjà attribué) : resynchronisation",
+        numero
+    );
+    resynchroniser_numerotation(conn).map_err(|e| e.to_string())?;
+    let numero = incrementer()?;
+    if deja_attribue(&numero)? {
+        return Err(format!(
+            "Numérotation incohérente : {} est déjà attribué",
+            numero
+        ));
+    }
+    Ok(numero)
+}
+
+pub(crate) fn resynchroniser_numerotation(conn: &Connection) -> rusqlite::Result<()> {
+    for dtype in crate::db::TYPES_DOCUMENT {
+        let Ok(prefixe) = document_prefixe(dtype) else {
+            continue;
+        };
+        let mut stmt = conn.prepare(
+            "SELECT CAST(substr(numero_facture, 4, 4) AS INTEGER), MAX(CAST(substr(numero_facture, 9) AS INTEGER))
+             FROM ventes
+             WHERE numero_facture GLOB ?1 || '-[0-9][0-9][0-9][0-9]-[0-9]*'
+             GROUP BY 1",
+        )?;
+        let maxima = stmt
+            .query_map(params![prefixe], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (annee, dernier) in maxima {
+            conn.execute(
+                "INSERT INTO numerotation_v2 (ntype, annee, prefixe, dernier_numero) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(ntype, annee) DO UPDATE SET dernier_numero = MAX(dernier_numero, excluded.dernier_numero)",
+                params![format!("{}_client", dtype), annee, prefixe, dernier],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn annee_courante() -> i32 {

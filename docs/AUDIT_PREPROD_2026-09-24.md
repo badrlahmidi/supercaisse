@@ -578,6 +578,19 @@ CREATE INDEX IF NOT EXISTS idx_article_stocks_mag  ON article_stocks(magasin_id)
 
 ### [MAJEUR] S-4 — Pas d'unicité sur les numéros de document ni sur les codes client
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. La migration v4 rend les deux contraintes obligatoires. Jusque-là, l'index sur `numero_facture` était ignoré, avec un simple avertissement, dès qu'il existait des doublons.
+>
+> - **Doublons existants :** le premier document garde son numéro, les suivants reçoivent le suffixe `-DOUBLON-<id>`. Les codes client sont d'abord nettoyés des espaces (un code vide devient `NULL`), puis les doublons reçoivent le suffixe `-<id>`. Chaque correction est journalisée et tracée dans l'audit (`correction_doublons`).
+> - **Index uniques** créés sur `ventes(numero_facture)` et `clients(code)`.
+> - **Compteurs de numérotation** resynchronisés sur le plus grand numéro existant, par type et par année. Si un compteur est en retard (restauration partielle, remise à zéro), `next_numero_document` le resynchronise au lieu de bloquer la vente ou d'attribuer un doublon.
+> - **Codes client :**
+>   - code saisi nettoyé des espaces ;
+>   - message clair si le code existe déjà (« Le code client « X » est déjà utilisé ») ;
+>   - code laissé vide : attribution automatique de `CLI-<id>`, que l'interface annonçait sans que rien ne le fasse, avec un suffixe en cas de collision.
+> - **Bug trouvé en testant, et corrigé :** le formulaire Clients (et Fournisseurs) refusait un email vide (« Email invalide »). Il était donc impossible de créer un client sans email.
+>
+> Couvert par des tests Rust (migration avec doublons de numéros et de codes, compteur en retard, codes générés) et par un test Vitest (création sans email, qui échouait avant le correctif). Vérifié dans l'application : migration v3 → v4, vente numérotée `FA-2026-00003`, doublon de code refusé avec le bon message, code `CLI-00002` généré.
+
 **Fichier** : `src-tauri/src/db.rs` (table `ventes`, `clients`)
 **Risque** : rien n'empêche deux factures portant le même `numero_facture`, par exemple après une restauration partielle ou une remise à zéro manuelle du compteur. C'est une non-conformité DGI.
 **Fix** : `CREATE UNIQUE INDEX idx_ventes_numero ON ventes(numero_facture) WHERE numero_facture IS NOT NULL;` et `CREATE UNIQUE INDEX idx_clients_code ON clients(code) WHERE code IS NOT NULL AND code != '';`.

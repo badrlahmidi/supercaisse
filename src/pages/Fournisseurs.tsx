@@ -19,7 +19,7 @@ const fournisseurSchema = z.object({
   adresse: z.string().optional().nullable(),
   telephone: z.string().optional().nullable(),
   ice: z.string().optional().nullable(),
-  email: z.string().email("Email invalide").optional().nullable(),
+  email: z.union([z.literal(""), z.string().trim().email("Email invalide")]).optional().nullable(),
 })
 
 type FournisseurForm = z.infer<typeof fournisseurSchema>

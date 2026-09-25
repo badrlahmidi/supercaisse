@@ -45,7 +45,7 @@ const clientSchema = z.object({
   nom: z.string().min(1, "Nom requis"),
   adresse: z.string().optional().nullable(),
   telephone: z.string().optional().nullable(),
-  email: z.string().email("Email invalide").optional().nullable(),
+  email: z.union([z.literal(""), z.string().trim().email("Email invalide")]).optional().nullable(),
   ice: z.string().optional().nullable(),
   credit_plafond: z.number().min(0).optional().nullable(),
   segment: z.string().optional().nullable(),
