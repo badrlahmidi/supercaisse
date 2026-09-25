@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "supercaisse",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "com.supercaisse.pos",
   "build": {
     "frontendDist": "../dist",
@@ -39,6 +39,18 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/badrlahmidi/supercaisse/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

@@ -318,6 +318,8 @@ const mockData: Record<string, (args: Record<string, unknown>) => unknown> = {
   export_database: () => "exports/supercaisse_export_20240101_120000.db",
   import_database: () => "backups/avant_restauration_supercaisse.db",
   list_backups: () => [],
+  verifier_mise_a_jour: () => ({ version_actuelle: __APP_VERSION__, configuree: false, disponible: null }),
+  installer_mise_a_jour: () => null,
 }
 
 export async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

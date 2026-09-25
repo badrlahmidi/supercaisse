@@ -34,6 +34,7 @@ pub fn run() {
     commands::installer_hook_panique();
     let resultat = tauri::Builder::default()
         .plugin(journal())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AuthState::default())
         .setup(|app| {
             log::info!("Démarrage de SuperCaisse {}", app.package_info().version);
@@ -66,6 +67,8 @@ pub fn run() {
             commands::login,
             commands::logout,
             commands::journaliser_frontend,
+            commands::verifier_mise_a_jour,
+            commands::installer_mise_a_jour,
             commands::get_categories,
             commands::add_category,
             commands::update_category,

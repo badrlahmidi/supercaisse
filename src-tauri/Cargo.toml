@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.9.0"
 description = "SuperCaisse POS - Modern Point of Sale"
 authors = ["SuperCaisse"]
 license = "MIT"
@@ -27,3 +27,4 @@ sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
 base64 = "0.22"
+tauri-plugin-updater = "2"

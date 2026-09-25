@@ -289,6 +289,7 @@ mod tests {
                 let (attribut, bloc) = bloc.split_once(']').unwrap();
                 let nom = bloc
                     .trim_start()
+                    .trim_start_matches("pub async fn ")
                     .trim_start_matches("pub fn ")
                     .split('(')
                     .next()

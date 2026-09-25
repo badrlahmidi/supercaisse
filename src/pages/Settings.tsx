@@ -20,6 +20,7 @@ import { Checkbox } from "@/ui/Checkbox"
 import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages } from "lucide-react"
 import { useI18nStore } from "@/store/i18n"
 import { iceSaisieValide, ifSaisieValide } from "@/lib/fiscal"
+import MisesAJour from "@/components/MisesAJour"
 
 
 interface User {
@@ -949,6 +950,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="system" className="space-y-6">
+          <MisesAJour />
           <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
           <Card>
             <CardHeader>

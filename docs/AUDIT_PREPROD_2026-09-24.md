@@ -978,6 +978,31 @@ Tests Rust à ajouter en priorité, sur base en mémoire et avec `init_db` facto
 
 ### [MINEUR] P-5 — Versioning et mécanisme de mise à jour
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. **Une action de ta part reste nécessaire** : générer la paire de clés de signature et renseigner les secrets GitHub (voir `docs/RELEASE.md`).
+>
+> - **Versions alignées sur 0.9.0**, avec `package.json` comme source unique :
+>   - `tauri.conf.json` y renvoie directement (`"version": "../package.json"`) ;
+>   - `npm version` reporte la version dans `Cargo.toml` et `Cargo.lock` (`scripts/synchroniser-version.mjs`) ;
+>   - un test Rust échoue si les versions divergent.
+>   L'écran de connexion affichait « Version 1.0.0 » en dur ; il affiche maintenant la version réelle, injectée au build. Les journaux l'indiquent au démarrage.
+> - **Mises à jour :** `tauri-plugin-updater` avec `requireSignedVersion`, qui empêche de faire réinstaller une ancienne version signée sous un numéro plus récent. L'endpoint est celui de la dernière release GitHub (`latest.json`).
+>   - Commandes réservées à l'admin : `verifier_mise_a_jour` et `installer_mise_a_jour`.
+>   - L'installation sauvegarde d'abord la base (`backups/avant_mise_a_jour_*.db`), trace l'opération dans l'audit, puis redémarre l'application.
+>   - La carte « À propos et mises à jour » (Paramètres > Système) affiche la version et propose la recherche et l'installation. Tant que la clé publique n'est pas renseignée, l'application indique que les mises à jour ne sont pas configurées.
+> - **Release :** `.github/workflows/release.yml`, déclenché par un tag `v*`.
+>   - Vérifications : le tag correspond à la version de `package.json`, et la clé publique est présente.
+>   - Il relance les tests, construit l'installateur Windows signé avec `latest.json` et crée une release en brouillon.
+>   - La procédure complète (génération de la clé, secrets `TAURI_SIGNING_PRIVATE_KEY*`, publication) est dans `docs/RELEASE.md`.
+>
+> Couvert par des tests Rust (versions alignées, clé publique requise) et Vitest (carte de mise à jour).
+>
+> Vérifié dans l'application avec une clé jetable et un `latest.json` servi en local :
+> - la version 0.9.1 est détectée, avec ses notes ;
+> - une signature malformée est refusée, de même qu'une signature produite par une autre clé (« The signature was created with a different key ») ;
+> - la sauvegarde préalable est bien créée, et l'application reste en service après un échec.
+>
+> La clé de test n'a pas été commitée.
+
 **Fichier** : `package.json:4` (`0.0.0`), `src-tauri/Cargo.toml:3` et `tauri.conf.json:4` (`0.1.0`), absence de `tauri-plugin-updater`
 **Risque** : les versions sont désynchronisées, et il n'y a aucun canal de mise à jour : chaque correctif impose une réinstallation manuelle sur chaque caisse. Ce point est bloquant compte tenu de l'échéance du 1er janvier 2027 (C-3).
 **Fix** :

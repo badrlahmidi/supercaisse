@@ -105,7 +105,7 @@ export default function Login() {
           </div>
 
           <p className="text-sm text-slate-500">
-            &copy; 2025 SuperCaisse POS — Version 1.0.0
+            &copy; {new Date().getFullYear()} SuperCaisse POS — Version {__APP_VERSION__}
           </p>
         </div>
       </div>

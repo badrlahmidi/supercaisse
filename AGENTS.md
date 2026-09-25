@@ -45,3 +45,7 @@
 - `npx tsc -b` — TypeScript check (the root `tsc --noEmit` checks no file: the root tsconfig only has references)
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (in `src-tauri/`) — Rust checks run by CI
 - `npx vite build` — verify production build
+
+## Versioning & releases
+- `package.json` holds the version; `tauri.conf.json` reads it (`"version": "../package.json"`) and `npm version <x.y.z>` syncs `Cargo.toml`/`Cargo.lock` (a Rust test fails if they diverge)
+- Pushing a `v<x.y.z>` tag runs `.github/workflows/release.yml` (signed Windows installer + `latest.json`, draft release); setup steps in `docs/RELEASE.md`
