@@ -23,32 +23,7 @@ import CategoryPills from "@/components/pos/CategoryPills"
 import ProductGrid from "@/components/pos/ProductGrid"
 import CartPanel from "@/components/pos/CartPanel"
 import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
-
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  categorie_nom?: string
-  a_variantes?: boolean
-}
-
-interface ArticleVariante {
-  id: number
-  taille: string | null
-  couleur: string | null
-  code_barre: string | null
-  stock_dedie: number
-}
-
-interface Category {
-  id: number
-  nom: string
-}
+import type { Article, ArticleVariante, Category } from "@/types"
 
 interface RapportX {
   session_id: number
@@ -60,13 +35,6 @@ interface RapportX {
   nb_annulations: number
   nb_articles_vendus: number
   par_mode: { mode: string; total: number; count: number }[]
-}
-
-interface Client {
-  id: number
-  nom: string
-  ice: string | null
-  credit_actuel: number
 }
 
 const SHORTCUTS = [

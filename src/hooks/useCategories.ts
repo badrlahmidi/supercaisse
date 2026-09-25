@@ -1,11 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { Category } from "@/types"
 
-export interface Category {
-  id: number
-  nom: string
-}
+export type { Category }
 
 export function useCategoriesList() {
   return useQuery({

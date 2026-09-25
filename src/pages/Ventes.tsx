@@ -16,7 +16,7 @@ import { format, subDays } from "date-fns"
 import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import type { Settings } from "@/lib/tauri"
+import type { Settings } from "@/types"
 
 interface Vente {
   id: number

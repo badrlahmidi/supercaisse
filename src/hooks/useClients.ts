@@ -1,19 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { Client } from "@/types"
 
-export interface Client {
-  id: number
-  nom: string
-  adresse?: string
-  telephone?: string
-  email: string | null
-  ice: string | null
-  credit_plafond: number | null
-  credit_actuel: number
-  points_fidelite: number
-  segment: string | null
-}
+export type { Client }
 
 export function useClientsList() {
   return useQuery({

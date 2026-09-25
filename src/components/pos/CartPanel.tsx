@@ -6,20 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
 import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
-
-interface Article {
-  id: number
-  stock: number
-  prix_vente?: number
-  prix_grossiste?: number | null
-}
-
-interface Client {
-  id: number
-  nom: string
-  credit_actuel: number
-  points_fidelite: number
-}
+import type { Article, Client } from "@/types"
 
 interface ReceiptData {
   shopName: string

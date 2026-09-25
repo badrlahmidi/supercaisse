@@ -17,21 +17,14 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
-import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes, Printer } from "lucide-react"
+import { Plus, Edit, Trash2, Search, Loader2, Download, Upload, SearchX, ImagePlus, X, Tags, Boxes, Printer, AlertTriangle } from "lucide-react"
 import { jsPDF } from "jspdf"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, exportCSV } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { useDebounce } from "@/hooks/useDebounce"
-
-interface ArticleVariante {
-  id: number
-  taille: string | null
-  couleur: string | null
-  code_barre: string | null
-  stock_dedie: number
-}
+import type { Article, ArticleVariante, ArticleComposant, Category, Fournisseur } from "@/types"
 
 const varianteSchema = z.object({
   taille: z.string().optional(),
@@ -41,47 +34,11 @@ const varianteSchema = z.object({
 })
 type VarianteForm = z.infer<typeof varianteSchema>
 
-interface ArticleComposant {
-  id: number
-  composant_id: number
-  designation: string
-  stock: number
-  quantite: number
-}
-
 const composantSchema = z.object({
   composant_id: z.number().min(1, "Article requis"),
   quantite: z.number().min(0.01, "Quantité requise"),
 })
 type ComposantForm = z.infer<typeof composantSchema>
-
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  prix_achat: number
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  categorie_nom?: string
-  fournisseur_nom?: string
-  actif: boolean
-  suivi_lot?: boolean
-  prix_grossiste?: number | null
-  est_kit?: boolean
-}
-
-interface Category {
-  id: number
-  nom: string
-}
-
-interface Fournisseur {
-  id: number
-  nom: string
-}
 
 const articleSchema = z.object({
   code_barre: z.string().optional().nullable(),
@@ -114,6 +71,7 @@ export default function Articles() {
   const [composantsArticle, setComposantsArticle] = useState<Article | null>(null)
   const [showComposants, setShowComposants] = useState(false)
   const [selectedForLabels, setSelectedForLabels] = useState<Set<number>>(new Set())
+  const [articleToDelete, setArticleToDelete] = useState<Article | null>(null)
 
   const { data: articles, isLoading, refetch } = useProductsList(debouncedSearch)
   const { data: categories } = useCategoriesList()
@@ -501,7 +459,7 @@ export default function Articles() {
                             <Boxes className="h-4 w-4" />
                           </Button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(article.id)} title="Supprimer">
+                        <Button variant="ghost" size="icon" onClick={() => setArticleToDelete(article)} title="Supprimer">
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
@@ -925,6 +883,33 @@ export default function Articles() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowComposants(false)}>Fermer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!articleToDelete} onOpenChange={() => setArticleToDelete(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Confirmer la suppression
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Êtes-vous sûr de vouloir supprimer <strong>{articleToDelete?.designation}</strong> ? Cette action est irréversible.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setArticleToDelete(null)}>Annuler</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (articleToDelete) deleteMutation.mutate(articleToDelete.id, { onSuccess: () => setArticleToDelete(null) })
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Supprimer
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
