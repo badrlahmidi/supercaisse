@@ -574,6 +574,8 @@ Déplacer ensuite `mockData` dans `src/lib/tauri.mock.ts`. L'import dynamique so
 
 ### [CRITIQUE] C-2 — Clés `snake_case` : échec des commandes, masqué par C-1
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`. Les clés de premier niveau sont converties en camelCase dans `invoke()`, la restauration de sauvegarde demande désormais un chemin avec confirmation, et un test de contrat (`src/lib/tauri.test.ts`) vérifie chaque appel littéral contre les signatures Rust.
+
 **Fichier** :
 
 | Appel | Clés en cause | Conséquence en production |

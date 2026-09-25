@@ -82,6 +82,25 @@ export default function Settings() {
   const [editingUser, setEditingUser] = useState<Utilisateur | null>(null)
   const [showUserForm, setShowUserForm] = useState(false)
   const [deleteUserConfirm, setDeleteUserConfirm] = useState<Utilisateur | null>(null)
+  const [showImportConfirm, setShowImportConfirm] = useState(false)
+  const [importPath, setImportPath] = useState("")
+
+  const exportMutation = useMutation({
+    mutationFn: () => invoke<string>("export_database"),
+    onSuccess: (path) => toast.success("Base exportée", { description: path }),
+    onError: (err) => toast.error("Échec de l'export", { description: String(err) }),
+  })
+
+  const importMutation = useMutation({
+    mutationFn: (path: string) => invoke("import_database", { path }),
+    onSuccess: () => {
+      toast.success("Sauvegarde restaurée")
+      setShowImportConfirm(false)
+      setImportPath("")
+      queryClient.invalidateQueries()
+    },
+    onError: (err) => toast.error("Échec de la restauration", { description: String(err) }),
+  })
   const [pinValue, setPinValue] = useState("")
   const [savingPin, setSavingPin] = useState(false)
   const [permRole, setPermRole] = useState("manager")
@@ -943,8 +962,8 @@ export default function Settings() {
                   <p className="font-medium">Exporter la base de données</p>
                   <p className="text-sm text-muted-foreground">Télécharger une copie complète au format SQL</p>
                 </div>
-                <Button onClick={() => invoke("export_database")}>
-                  <Download className="h-4 w-4 mr-2" />
+                <Button onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+                  {exportMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
                   Exporter
                 </Button>
               </div>
@@ -953,7 +972,7 @@ export default function Settings() {
                   <p className="font-medium">Importer une sauvegarde</p>
                   <p className="text-sm text-muted-foreground text-destructive">⚠️ Remplace toutes les données actuelles</p>
                 </div>
-                <Button variant="destructive" onClick={() => invoke("import_database")}>
+                <Button variant="destructive" onClick={() => setShowImportConfirm(true)}>
                   Importer
                 </Button>
               </div>
@@ -961,6 +980,40 @@ export default function Settings() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={showImportConfirm} onOpenChange={(open) => { if (!importMutation.isPending) setShowImportConfirm(open) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Restaurer une sauvegarde
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Toutes les données actuelles seront remplacées par le contenu du fichier. Cette action est irréversible.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="import_path">Chemin du fichier de sauvegarde (.db)</Label>
+            <Input
+              id="import_path"
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              placeholder="backups/supercaisse_20260101_120000.db"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowImportConfirm(false)} disabled={importMutation.isPending}>Annuler</Button>
+            <Button
+              variant="destructive"
+              onClick={() => importMutation.mutate(importPath.trim())}
+              disabled={!importPath.trim() || importMutation.isPending}
+            >
+              {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+              Restaurer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteUserConfirm} onOpenChange={() => setDeleteUserConfirm(null)}>
         <DialogContent className="max-w-sm">
