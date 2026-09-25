@@ -3,7 +3,24 @@ use crate::paths::{ensure_dir, AppDirs};
 use crate::session::AuthState;
 use base64::engine::general_purpose;
 use base64::Engine;
+use rusqlite::OptionalExtension;
 use tauri::State;
+
+fn lancer(commande: &mut std::process::Command, action: &str) -> Result<(), String> {
+    let sortie = commande
+        .output()
+        .map_err(|e| format!("{} impossible : {}", action, e))?;
+    if sortie.status.success() {
+        Ok(())
+    } else {
+        let detail = String::from_utf8_lossy(&sortie.stderr).trim().to_string();
+        log::warn!("{} en échec ({}) : {}", action, sortie.status, detail);
+        Err(format!(
+            "{} impossible ({}) : {}",
+            action, sortie.status, detail
+        ))
+    }
+}
 
 #[tauri::command(async)]
 pub fn print_ticket(auth: State<AuthState>, token: String, texte: String) -> Result<(), String> {
@@ -17,13 +34,15 @@ pub fn print_ticket(auth: State<AuthState>, token: String, texte: String) -> Res
             "Start-Process -FilePath 'notepad.exe' -ArgumentList '/p', '{}' -WindowStyle Hidden -Wait",
             path_str
         );
-        let _ = std::process::Command::new("powershell")
-            .args(["-NonInteractive", "-Command", &ps])
-            .output();
+        lancer(
+            std::process::Command::new("powershell").args(["-NonInteractive", "-Command", &ps]),
+            "Impression",
+        )?;
     } else {
-        let _ = std::process::Command::new("lp")
-            .arg(path.to_string_lossy().as_ref())
-            .output();
+        lancer(
+            std::process::Command::new("lp").arg(path.to_string_lossy().as_ref()),
+            "Impression",
+        )?;
     }
     Ok(())
 }
@@ -104,7 +123,9 @@ fn imprimer_escpos(db: &DbState, base64_data: String) -> Result<(), String> {
             [],
             |r| r.get(0),
         )
-        .unwrap_or_else(|_| "POS-80".to_string())
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "POS-80".to_string())
     };
     let cible = valider_imprimante(&printer_name)?;
 
@@ -164,17 +185,20 @@ pub fn print_receipt(auth: State<AuthState>, token: String, data: String) -> Res
             "Start-Process -FilePath '{}' -WindowStyle Normal -Wait",
             path.to_string_lossy().replace("'", "''")
         );
-        let _ = std::process::Command::new("powershell")
-            .args(["-Command", &ps])
-            .output();
+        lancer(
+            std::process::Command::new("powershell").args(["-Command", &ps]),
+            "Impression",
+        )?;
     } else if cfg!(target_os = "macos") {
-        let _ = std::process::Command::new("open")
-            .arg(path.to_string_lossy().as_ref())
-            .output();
+        lancer(
+            std::process::Command::new("open").arg(path.to_string_lossy().as_ref()),
+            "Impression",
+        )?;
     } else {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(path.to_string_lossy().as_ref())
-            .output();
+        lancer(
+            std::process::Command::new("xdg-open").arg(path.to_string_lossy().as_ref()),
+            "Impression",
+        )?;
     }
     Ok(())
 }

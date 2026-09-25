@@ -85,7 +85,7 @@ pub fn add_paiement(
         ),
         Some("paiement"),
         Some(paiement_id),
-    );
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(paiement_id)
 }

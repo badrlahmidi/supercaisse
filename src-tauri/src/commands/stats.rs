@@ -11,34 +11,34 @@ pub fn get_stats(
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
-    let total_ventes_30j: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= datetime('now','-30 days','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let total_ventes_30j: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= datetime('now','-30 days','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
     let nb_articles: i64 = conn
         .query_row("SELECT COUNT(*) FROM articles WHERE actif=1", [], |r| {
             r.get(0)
         })
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
     let stock_alerte: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM articles WHERE stock <= stock_alerte AND stock_alerte > 0",
             [],
             |r| r.get(0),
         )
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
     let credit_total: f64 = conn
         .query_row(
             "SELECT COALESCE(SUM(ROUND((credit_actuel) * 100)) / 100.0,0) FROM clients",
             [],
             |r| r.get(0),
         )
-        .unwrap_or(0.0);
+        .map_err(|e| e.to_string())?;
     let nb_clients: i64 = conn
         .query_row("SELECT COUNT(*) FROM clients", [], |r| r.get(0))
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
 
-    let ca_jour: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= date('now','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
-    let ca_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let ca_jour: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= date('now','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let ca_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
 
-    let ht_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((COALESCE(montant_ht, montant_total - montant_remise)) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).unwrap_or(0.0);
+    let ht_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((COALESCE(montant_ht, montant_total - montant_remise)) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
 
     let cout_achats_mois: f64 = conn.query_row(concat!("
         SELECT COALESCE(SUM(ROUND((vl.quantite * a.prix_achat * (CASE WHEN vl.total_ligne < 0 THEN -1 ELSE 1 END)) * 100)) / 100.0, 0)
@@ -46,7 +46,7 @@ pub fn get_stats(
         JOIN ventes v ON v.id = vl.vente_id
         JOIN articles a ON a.id = vl.article_id
         WHERE strftime('%Y-%m', v.date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!(), "
-    "), [], |r| r.get(0)).unwrap_or(0.0);
+    "), [], |r| r.get(0)).map_err(|e| e.to_string())?;
     let benefice_mois = ht_mois - cout_achats_mois;
 
     let mut stmt = conn.prepare(concat!("
@@ -67,8 +67,8 @@ pub fn get_stats(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     let mut stmt = conn
         .prepare(concat!(
@@ -93,8 +93,8 @@ pub fn get_stats(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "total_ventes_30j": total_ventes_30j,

@@ -783,9 +783,7 @@ fn migration_001_base(conn: &Connection) -> Result<()> {
     ")?;
 
     // Migration du stock existant vers le "Magasin Principal"
-    let nb_magasins: i64 = conn
-        .query_row("SELECT count(*) FROM magasins", [], |r| r.get(0))
-        .unwrap_or(0);
+    let nb_magasins: i64 = conn.query_row("SELECT count(*) FROM magasins", [], |r| r.get(0))?;
     if nb_magasins == 0 {
         conn.execute(
             "INSERT INTO magasins (nom, adresse) VALUES ('Magasin Principal', 'Siège central')",
@@ -925,9 +923,7 @@ fn migration_001_base(conn: &Connection) -> Result<()> {
     }
 
     // Insert default tables if empty
-    let nb_tables: i64 = conn
-        .query_row("SELECT count(*) FROM tables_resto", [], |r| r.get(0))
-        .unwrap_or(0);
+    let nb_tables: i64 = conn.query_row("SELECT count(*) FROM tables_resto", [], |r| r.get(0))?;
     if nb_tables == 0 {
         for i in 1..=12 {
             conn.execute(
@@ -1035,14 +1031,15 @@ pub fn hash_password(password: &str) -> std::result::Result<String, String> {
 
 pub fn verify_password(password: &str, hash: &str) -> bool {
     if hash.starts_with("$argon2") {
-        let parsed = PasswordHash::new(hash).ok();
-        parsed
-            .map(|h| {
-                Argon2::default()
-                    .verify_password(password.as_bytes(), &h)
-                    .is_ok()
-            })
-            .unwrap_or(false)
+        match PasswordHash::new(hash) {
+            Ok(h) => Argon2::default()
+                .verify_password(password.as_bytes(), &h)
+                .is_ok(),
+            Err(e) => {
+                log::error!("Empreinte de mot de passe illisible en base : {}", e);
+                false
+            }
+        }
     } else {
         use sha2::Digest;
         let sha_hash = hex::encode(sha2::Sha256::digest(password.as_bytes()));

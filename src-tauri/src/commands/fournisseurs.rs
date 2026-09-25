@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use tauri::State;
 
 use super::log_audit;
@@ -93,13 +93,16 @@ pub fn delete_fournisseur(
         &token,
         Acces::Module("fournisseurs", "modifier"),
     )?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let nom: String = conn
         .query_row(
             "SELECT nom FROM fournisseurs WHERE id = ?1",
             params![id],
             |r| r.get(0),
         )
-        .unwrap_or_else(|_| format!("ID {}", id));
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM fournisseurs WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     log_audit(
@@ -109,6 +112,7 @@ pub fn delete_fournisseur(
         &format!("Suppression fournisseur: {} (ID {})", nom, id),
         Some("fournisseur"),
         Some(id),
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }

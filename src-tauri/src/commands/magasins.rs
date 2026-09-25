@@ -78,7 +78,7 @@ pub fn delete_magasin(
     let _me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "modifier"))?;
     let count: i64 = conn
         .query_row("SELECT count(*) FROM magasins", [], |r| r.get(0))
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
     if count <= 1 {
         return Err("Impossible de supprimer le dernier magasin".to_string());
     }
@@ -88,7 +88,7 @@ pub fn delete_magasin(
             params![id],
             |r| r.get(0),
         )
-        .unwrap_or(false);
+        .map_err(|e| e.to_string())?;
     if has_sessions {
         return Err("Ce magasin a des sessions de caisse associées".to_string());
     }
@@ -328,7 +328,7 @@ pub(crate) fn validate_transfert_impl(
         ),
         Some("transfert"),
         Some(transfert_id),
-    );
+    )?;
 
     drop(stmt);
     tx.commit().map_err(|e| e.to_string())?;

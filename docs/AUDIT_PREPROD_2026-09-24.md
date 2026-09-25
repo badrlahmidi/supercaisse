@@ -590,6 +590,23 @@ pub async fn get_rapport_detaille(db: State<'_, DbState>, debut: Option<String>,
 
 ### [MAJEUR] M-16 — Erreurs avalées (`unwrap_or`, `.ok()`, `let _ =`)
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+>
+> - **Audit :** `log_audit` renvoie un `Result` et ses 25 appels le propagent. Les 16 opérations qui écrivaient hors transaction avant l'audit passent désormais dans une transaction, si bien qu'un audit impossible annule l'opération : suppressions, permissions, paramètres, ouverture de session, utilisateurs, connexion, changement de mot de passe. Pour la restauration, l'audit fait partie de la chaîne protégée par le retour arrière. Les tentatives échouées (connexion, mot de passe) restent journalisées avant le refus.
+> - **Requêtes SQL :** les agrégats de `rapports` et `stats` n'utilisent plus `unwrap_or(0)`, et les 12 `filter_map(Result::ok)` sur des lignes ont disparu. Une erreur SQL remonte au lieu d'afficher « 0 DH » ou une liste incomplète. Même chose pour les requêtes ponctuelles :
+>   - le contrôle de double conversion (`already_converted`) ;
+>   - la session et le magasin de la vente ;
+>   - le numéro de facture annulé ;
+>   - la session du journal de caisse ;
+>   - les compteurs de `delete_magasin` et `open_session` ;
+>   - les compteurs des migrations.
+> - **« Introuvable » et « erreur » distingués :** les recherches qui pouvaient légitimement ne rien trouver passent à `.optional()?`. Cela concerne les noms avant suppression, les anciens prix d'un article et le nom de l'imprimante.
+> - **Impression :** `print_ticket` et `print_receipt` vérifient le code de sortie de `lp`, PowerShell et `xdg-open`, et signalent l'échec (également écrit dans le journal).
+> - **Entrées :** une ligne d'achat sans quantité ou sans prix valide est refusée au lieu de valoir 0. À l'import CSV, une valeur numérique illisible produit une erreur de ligne au lieu d'un 0 silencieux. Une empreinte de mot de passe illisible est journalisée.
+> - **Restent volontairement :** les valeurs par défaut de paramètres ou de champs JSON optionnels, le listage des fichiers de sauvegarde et le nettoyage des fichiers temporaires.
+>
+> Couvert par des tests Rust : audit bloqué par un trigger qui annule une suppression, une modification d'utilisateur ou une clôture de caisse ; lignes d'achat invalides refusées. Vérifié dans l'application : connexion (auditée), tableau de bord et rapports.
+
 **Fichier** : `sessions.rs:75-91`, `caisses.rs:59-81`, `rapports.rs` (partout), `stats.rs` (partout), `ventes.rs:96,127-133,406-410`, `mod.rs:24-28` (`log_audit`), `auth.rs:29-32`
 **Risque** :
 - `unwrap_or(0.0)` sur des agrégats financiers transforme une erreur SQL en « 0 DH ». C'est exactement le mécanisme qui masque C-4.

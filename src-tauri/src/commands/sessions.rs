@@ -53,6 +53,7 @@ pub fn open_session(
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let fond_initial = montant_positif("Fond de caisse", fond_initial)?;
     let caissier_id = me.user_id;
 
@@ -62,7 +63,7 @@ pub fn open_session(
             params![caissier_id],
             |row| row.get(0),
         )
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
 
     if count > 0 {
         return Err("Une session est déjà ouverte pour ce caissier".to_string());
@@ -88,7 +89,8 @@ pub fn open_session(
         ),
         Some("session"),
         Some(session_id),
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(session_id)
 }
 
@@ -214,7 +216,7 @@ pub(crate) fn close_session_impl(
         ),
         Some("session"),
         Some(session_id),
-    );
+    )?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -360,6 +362,22 @@ mod tests {
         assert_eq!(attendu, 129.9);
         assert_eq!(ecart, 0.0);
         assert!(close_session_impl(&mut conn, 1, f64::NAN, None).is_err());
+    }
+
+    #[test]
+    fn test_cloture_annulee_si_l_audit_echoue() {
+        let mut conn = setup();
+        conn.execute_batch(
+            "CREATE TRIGGER audit_bloque BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'disque plein'); END;",
+        )
+        .unwrap();
+        assert!(close_session_impl(&mut conn, 1, 100.0, None).is_err());
+        let statut: String = conn
+            .query_row("SELECT statut FROM sessions_caisse WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(statut, "ouverte");
     }
 
     #[test]

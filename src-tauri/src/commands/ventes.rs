@@ -193,7 +193,7 @@ pub(crate) fn create_vente_impl(
                 tx.query_row(
                     "SELECT magasin_id FROM sessions_caisse WHERE caissier_id = ?1 AND statut = 'ouverte' ORDER BY id DESC LIMIT 1",
                     params![cid], |r| r.get::<_, Option<i64>>(0)
-                ).ok().flatten().unwrap_or(default_magasin_id(&tx)?)
+                ).optional().map_err(|e| e.to_string())?.flatten().map_or_else(|| default_magasin_id(&tx), Ok)?
             } else {
                 default_magasin_id(&tx)?
             }
@@ -321,7 +321,8 @@ pub(crate) fn create_vente_impl(
             params![cid],
             |row| row.get(0),
         )
-        .ok()
+        .optional()
+        .map_err(|e| e.to_string())?
     } else {
         None
     };
@@ -399,7 +400,7 @@ pub(crate) fn create_vente_impl(
         ),
         Some("vente"),
         Some(vente_id),
-    );
+    )?;
 
     tx.commit().map_err(|e| e.to_string())?;
 
@@ -629,7 +630,7 @@ pub(crate) fn annuler_vente_impl(
             params![vente_id],
             |r| r.get(0),
         )
-        .ok();
+        .map_err(|e| e.to_string())?;
     let montant: f64 = tx
         .query_row(
             "SELECT montant_total - montant_remise FROM ventes WHERE id = ?1",
@@ -661,7 +662,7 @@ pub(crate) fn annuler_vente_impl(
         ),
         Some("vente"),
         Some(vente_id),
-    );
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -835,7 +836,7 @@ pub(crate) fn convert_document_impl(
         "SELECT COUNT(*) > 0 FROM ventes WHERE source_vente_id = ?1 AND dtype = ?2 AND statut != 'annulee'",
         params![vente_id, target_type],
         |r| r.get(0),
-    ).unwrap_or(false);
+    ).map_err(|e| e.to_string())?;
     if already_converted {
         return Err(format!(
             "Ce document a déjà été converti en {}",
@@ -1004,7 +1005,7 @@ pub(crate) fn convert_document_impl(
         ),
         Some("vente"),
         Some(new_vente_id),
-    );
+    )?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(new_vente_id)

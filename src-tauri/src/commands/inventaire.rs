@@ -58,7 +58,7 @@ pub(crate) fn create_inventaire_impl(
         &format!("Inventaire #{} créé ({} articles)", inv_id, nb),
         Some("inventaire"),
         Some(inv_id),
-    );
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "id": inv_id, "nb_articles": nb }))
 }
@@ -101,8 +101,8 @@ pub fn get_inventaire(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "id": inventaire_id,
@@ -270,7 +270,7 @@ pub(crate) fn valider_inventaire_impl(
         ),
         Some("inventaire"),
         Some(inventaire_id),
-    );
+    )?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())

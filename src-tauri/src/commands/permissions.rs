@@ -46,6 +46,7 @@ pub fn update_permission(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO permissions (role, module, action, allowed) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(role, module, action) DO UPDATE SET allowed = ?4",
@@ -65,6 +66,7 @@ pub fn update_permission(
         ),
         None,
         None,
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }

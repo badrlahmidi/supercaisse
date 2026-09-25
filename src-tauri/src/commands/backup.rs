@@ -157,7 +157,24 @@ pub(crate) fn restaurer(
 ) -> Result<PathBuf, String> {
     let version_source = verifier_sauvegarde(source)?;
     let securite = sauvegarder(conn, dirs, "avant_restauration_")?;
-    let resultat = remplacer_base(conn, source).and_then(|_| migrer(conn));
+    let resultat = remplacer_base(conn, source)
+        .and_then(|_| migrer(conn))
+        .and_then(|_| {
+            log_audit(
+                conn,
+                auteur,
+                "importer_base",
+                &format!(
+                    "Restauration depuis {} (schéma v{} → v{}), sauvegarde préalable : {}",
+                    source.display(),
+                    version_source,
+                    SCHEMA_VERSION,
+                    securite.display()
+                ),
+                None,
+                None,
+            )
+        });
     if let Err(e) = resultat {
         remplacer_base(conn, &securite).map_err(|e2| {
             format!(
@@ -172,20 +189,6 @@ pub(crate) fn restaurer(
             e
         ));
     }
-    log_audit(
-        conn,
-        auteur,
-        "importer_base",
-        &format!(
-            "Restauration depuis {} (schéma v{} → v{}), sauvegarde préalable : {}",
-            source.display(),
-            version_source,
-            SCHEMA_VERSION,
-            securite.display()
-        ),
-        None,
-        None,
-    );
     Ok(securite)
 }
 

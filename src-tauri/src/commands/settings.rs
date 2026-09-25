@@ -92,6 +92,7 @@ pub fn update_settings(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("settings", "modifier"))?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let pairs: Vec<(&str, String)> = vec![
         ("shop_name", shop_name),
         ("shop_address", shop_address.unwrap_or_default()),
@@ -155,6 +156,7 @@ pub fn update_settings(
         "Mise à jour des paramètres boutique",
         None,
         None,
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }

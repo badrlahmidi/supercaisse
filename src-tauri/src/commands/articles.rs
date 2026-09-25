@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use tauri::State;
 
 use super::mouvements::retirer_stock;
@@ -146,13 +146,15 @@ pub fn update_article(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let old: Option<(f64, f64, String)> = conn
         .query_row(
-            "SELECT prix_vente, prix_achat, designation FROM articles WHERE id = ?1",
+            "SELECT COALESCE(prix_vente, 0), COALESCE(prix_achat, 0), designation FROM articles WHERE id = ?1",
             params![id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
-        .ok();
+        .optional()
+        .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12, prix_grossiste=?13, est_kit=?14 WHERE id=?15",
         params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32, id],
@@ -176,9 +178,10 @@ pub fn update_article(
                 &format!("{} (ID {}) — {}", designation, id, changes.join(", ")),
                 Some("article"),
                 Some(id),
-            );
+            )?;
         }
     }
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -191,13 +194,16 @@ pub fn delete_article(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let designation: String = conn
         .query_row(
             "SELECT designation FROM articles WHERE id = ?1",
             params![id],
             |r| r.get(0),
         )
-        .unwrap_or_else(|_| format!("ID {}", id));
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM articles WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     log_audit(
@@ -207,7 +213,8 @@ pub fn delete_article(
         &format!("Suppression article: {} (ID {})", designation, id),
         Some("article"),
         Some(id),
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -275,51 +282,49 @@ pub fn import_articles_csv(
         } else {
             Some(cols[1].trim().trim_matches('"').to_string())
         };
-        let prix_achat: f64 = cols[2]
-            .trim()
-            .trim_matches('"')
-            .replace(',', ".")
-            .parse()
-            .unwrap_or(0.0);
-        let prix_vente: f64 = cols[3]
-            .trim()
-            .trim_matches('"')
-            .replace(',', ".")
-            .parse()
-            .unwrap_or(0.0);
-        let tva: f64 = if cols.len() > 4 {
-            cols[4]
-                .trim()
-                .trim_matches('"')
-                .replace(',', ".")
-                .parse()
-                .unwrap_or(0.0)
-        } else {
-            0.0
+        let lire = |valeur: &str, libelle: &str| -> Result<f64, String> {
+            let v = valeur.trim().trim_matches('"').replace(',', ".");
+            if v.is_empty() {
+                return Ok(0.0);
+            }
+            v.parse::<f64>()
+                .ok()
+                .filter(|x| x.is_finite())
+                .ok_or_else(|| {
+                    format!(
+                        "Ligne {}: {} invalide « {} »",
+                        i + 1,
+                        libelle,
+                        valeur.trim()
+                    )
+                })
         };
-        let stock: f64 = if cols.len() > 5 {
-            cols[5]
-                .trim()
-                .trim_matches('"')
-                .replace(',', ".")
-                .parse()
-                .unwrap_or(0.0)
-        } else {
-            0.0
+        let valeurs = (|| -> Result<(f64, f64, f64, f64, Option<f64>), String> {
+            let stock_alerte =
+                if cols.len() > 6 && !cols[6].trim().is_empty() && cols[6].trim() != "\"\"" {
+                    Some(lire(cols[6], "stock d'alerte")?)
+                } else {
+                    None
+                };
+            Ok((
+                lire(cols[2], "prix d'achat")?,
+                lire(cols[3], "prix de vente")?,
+                lire(cols[4], "TVA")?,
+                if cols.len() > 5 {
+                    lire(cols[5], "stock")?
+                } else {
+                    0.0
+                },
+                stock_alerte,
+            ))
+        })();
+        let (prix_achat, prix_vente, tva, stock, stock_alerte) = match valeurs {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
         };
-        let stock_alerte: Option<f64> =
-            if cols.len() > 6 && !cols[6].trim().is_empty() && cols[6].trim() != "\"\"" {
-                Some(
-                    cols[6]
-                        .trim()
-                        .trim_matches('"')
-                        .replace(',', ".")
-                        .parse()
-                        .unwrap_or(0.0),
-                )
-            } else {
-                None
-            };
         let image_url: Option<String> =
             if cols.len() > 7 && !cols[7].trim().is_empty() && cols[7].trim() != "\"\"" {
                 Some(cols[7].trim().trim_matches('"').to_string())
@@ -356,7 +361,7 @@ pub fn import_articles_csv(
         ),
         None,
         None,
-    );
+    )?;
 
     tx.commit().map_err(|e| e.to_string())?;
 

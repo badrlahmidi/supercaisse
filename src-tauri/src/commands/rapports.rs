@@ -31,17 +31,17 @@ pub fn get_rapport_x(
             params![session_id],
             |r| r.get(0),
         )
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
 
     let ca_total: f64 = conn.query_row(
         concat!("SELECT COALESCE(SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0, 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
-    ).unwrap_or(0.0);
+    ).map_err(|e| e.to_string())?;
 
     let total_remises: f64 = conn.query_row(
         concat!("SELECT COALESCE(SUM(ROUND((v.montant_remise) * 100)) / 100.0, 0) FROM ventes v WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
-    ).unwrap_or(0.0);
+    ).map_err(|e| e.to_string())?;
 
     let nb_annulations: i64 = conn
         .query_row(
@@ -49,12 +49,12 @@ pub fn get_rapport_x(
             params![session_id],
             |r| r.get(0),
         )
-        .unwrap_or(0);
+        .map_err(|e| e.to_string())?;
 
     let nb_articles_vendus: f64 = conn.query_row(
         concat!("SELECT COALESCE(SUM(", quantite_signee!("va"), "), 0) FROM vente_articles va JOIN ventes v ON v.id = va.vente_id WHERE v.session_id = ?1 AND ", filtre_ca!()),
         params![session_id], |r| r.get(0),
-    ).unwrap_or(0.0);
+    ).map_err(|e| e.to_string())?;
 
     let mut stmt = conn
         .prepare(
@@ -73,8 +73,8 @@ pub fn get_rapport_x(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "session_id": session_id,
@@ -135,7 +135,7 @@ pub fn get_rapport_detaille(
         .query_row(&base_sql, params_ref.as_slice(), |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
-        .unwrap_or((0.0, 0.0, 0));
+        .map_err(|e| e.to_string())?;
 
     let (wc2, wp2) = date_filter("v.date");
     let marge_sql = format!(
@@ -152,7 +152,7 @@ pub fn get_rapport_detaille(
         .collect();
     let marge_brute: f64 = conn
         .query_row(&marge_sql, params_ref2.as_slice(), |r| r.get(0))
-        .unwrap_or(0.0);
+        .map_err(|e| e.to_string())?;
 
     let (wc3, wp3) = date_filter("v.date");
     let tva_sql = format!(
@@ -167,7 +167,7 @@ pub fn get_rapport_detaille(
         .collect();
     let tva_collectee: f64 = conn
         .query_row(&tva_sql, params_ref3.as_slice(), |r| r.get(0))
-        .unwrap_or(0.0);
+        .map_err(|e| e.to_string())?;
 
     let (wc4, wp4) = date_filter("v.date");
     let top_sql = format!(
@@ -192,8 +192,8 @@ pub fn get_rapport_detaille(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     let (wc5, wp5) = date_filter("v.date");
     let rotation_sql = format!(
@@ -219,8 +219,8 @@ pub fn get_rapport_detaille(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     let (wc6, wp6) = date_filter("v.date");
     let daily_sql = format!(
@@ -242,8 +242,8 @@ pub fn get_rapport_detaille(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     let (wc7, wp7) = date_filter("v.date");
     let mode_sql = format!(
@@ -265,8 +265,8 @@ pub fn get_rapport_detaille(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "ca_total": ca_total,

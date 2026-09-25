@@ -24,8 +24,8 @@ pub fn get_tables(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
     Ok(tables)
 }
 

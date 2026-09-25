@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use tauri::State;
 
 use super::log_audit;
@@ -85,13 +85,16 @@ pub fn delete_category(
         &token,
         Acces::Module("categories", "modifier"),
     )?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let nom: String = conn
         .query_row(
             "SELECT nom FROM categories WHERE id = ?1",
             params![id],
             |r| r.get(0),
         )
-        .unwrap_or_else(|_| format!("ID {}", id));
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM categories WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     log_audit(
@@ -101,6 +104,7 @@ pub fn delete_category(
         &format!("Suppression catégorie: {} (ID {})", nom, id),
         Some("categorie"),
         Some(id),
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }

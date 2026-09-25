@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
 use super::auth::valider_nouveau_mot_de_passe;
@@ -44,6 +44,7 @@ pub fn add_utilisateur(
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     valider_nouveau_mot_de_passe(&login, &password)?;
     let hash = hash_password(&password)?;
     conn.execute(
@@ -59,7 +60,8 @@ pub fn add_utilisateur(
         &format!("Nouvel utilisateur: {} ({}) - rôle {}", nom, login, role),
         Some("utilisateur"),
         Some(id),
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -121,6 +123,8 @@ pub(crate) fn update_utilisateur_impl(
     password: Option<&str>,
     auteur: Option<i64>,
 ) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let conn: &Connection = &tx;
     if role != "admin" {
         verifier_admin_restant(conn, id)?;
     }
@@ -152,7 +156,8 @@ pub(crate) fn update_utilisateur_impl(
         ),
         Some("utilisateur"),
         Some(id),
-    );
+    )?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -173,6 +178,8 @@ pub(crate) fn delete_utilisateur_impl(
     id: i64,
     auteur: Option<i64>,
 ) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let conn: &Connection = &tx;
     verifier_admin_restant(conn, id)?;
     let nom: String = conn
         .query_row(
@@ -180,7 +187,9 @@ pub(crate) fn delete_utilisateur_impl(
             params![id],
             |r| r.get(0),
         )
-        .unwrap_or_else(|_| format!("ID {}", id));
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM utilisateurs WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     log_audit(
@@ -190,6 +199,71 @@ pub(crate) fn delete_utilisateur_impl(
         &format!("Suppression utilisateur: {} (ID {})", nom, id),
         Some("utilisateur"),
         Some(id),
-    );
+    )?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base() -> Connection {
+        let conn = init_db(":memory:").unwrap();
+        conn.execute(
+            "INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'caissier', 'x', 'Caissier', 'caissier')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_audit_en_echec_annule_l_operation() {
+        let conn = base();
+        conn.execute_batch(
+            "CREATE TRIGGER audit_bloque BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'disque plein'); END;",
+        )
+        .unwrap();
+        let err = delete_utilisateur_impl(&conn, 2, Some(1)).unwrap_err();
+        assert!(err.contains("Journal d'audit"), "{err}");
+        let existe: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM utilisateurs WHERE id = 2",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(existe);
+        assert!(update_utilisateur_impl(
+            &conn,
+            2,
+            "caissier",
+            "Renommé",
+            "caissier",
+            None,
+            Some(1)
+        )
+        .is_err());
+        let nom: String = conn
+            .query_row("SELECT nom FROM utilisateurs WHERE id = 2", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(nom, "Caissier");
+    }
+
+    #[test]
+    fn test_suppression_journalisee() {
+        let conn = base();
+        delete_utilisateur_impl(&conn, 2, Some(1)).unwrap();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = 'supprimer_utilisateur'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+    }
 }

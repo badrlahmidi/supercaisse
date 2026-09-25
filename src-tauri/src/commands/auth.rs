@@ -59,9 +59,11 @@ pub(crate) fn login_impl(
             &format!("Tentative de connexion échouée pour: {}", ulogin),
             Some("utilisateur"),
             Some(id),
-        );
+        )?;
         return Ok(None);
     }
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let conn: &Connection = &tx;
     if !hash.starts_with("$argon2") {
         conn.execute(
             "UPDATE utilisateurs SET password_hash = ?1 WHERE id = ?2",
@@ -84,7 +86,8 @@ pub(crate) fn login_impl(
         &format!("Connexion réussie: {} ({})", nom, role),
         Some("utilisateur"),
         Some(id),
-    );
+    )?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(Some(Utilisateur {
         id: Some(id),
         login: ulogin,
@@ -156,13 +159,15 @@ pub(crate) fn change_password_impl(
             &format!("Ancien mot de passe incorrect pour: {}", login),
             Some("utilisateur"),
             Some(user_id),
-        );
+        )?;
         return Err("Ancien mot de passe incorrect".to_string());
     }
     if ancien == nouveau {
         return Err("Le nouveau mot de passe doit être différent de l'ancien".to_string());
     }
     valider_nouveau_mot_de_passe(&login, nouveau)?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let conn: &Connection = &tx;
     conn.execute(
         "UPDATE utilisateurs SET password_hash = ?1, must_change_password = 0 WHERE id = ?2",
         params![hash_password(nouveau)?, user_id],
@@ -175,7 +180,8 @@ pub(crate) fn change_password_impl(
         &format!("Mot de passe modifié: {}", login),
         Some("utilisateur"),
         Some(user_id),
-    );
+    )?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -223,8 +229,8 @@ pub(crate) fn login_pin_impl(conn: &Connection, pin: &str) -> Result<Option<Util
             ))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
     for (id, ulogin, nom, role, hash, must_change_password) in users {
         if verify_password(pin, &hash) {
             return Ok(Some(Utilisateur {

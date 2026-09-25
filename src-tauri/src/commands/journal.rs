@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use tauri::State;
 
 use super::calcul::montant_saisi;
@@ -74,7 +74,8 @@ pub fn add_journal_caisse(
             params![uid],
             |row| row.get(0),
         )
-        .ok()
+        .optional()
+        .map_err(|e| e.to_string())?
     } else {
         None
     };

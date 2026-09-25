@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use tauri::State;
 
 use super::calcul::montant_positif;
@@ -98,11 +98,14 @@ pub fn delete_client(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("clients", "modifier"))?;
+    let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let nom: String = conn
         .query_row("SELECT nom FROM clients WHERE id = ?1", params![id], |r| {
             r.get(0)
         })
-        .unwrap_or_else(|_| format!("ID {}", id));
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| format!("ID {}", id));
     conn.execute("DELETE FROM clients WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     log_audit(
@@ -112,7 +115,8 @@ pub fn delete_client(
         &format!("Suppression client: {} (ID {})", nom, id),
         Some("client"),
         Some(id),
-    );
+    )?;
+    conn.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -151,8 +155,8 @@ pub fn get_releve_client(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     let mut stmt2 = conn
         .prepare(
@@ -172,8 +176,8 @@ pub fn get_releve_client(
             }))
         })
         .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "client_id": client_id,

@@ -3,8 +3,34 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
-use super::calcul::{montant_saisi, round2, somme_dh};
+use super::calcul::{montant_saisi, somme_dh};
 use super::{adjust_article_stock, default_magasin_id};
+
+pub(crate) fn lire_ligne_achat(ligne: &serde_json::Value) -> Result<(i64, f64, f64, f64), String> {
+    let article_id = ligne["article_id"]
+        .as_i64()
+        .ok_or("article_id manquant ou invalide dans la ligne")?;
+    let quantite = ligne["quantite"]
+        .as_f64()
+        .filter(|q| q.is_finite() && *q > 0.0)
+        .ok_or_else(|| {
+            format!(
+                "Quantité manquante ou invalide pour l'article {}",
+                article_id
+            )
+        })?;
+    let prix = ligne["prix_unitaire"]
+        .as_f64()
+        .filter(|p| p.is_finite() && *p >= 0.0)
+        .ok_or_else(|| {
+            format!(
+                "Prix unitaire manquant ou invalide pour l'article {}",
+                article_id
+            )
+        })?;
+    let total = montant_saisi("Total de ligne d'achat", quantite * prix)?;
+    Ok((article_id, quantite, prix, total))
+}
 
 #[tauri::command(async)]
 pub fn create_achat(
@@ -21,13 +47,14 @@ pub fn create_achat(
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "creer"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
-    let mut totaux_lignes = Vec::with_capacity(articles.len());
-    for a in &articles {
-        let qte = a["quantite"].as_f64().unwrap_or(0.0);
-        let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
-        totaux_lignes.push(montant_saisi("Total de ligne d'achat", qte * pu)?);
+    if articles.is_empty() {
+        return Err("L'achat ne contient aucun article".to_string());
     }
-    let montant_total = somme_dh(totaux_lignes);
+    let lignes = articles
+        .iter()
+        .map(lire_ligne_achat)
+        .collect::<Result<Vec<_>, String>>()?;
+    let montant_total = somme_dh(lignes.iter().map(|l| l.3));
     let sl = statut_livraison.unwrap_or_else(|| "recu".to_string());
     let sp = statut_paiement.unwrap_or_else(|| "non_paye".to_string());
 
@@ -36,13 +63,7 @@ pub fn create_achat(
         params![fournisseur_id, reference, montant_total, sl, sp],
     ).map_err(|e| e.to_string())?;
     let achat_id = tx.last_insert_rowid();
-    for a in &articles {
-        let article_id = a["article_id"]
-            .as_i64()
-            .ok_or("article_id manquant ou invalide dans la ligne")?;
-        let qte = a["quantite"].as_f64().unwrap_or(0.0);
-        let pu = a["prix_unitaire"].as_f64().unwrap_or(0.0);
-        let total_ligne = round2(qte * pu);
+    for &(article_id, qte, pu, total_ligne) in &lignes {
         tx.execute(
             "INSERT INTO achat_articles (achat_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![achat_id, article_id, qte, pu, total_ligne],
@@ -243,4 +264,34 @@ pub fn compare_fournisseur_prices(
     }
 
     Ok(articles_map.into_values().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_lignes_d_achat_incompletes_refusees() {
+        assert_eq!(
+            lire_ligne_achat(&json!({ "article_id": 1, "quantite": 3, "prix_unitaire": 3.335 }))
+                .unwrap(),
+            (1, 3.0, 3.335, 10.01)
+        );
+        assert!(lire_ligne_achat(&json!({ "article_id": 1, "prix_unitaire": 2 })).is_err());
+        assert!(lire_ligne_achat(&json!({ "article_id": 1, "quantite": 2 })).is_err());
+        assert!(
+            lire_ligne_achat(&json!({ "article_id": 1, "quantite": "2", "prix_unitaire": 2 }))
+                .is_err()
+        );
+        assert!(
+            lire_ligne_achat(&json!({ "article_id": 1, "quantite": 0, "prix_unitaire": 2 }))
+                .is_err()
+        );
+        assert!(
+            lire_ligne_achat(&json!({ "article_id": 1, "quantite": 1, "prix_unitaire": -2 }))
+                .is_err()
+        );
+        assert!(lire_ligne_achat(&json!({ "quantite": 1, "prix_unitaire": 2 })).is_err());
+    }
 }

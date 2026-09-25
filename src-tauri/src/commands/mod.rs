@@ -114,11 +114,13 @@ pub(crate) fn log_audit(
     detail: &str,
     reference_type: Option<&str>,
     reference_id: Option<i64>,
-) {
-    let _ = conn.execute(
+) -> Result<(), String> {
+    conn.execute(
         "INSERT INTO audit_log (utilisateur_id, action, detail, reference_type, reference_id) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![utilisateur_id, action, detail, reference_type, reference_id],
-    );
+    )
+    .map(|_| ())
+    .map_err(|e| format!("Journal d'audit impossible à écrire ({}) : opération annulée", e))
 }
 
 pub(crate) fn fin_de_journee(fin: &str) -> String {
