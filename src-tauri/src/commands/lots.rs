@@ -3,6 +3,7 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::mouvements::retirer_stock;
 use super::{adjust_article_stock, default_magasin_id};
 
 #[tauri::command]
@@ -134,7 +135,7 @@ pub fn discard_article_lot(
         params![quantite, lot_id],
     )
     .map_err(|e| e.to_string())?;
-    adjust_article_stock(&tx, article_id, magasin_id, -quantite)?;
+    retirer_stock(&tx, article_id, magasin_id, quantite)?;
     tx.execute(
         "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, ?4, ?5)",
         params![article_id, quantite, lot_id, motif.unwrap_or_else(|| "peremption".to_string()), magasin_id],

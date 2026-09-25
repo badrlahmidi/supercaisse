@@ -49,6 +49,7 @@ pub fn get_settings(
             .unwrap_or_else(|| "MAD".to_string()),
         printer_name: map.get("printer_name").filter(|s| !s.is_empty()).cloned(),
         fidelite_actif: map.get("fidelite_actif").cloned(),
+        autoriser_stock_negatif: map.get("autoriser_stock_negatif").cloned(),
         fidelite_dh_pour_1_point: map.get("fidelite_dh_pour_1_point").cloned(),
         fidelite_valeur_1_point: map.get("fidelite_valeur_1_point").cloned(),
         business_type: map.get("business_type").cloned(),
@@ -87,6 +88,7 @@ pub fn update_settings(
     logo_base64: Option<String>,
     receipt_header: Option<String>,
     doc_primary_color: Option<String>,
+    autoriser_stock_negatif: Option<String>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("settings", "modifier"))?;
@@ -116,6 +118,13 @@ pub fn update_settings(
         (
             "fidelite_actif",
             fidelite_actif.unwrap_or_else(|| "true".to_string()),
+        ),
+        (
+            "autoriser_stock_negatif",
+            match autoriser_stock_negatif.as_deref() {
+                Some("true") => "true".to_string(),
+                _ => "false".to_string(),
+            },
         ),
         (
             "fidelite_dh_pour_1_point",

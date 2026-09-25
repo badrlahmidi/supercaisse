@@ -375,6 +375,14 @@ if mode_paiement == "credit" && stock_was_deducted { /* credit_actuel -= net */ 
 
 ### [MAJEUR] M-4 — Stock négatif non contrôlé ; lots et variantes hors du stock magasin
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms`.
+> - Nouveau module `commands/mouvements.rs`, utilisé par la vente, l'annulation et la conversion (la logique variante/kit/article, dupliquée trois fois, n'existe plus qu'une fois).
+> - Stock négatif refusé par défaut, par magasin, pour les ventes (factures/BL, composants de kits), conversions devis → facture/BL, transferts, ajustements manuels et mises au rebut de lots. Paramètre « Autoriser la vente en stock négatif » dans Paramètres.
+> - Variantes : stock par magasin (`article_variante_stocks`), `stock_dedie` devient le total. Le stock existant est repris dans le magasin par défaut.
+> - Lots : consommation FEFO à la vente (lots périmés ignorés), tracée dans `vente_lots`. Annulation, avoir, annulation d'avoir et facture issue d'un BL restituent ou reprennent exactement les mêmes lots.
+> - Transferts : source ≠ destination, magasins et articles existants, quantités > 0, stock source vérifié à la validation.
+> - Couvert par 10 tests Rust.
+
 **Fichier** : `src-tauri/src/commands/mod.rs:8-19`, `ventes.rs:152-179`, `variantes.rs`, `lots.rs`, `magasins.rs:113-142`
 **Risque** :
 - `adjust_article_stock` accepte n'importe quel delta : ventes, transferts et démontages de kits peuvent passer le stock sous zéro sans alerte.

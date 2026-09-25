@@ -71,6 +71,7 @@ const mockSettings: Settings = {
   printer_name: "POS-80",
   business_type: "standard",
   fidelite_actif: "true",
+  autoriser_stock_negatif: "false",
   fidelite_dh_pour_1_point: "100",
   fidelite_valeur_1_point: "1",
   idle_timeout: "300",

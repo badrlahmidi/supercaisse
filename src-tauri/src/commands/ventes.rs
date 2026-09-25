@@ -6,23 +6,10 @@ use tauri::State;
 use super::calcul::{
     calculer_ligne, round2, totaliser, valider_pourcentage, LigneCalculee, TOLERANCE_MONTANT,
 };
+use super::mouvements::{inverser_lots, mouvement_ligne, proprietaire_lots, LigneStock, Sens};
 use super::{
-    adjust_article_stock, annee_courante, default_magasin_id, document_prefixe, log_audit,
-    next_numero_document,
+    annee_courante, default_magasin_id, document_prefixe, log_audit, next_numero_document,
 };
-
-fn get_composants(tx: &Connection, article_id: i64) -> Result<Vec<(i64, f64)>, String> {
-    let mut stmt = tx
-        .prepare("SELECT composant_id, quantite FROM article_composants WHERE article_id = ?1")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![article_id], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.to_string())
-}
 
 const MODES_PAIEMENT: [&str; 7] = [
     "especes", "carte", "cb", "cheque", "virement", "credit", "fidelite",
@@ -362,35 +349,19 @@ pub(crate) fn create_vente_impl(
         ).map_err(|e| e.to_string())?;
 
         if encaisse {
-            if let Some(vid) = l.variante_id {
-                tx.execute(
-                    "UPDATE article_variantes SET stock_dedie = stock_dedie - ?1 WHERE id = ?2",
-                    params![qte, vid],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente_variante', ?4)",
-                    params![article_id, qte, vid, magasin_id],
-                ).map_err(|e| e.to_string())?;
-            } else {
-                let composants = get_composants(&tx, article_id)?;
-                if !composants.is_empty() {
-                    for (composant_id, comp_qte) in composants {
-                        let qte_composant = comp_qte * qte;
-                        adjust_article_stock(&tx, composant_id, magasin_id, -qte_composant)?;
-                        tx.execute(
-                            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente_kit', ?4)",
-                            params![composant_id, qte_composant, vente_id, magasin_id],
-                        ).map_err(|e| e.to_string())?;
-                    }
-                } else {
-                    adjust_article_stock(&tx, article_id, magasin_id, -qte)?;
-                    tx.execute(
-                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente', ?4)",
-                        params![article_id, qte, vente_id, magasin_id],
-                    ).map_err(|e| e.to_string())?;
-                }
-            }
+            mouvement_ligne(
+                &tx,
+                Sens::Sortie,
+                &LigneStock {
+                    article_id,
+                    variante_id: l.variante_id,
+                    quantite: qte,
+                },
+                magasin_id,
+                vente_id,
+                "vente",
+                true,
+            )?;
         }
     }
 
@@ -614,52 +585,32 @@ pub(crate) fn annuler_vente_impl(
             .map_err(|e| e.to_string())?;
         drop(stmt);
 
-        let (adjustment_sign, mtype_suffix) = if is_avoir {
-            (-1.0_f64, "annulation_avoir")
+        let (sens, reference) = if is_avoir {
+            (Sens::Sortie, "annulation_avoir")
         } else {
-            (1.0_f64, "annulation_vente")
+            (Sens::Entree, "annulation_vente")
         };
-
-        for (article_id, qte, variante_id) in lignes {
-            if let Some(vid) = variante_id {
-                let delta = qte * adjustment_sign;
-                tx.execute(
-                    "UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2",
-                    params![delta, vid],
-                )
-                .map_err(|e| e.to_string())?;
-                let mtype = if is_avoir { "sortie" } else { "entree" };
-                tx.execute(
-                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![article_id, qte, mtype, vid, format!("{}_variante", mtype_suffix), magasin_id],
-                ).map_err(|e| e.to_string())?;
-            } else {
-                let composants = get_composants(&tx, article_id)?;
-                if !composants.is_empty() {
-                    for (composant_id, comp_qte) in composants {
-                        let qte_composant = comp_qte * qte;
-                        adjust_article_stock(
-                            &tx,
-                            composant_id,
-                            magasin_id,
-                            qte_composant * adjustment_sign,
-                        )?;
-                        let mtype = if is_avoir { "sortie" } else { "entree" };
-                        tx.execute(
-                            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            params![composant_id, qte_composant, mtype, vente_id, format!("{}_kit", mtype_suffix), magasin_id],
-                        ).map_err(|e| e.to_string())?;
-                    }
-                } else {
-                    adjust_article_stock(&tx, article_id, magasin_id, qte * adjustment_sign)?;
-                    let mtype = if is_avoir { "sortie" } else { "entree" };
-                    tx.execute(
-                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        params![article_id, qte, mtype, vente_id, mtype_suffix, magasin_id],
-                    ).map_err(|e| e.to_string())?;
-                }
-            }
+        for (article_id, quantite, variante_id) in lignes {
+            mouvement_ligne(
+                &tx,
+                sens,
+                &LigneStock {
+                    article_id,
+                    variante_id,
+                    quantite,
+                },
+                magasin_id,
+                vente_id,
+                reference,
+                false,
+            )?;
         }
+        let proprietaire = if is_avoir {
+            vente_id
+        } else {
+            proprietaire_lots(&tx, vente_id)?
+        };
+        inverser_lots(&tx, proprietaire, None)?;
     }
 
     let numero_facture: Option<String> = tx
@@ -977,71 +928,38 @@ pub(crate) fn convert_document_impl(
             params![new_vente_id, article_id, qte, pu, tva, new_total_ligne, new_ligne_ht, new_ligne_tva, remise_ligne, note, variante_id, prix_type],
         ).map_err(|e| e.to_string())?;
 
+        let ligne_stock = LigneStock {
+            article_id: *article_id,
+            variante_id: *variante_id,
+            quantite: *qte,
+        };
         if target_type == "avoir" {
-            if let Some(vid) = variante_id {
-                tx.execute(
-                    "UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2",
-                    params![qte, vid],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'avoir_variante', ?4)",
-                    params![article_id, qte, new_vente_id, magasin_id],
-                ).map_err(|e| e.to_string())?;
-            } else {
-                let composants = get_composants(&tx, *article_id)?;
-                if !composants.is_empty() {
-                    for (composant_id, comp_qte) in composants {
-                        let qte_composant = comp_qte * qte;
-                        adjust_article_stock(&tx, composant_id, magasin_id, qte_composant)?;
-                        tx.execute(
-                            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'avoir_kit', ?4)",
-                            params![composant_id, qte_composant, new_vente_id, magasin_id],
-                        ).map_err(|e| e.to_string())?;
-                    }
-                } else {
-                    adjust_article_stock(&tx, *article_id, magasin_id, *qte)?;
-                    tx.execute(
-                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'avoir', ?4)",
-                        params![article_id, qte, new_vente_id, magasin_id],
-                    ).map_err(|e| e.to_string())?;
-                }
-            }
+            mouvement_ligne(
+                &tx,
+                Sens::Entree,
+                &ligne_stock,
+                magasin_id,
+                new_vente_id,
+                "avoir",
+                false,
+            )?;
         }
-
         if (target_type == "facture" || target_type == "bl") && source_dtype == "devis" {
-            if let Some(vid) = variante_id {
-                tx.execute(
-                    "UPDATE article_variantes SET stock_dedie = stock_dedie - ?1 WHERE id = ?2",
-                    params![qte, vid],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.execute(
-                    "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente_variante', ?4)",
-                    params![article_id, qte, new_vente_id, magasin_id],
-                ).map_err(|e| e.to_string())?;
-            } else {
-                let composants = get_composants(&tx, *article_id)?;
-                if !composants.is_empty() {
-                    for (composant_id, comp_qte) in composants {
-                        let qte_composant = comp_qte * qte;
-                        adjust_article_stock(&tx, composant_id, magasin_id, -qte_composant)?;
-                        tx.execute(
-                            "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente_kit', ?4)",
-                            params![composant_id, qte_composant, new_vente_id, magasin_id],
-                        ).map_err(|e| e.to_string())?;
-                    }
-                } else {
-                    adjust_article_stock(&tx, *article_id, magasin_id, -qte)?;
-                    tx.execute(
-                        "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'vente', ?4)",
-                        params![article_id, qte, new_vente_id, magasin_id],
-                    ).map_err(|e| e.to_string())?;
-                }
-            }
+            mouvement_ligne(
+                &tx,
+                Sens::Sortie,
+                &ligne_stock,
+                magasin_id,
+                new_vente_id,
+                "vente",
+                true,
+            )?;
         }
     }
 
+    if target_type == "avoir" {
+        inverser_lots(&tx, proprietaire_lots(&tx, vente_id)?, Some(new_vente_id))?;
+    }
     tx.execute(
         "UPDATE ventes SET statut = 'convertie' WHERE id = ?1",
         params![vente_id],
@@ -1093,6 +1011,7 @@ mod tests {
             UPDATE settings SET value = '1' WHERE key = 'fidelite_valeur_1_point';
             UPDATE settings SET value = '100' WHERE key = 'fidelite_dh_pour_1_point';
             UPDATE settings SET value = 'true' WHERE key = 'fidelite_actif';
+            INSERT INTO article_stocks (article_id, magasin_id, quantite) SELECT id, 1, 100 FROM articles; UPDATE articles SET stock = 100;
         ").unwrap();
         conn
     }

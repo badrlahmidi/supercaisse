@@ -62,6 +62,7 @@ const settingsSchema = z.object({
   currency: z.string().default("MAD"),
   printer_name: z.string().optional().default("POS-80"),
   fidelite_actif: z.string().optional().default("true"),
+  autoriser_stock_negatif: z.enum(["true", "false"]).optional().default("false"),
   fidelite_dh_pour_1_point: z.string().optional().default("100"),
   fidelite_valeur_1_point: z.string().optional().default("1"),
   business_type: z.enum(["standard", "restaurant"]).default("standard"),
@@ -407,6 +408,32 @@ export default function Settings() {
                     <Label htmlFor="fidelite_valeur_1_point">Valeur de réduction d'1 Point (DH)</Label>
                     <Input id="fidelite_valeur_1_point" type="number" {...settingsForm.register("fidelite_valeur_1_point")} />
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Stock</CardTitle>
+                <CardDescription>
+                  Par défaut, une vente, une conversion ou un transfert est refusé si le magasin n'a pas le stock suffisant.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="autoriser_stock_negatif" className="flex-1">Autoriser la vente en stock négatif</Label>
+                  <Select
+                    value={settingsForm.watch("autoriser_stock_negatif") || "false"}
+                    onValueChange={(v) => settingsForm.setValue("autoriser_stock_negatif", v as "true" | "false")}
+                  >
+                    <SelectTrigger id="autoriser_stock_negatif" className="w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="false">Non</SelectItem>
+                      <SelectItem value="true">Oui</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>

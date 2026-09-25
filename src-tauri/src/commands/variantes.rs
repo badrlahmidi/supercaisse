@@ -4,6 +4,7 @@ use rusqlite::{params, OptionalExtension};
 use tauri::State;
 
 use super::default_magasin_id;
+use super::mouvements::ajuster_stock_variante;
 
 #[tauri::command]
 pub fn add_article_variante(
@@ -16,13 +17,22 @@ pub fn add_article_variante(
     code_barre: Option<String>,
     stock_initial: f64,
 ) -> Result<i64, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
-    conn.execute(
-        "INSERT INTO article_variantes (article_id, taille, couleur, code_barre, stock_dedie) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![article_id, taille, couleur, code_barre, stock_initial],
+    if !stock_initial.is_finite() || stock_initial < 0.0 {
+        return Err(format!("Stock initial invalide : {}", stock_initial));
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO article_variantes (article_id, taille, couleur, code_barre, stock_dedie) VALUES (?1, ?2, ?3, ?4, 0)",
+        params![article_id, taille, couleur, code_barre],
     ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let id = tx.last_insert_rowid();
+    if stock_initial > 0.0 {
+        ajuster_stock_variante(&tx, id, default_magasin_id(&tx)?, stock_initial)?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -90,12 +100,8 @@ pub fn adjust_article_variante_stock(
             |r| r.get(0),
         )
         .map_err(|_| "Variante introuvable".to_string())?;
-    tx.execute(
-        "UPDATE article_variantes SET stock_dedie = stock_dedie + ?1 WHERE id = ?2",
-        params![quantite, id],
-    )
-    .map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
+    ajuster_stock_variante(&tx, id, magasin_id, quantite)?;
     let mtype = if quantite >= 0.0 { "entree" } else { "sortie" };
     tx.execute(
         "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, ?3, ?4, 'variante_ajustement', ?5)",
@@ -114,6 +120,11 @@ pub fn delete_article_variante(
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
+    conn.execute(
+        "DELETE FROM article_variante_stocks WHERE variante_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM article_variantes WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())

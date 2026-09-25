@@ -3,6 +3,7 @@ use crate::session::{autoriser, Acces, AuthState};
 use rusqlite::params;
 use tauri::State;
 
+use super::mouvements::retirer_stock;
 use super::{adjust_article_stock, default_magasin_id, log_audit};
 
 #[tauri::command]
@@ -222,7 +223,14 @@ pub fn update_article_stock(
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
-    adjust_article_stock(&tx, article_id, magasin_id, quantite)?;
+    if !quantite.is_finite() {
+        return Err(format!("Quantité invalide : {}", quantite));
+    }
+    if quantite < 0.0 {
+        retirer_stock(&tx, article_id, magasin_id, -quantite)?;
+    } else {
+        adjust_article_stock(&tx, article_id, magasin_id, quantite)?;
+    }
     let mtype = if quantite >= 0.0 { "entree" } else { "sortie" };
     tx.execute(
         "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_type, magasin_id) VALUES (?1, ?2, ?3, 'ajustement', ?4)",

@@ -96,6 +96,7 @@ export interface Settings {
   printer_name: string | null
   business_type: string
   fidelite_actif: string
+  autoriser_stock_negatif?: string
   fidelite_dh_pour_1_point: string
   fidelite_valeur_1_point: string
   idle_timeout: string

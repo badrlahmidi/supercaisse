@@ -219,6 +219,7 @@ mod tests {
     fn setup() -> Connection {
         let conn = crate::db::init_db(":memory:").unwrap();
         conn.execute("INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Article', 100, 20)", []).unwrap();
+        conn.execute_batch("INSERT INTO article_stocks (article_id, magasin_id, quantite) SELECT id, 1, 100 FROM articles; UPDATE articles SET stock = 100;").unwrap();
         conn.execute("INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (1, 1, 100, 'ouverte', 1)", []).unwrap();
         conn
     }
@@ -465,6 +466,7 @@ mod tests {
         {
             let conn = crate::db::init_db(&path_str).unwrap();
             conn.execute("INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Article', 100, 20)", []).unwrap();
+            conn.execute_batch("INSERT INTO article_stocks (article_id, magasin_id, quantite) SELECT id, 1, 100 FROM articles; UPDATE articles SET stock = 100;").unwrap();
             conn.execute("INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut) VALUES (1, 1, 0, 'ouverte')", []).unwrap();
             conn.execute("INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut) VALUES (2, 1, 0, 'cloturee')", []).unwrap();
             conn.execute_batch("

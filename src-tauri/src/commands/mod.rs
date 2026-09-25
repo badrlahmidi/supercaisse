@@ -32,6 +32,7 @@ mod inventaire;
 mod journal;
 mod lots;
 mod magasins;
+mod mouvements;
 mod paiements;
 mod permissions;
 mod print;

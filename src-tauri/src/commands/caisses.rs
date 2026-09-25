@@ -226,6 +226,7 @@ mod tests {
             INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Huile', 100, 20);
             INSERT INTO clients (id, nom) VALUES (1, 'Client');
             UPDATE settings SET value = 'false' WHERE key = 'fidelite_actif';
+            INSERT INTO article_stocks (article_id, magasin_id, quantite) SELECT id, 1, 100 FROM articles; UPDATE articles SET stock = 100;
         ",
         )
         .unwrap();

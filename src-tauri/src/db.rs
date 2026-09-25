@@ -60,6 +60,7 @@ pub struct Settings {
     pub currency: String,
     pub printer_name: Option<String>,
     pub fidelite_actif: Option<String>,
+    pub autoriser_stock_negatif: Option<String>,
     pub fidelite_dh_pour_1_point: Option<String>,
     pub fidelite_valeur_1_point: Option<String>,
     pub business_type: Option<String>,
@@ -795,6 +796,43 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
                 params![key, value],
             )?;
         }
+    }
+
+    let variante_stocks_existe: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'article_variante_stocks'",
+        [],
+        |r| r.get(0),
+    )?;
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS article_variante_stocks (
+            variante_id INTEGER NOT NULL,
+            magasin_id INTEGER NOT NULL,
+            quantite REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (variante_id, magasin_id),
+            FOREIGN KEY (variante_id) REFERENCES article_variantes(id),
+            FOREIGN KEY (magasin_id) REFERENCES magasins(id)
+        );
+        CREATE TABLE IF NOT EXISTS vente_lots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vente_id INTEGER NOT NULL,
+            lot_id INTEGER NOT NULL,
+            quantite REAL NOT NULL,
+            FOREIGN KEY (vente_id) REFERENCES ventes(id),
+            FOREIGN KEY (lot_id) REFERENCES article_lots(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_vente_lots_vente ON vente_lots(vente_id);
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('autoriser_stock_negatif', 'false');
+    ",
+    )?;
+    if !variante_stocks_existe {
+        conn.execute(
+            "INSERT INTO article_variante_stocks (variante_id, magasin_id, quantite)
+             SELECT v.id, (SELECT MIN(id) FROM magasins), v.stock_dedie
+             FROM article_variantes v
+             WHERE COALESCE(v.stock_dedie, 0) != 0 AND EXISTS (SELECT 1 FROM magasins)",
+            [],
+        )?;
     }
 
     let _ = conn.execute(

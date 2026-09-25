@@ -1,8 +1,9 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use tauri::State;
 
+use super::mouvements::retirer_stock;
 use super::{adjust_article_stock, log_audit};
 
 #[tauri::command]
@@ -181,8 +182,37 @@ pub fn create_transfert(
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("stock", "creer"))?;
-    let utilisateur_id = Some(me.user_id);
+    create_transfert_impl(&mut conn, source_id, dest_id, Some(me.user_id), articles)
+}
+
+pub(crate) fn create_transfert_impl(
+    conn: &mut Connection,
+    source_id: i64,
+    dest_id: i64,
+    utilisateur_id: Option<i64>,
+    articles: Vec<serde_json::Value>,
+) -> Result<i64, String> {
+    if source_id == dest_id {
+        return Err(
+            "Le magasin source et le magasin destination doivent être différents".to_string(),
+        );
+    }
+    if articles.is_empty() {
+        return Err("Le transfert ne contient aucun article".to_string());
+    }
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for magasin in [source_id, dest_id] {
+        let existe: bool = tx
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM magasins WHERE id = ?1",
+                params![magasin],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !existe {
+            return Err(format!("Magasin {} introuvable", magasin));
+        }
+    }
 
     tx.execute(
         "INSERT INTO transferts_stock (source_id, dest_id, utilisateur_id, statut) VALUES (?1, ?2, ?3, 'en_attente')",
@@ -196,6 +226,22 @@ pub fn create_transfert(
             .as_i64()
             .ok_or("article_id manquant ou invalide dans la ligne")?;
         let quantite = a["quantite"].as_f64().unwrap_or(0.0);
+        if !quantite.is_finite() || quantite <= 0.0 {
+            return Err(format!(
+                "Quantité invalide pour l'article {} : {}",
+                article_id, quantite
+            ));
+        }
+        let existe: bool = tx
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM articles WHERE id = ?1",
+                params![article_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !existe {
+            return Err(format!("Article {} introuvable", article_id));
+        }
         tx.execute(
             "INSERT INTO transfert_lignes (transfert_id, article_id, quantite) VALUES (?1, ?2, ?3)",
             params![transfert_id, article_id, quantite],
@@ -216,6 +262,14 @@ pub fn validate_transfert(
 ) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
+    validate_transfert_impl(&mut conn, transfert_id, Some(me.user_id))
+}
+
+pub(crate) fn validate_transfert_impl(
+    conn: &mut Connection,
+    transfert_id: i64,
+    auteur: Option<i64>,
+) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let (source_id, dest_id, statut): (i64, i64, String) = tx
@@ -242,7 +296,7 @@ pub fn validate_transfert(
     for res in lignes {
         let (article_id, qte) = res.map_err(|e| e.to_string())?;
 
-        adjust_article_stock(&tx, article_id, source_id, -qte)?;
+        retirer_stock(&tx, article_id, source_id, qte)?;
         tx.execute(
             "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'sortie', ?3, 'transfert', ?4)",
             params![article_id, qte, transfert_id, source_id]
@@ -263,7 +317,7 @@ pub fn validate_transfert(
 
     log_audit(
         &tx,
-        Some(me.user_id),
+        auteur,
         "valider_transfert",
         &format!(
             "Validation transfert #{} (magasin {} → {})",
