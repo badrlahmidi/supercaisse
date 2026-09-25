@@ -38,13 +38,15 @@ pub fn add_category(
     description: Option<String>,
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("categories", "creer"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("categories", "creer"))?;
     conn.execute(
         "INSERT INTO categories (nom, description) VALUES (?1, ?2)",
         params![nom, description],
     )
     .map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    super::tracer_creation(&conn, "categories", id, Some(me.user_id))?;
+    Ok(id)
 }
 
 #[tauri::command(async)]
@@ -57,7 +59,7 @@ pub fn update_category(
     description: Option<String>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(
+    let me = autoriser(
         &auth,
         &conn,
         &token,
@@ -68,6 +70,7 @@ pub fn update_category(
         params![nom, description, id],
     )
     .map_err(|e| e.to_string())?;
+    super::tracer_modification(&conn, "categories", id, Some(me.user_id))?;
     Ok(())
 }
 

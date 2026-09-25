@@ -97,7 +97,7 @@ pub fn add_article(
     est_kit: Option<bool>,
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "creer"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "creer"))?;
     let effective_code_barre = match &code_barre {
         Some(cb) if !cb.trim().is_empty() => code_barre.clone(),
         _ => None,
@@ -108,6 +108,7 @@ pub fn add_article(
         params![effective_code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock, stock_alerte, categorie_id, fournisseur_id, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32],
     ).map_err(|e| e.to_string())?;
     let article_id = conn.last_insert_rowid();
+    super::tracer_creation(&conn, "articles", article_id, Some(me.user_id))?;
     if effective_code_barre.is_none() {
         let auto_barcode = format!("INT-{:06}", article_id);
         conn.execute(
@@ -159,6 +160,7 @@ pub fn update_article(
         "UPDATE articles SET code_barre=?1, designation=?2, description=?3, image_url=?4, prix_achat=?5, prix_vente=?6, tva=?7, stock_alerte=?8, categorie_id=?9, fournisseur_id=?10, actif=?11, suivi_lot=?12, prix_grossiste=?13, est_kit=?14 WHERE id=?15",
         params![code_barre, designation, description, image_url, prix_achat, prix_vente, tva, stock_alerte, categorie_id, fournisseur_id, actif as i32, suivi_lot.unwrap_or(false) as i32, prix_grossiste, est_kit.unwrap_or(false) as i32, id],
     ).map_err(|e| e.to_string())?;
+    super::tracer_modification(&conn, "articles", id, Some(me.user_id))?;
     if let Some((old_pv, old_pa, old_name)) = old {
         let mut changes = Vec::new();
         if (old_pv - prix_vente).abs() > 0.001 {
@@ -342,8 +344,9 @@ pub fn import_articles_csv(
         ) {
             Ok(_) => {
                 imported += 1;
+                let article_id = tx.last_insert_rowid();
+                super::tracer_creation(&tx, "articles", article_id, Some(me.user_id))?;
                 if stock != 0.0 {
-                    let article_id = tx.last_insert_rowid();
                     if let Err(e) = adjust_article_stock(&tx, article_id, magasin_id, stock) {
                         errors.push(format!("Ligne {} (stock): {}", i+1, e));
                     }

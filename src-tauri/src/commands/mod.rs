@@ -180,6 +180,39 @@ pub(crate) fn log_audit(
     .map_err(|e| format!("Journal d'audit impossible à écrire ({}) : opération annulée", e))
 }
 
+pub(crate) fn tracer_creation(
+    conn: &Connection,
+    table: &str,
+    id: i64,
+    auteur: Option<i64>,
+) -> Result<(), String> {
+    debug_assert!(crate::db::TABLES_TRACEES.contains(&table));
+    conn.execute(
+        &format!("UPDATE {} SET created_by = ?1 WHERE id = ?2", table),
+        params![auteur, id],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+pub(crate) fn tracer_modification(
+    conn: &Connection,
+    table: &str,
+    id: i64,
+    auteur: Option<i64>,
+) -> Result<(), String> {
+    debug_assert!(crate::db::TABLES_TRACEES.contains(&table));
+    conn.execute(
+        &format!(
+            "UPDATE {} SET updated_at = datetime('now', 'localtime'), updated_by = ?1 WHERE id = ?2",
+            table
+        ),
+        params![auteur, id],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 pub(crate) fn valeur_autorisee(
     libelle: &str,
     valeur: &str,

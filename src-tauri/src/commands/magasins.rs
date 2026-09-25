@@ -39,13 +39,15 @@ pub fn add_magasin(
     adresse: Option<String>,
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "creer"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "creer"))?;
     conn.execute(
         "INSERT INTO magasins (nom, adresse) VALUES (?1, ?2)",
         params![nom, adresse],
     )
     .map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    super::tracer_creation(&conn, "magasins", id, Some(me.user_id))?;
+    Ok(id)
 }
 
 #[tauri::command(async)]
@@ -58,12 +60,13 @@ pub fn update_magasin(
     adresse: Option<String>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "modifier"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "modifier"))?;
     conn.execute(
         "UPDATE magasins SET nom=?1, adresse=?2 WHERE id=?3",
         params![nom, adresse, id],
     )
     .map_err(|e| e.to_string())?;
+    super::tracer_modification(&conn, "magasins", id, Some(me.user_id))?;
     Ok(())
 }
 

@@ -54,6 +54,7 @@ pub fn add_utilisateur(
     )
     .map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
+    super::tracer_creation(&conn, "utilisateurs", id, Some(me.user_id))?;
     log_audit(
         &conn,
         Some(me.user_id),
@@ -148,6 +149,7 @@ pub(crate) fn update_utilisateur_impl(
             .map_err(|e| e.to_string())?;
         }
     }
+    super::tracer_modification(conn, "utilisateurs", id, auteur)?;
     log_audit(
         conn,
         auteur,

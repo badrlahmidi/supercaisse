@@ -44,12 +44,14 @@ pub fn add_fournisseur(
     email: Option<String>,
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("fournisseurs", "creer"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("fournisseurs", "creer"))?;
     conn.execute(
         "INSERT INTO fournisseurs (nom, adresse, telephone, ice, email) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![nom, adresse, telephone, ice, email],
     ).map_err(|e| e.to_string())?;
-    Ok(conn.last_insert_rowid())
+    let id = conn.last_insert_rowid();
+    super::tracer_creation(&conn, "fournisseurs", id, Some(me.user_id))?;
+    Ok(id)
 }
 
 #[tauri::command(async)]
@@ -65,7 +67,7 @@ pub fn update_fournisseur(
     email: Option<String>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(
+    let me = autoriser(
         &auth,
         &conn,
         &token,
@@ -76,6 +78,7 @@ pub fn update_fournisseur(
         params![nom, adresse, telephone, ice, email, id],
     )
     .map_err(|e| e.to_string())?;
+    super::tracer_modification(&conn, "fournisseurs", id, Some(me.user_id))?;
     Ok(())
 }
 

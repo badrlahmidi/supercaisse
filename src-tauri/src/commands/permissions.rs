@@ -48,9 +48,11 @@ pub fn update_permission(
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let conn = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO permissions (role, module, action, allowed) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(role, module, action) DO UPDATE SET allowed = ?4",
-        params![role, module, action, allowed as i32],
+        "INSERT INTO permissions (role, module, action, allowed, created_by) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(role, module, action) DO UPDATE SET allowed = ?4,
+             updated_at = datetime('now', 'localtime'), updated_by = ?5
+         WHERE permissions.allowed IS NOT excluded.allowed",
+        params![role, module, action, allowed as i32, me.user_id],
     )
     .map_err(|e| e.to_string())?;
     log_audit(

@@ -146,6 +146,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_004_unicite,
     migration_005_verrouillage_pin,
     migration_006_plafonds_remise,
+    migration_007_index_et_tracabilite,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -631,6 +632,41 @@ fn reconstruire_table(conn: &Connection, r: &Reconstruction) -> Result<()> {
             |row| row.get(0),
         )
         .optional()?;
+    let prevues: Vec<&str> = r.colonnes.split(',').map(str::trim).collect();
+    let supplementaires = {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", r.table))?;
+        let lignes = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        lignes
+            .into_iter()
+            .filter(|(nom, _, _, _)| !prevues.contains(&nom.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let mut definition = r.definition.clone();
+    let mut colonnes = r.colonnes.to_string();
+    let mut selection = r.selection.to_string();
+    for (nom, type_sql, non_nul, defaut) in &supplementaires {
+        definition.push_str(&format!(
+            ",\n{} {}{}{}",
+            nom,
+            type_sql,
+            if *non_nul { " NOT NULL" } else { "" },
+            defaut
+                .as_ref()
+                .map(|d| format!(" DEFAULT {}", d))
+                .unwrap_or_default()
+        ));
+        colonnes.push_str(&format!(", {}", nom));
+        selection.push_str(&format!(", {}", nom));
+    }
     let nouvelle = format!("{}_v3", r.table);
     conn.execute_batch(&format!(
         "CREATE TABLE {n} ({d});
@@ -638,9 +674,9 @@ fn reconstruire_table(conn: &Connection, r: &Reconstruction) -> Result<()> {
          DROP TABLE {t};
          ALTER TABLE {n} RENAME TO {t};",
         n = nouvelle,
-        d = r.definition,
-        c = r.colonnes,
-        s = r.selection,
+        d = definition,
+        c = colonnes,
+        s = selection,
         t = r.table
     ))?;
     for sql in annexes {
@@ -706,6 +742,46 @@ fn migration_006_plafonds_remise(conn: &Connection) -> Result<()> {
         "INSERT OR IGNORE INTO settings (key, value) VALUES ('remise_max_caissier', '10');
          INSERT OR IGNORE INTO settings (key, value) VALUES ('remise_max_manager', '100');",
     )
+}
+
+pub(crate) const TABLES_TRACEES: &[&str] = &[
+    "articles",
+    "clients",
+    "fournisseurs",
+    "categories",
+    "utilisateurs",
+    "magasins",
+    "settings",
+    "permissions",
+];
+
+fn migration_007_index_et_tracabilite(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_ventes_source ON ventes(source_vente_id);
+         CREATE INDEX IF NOT EXISTS idx_ventes_statut_dtype ON ventes(statut, dtype, date);
+         CREATE INDEX IF NOT EXISTS idx_ventes_magasin ON ventes(magasin_id, date);
+         CREATE INDEX IF NOT EXISTS idx_sessions_caissier ON sessions_caisse(caissier_id, statut);
+         CREATE INDEX IF NOT EXISTS idx_mouvements_magasin ON mouvements_stock(magasin_id, date);
+         CREATE INDEX IF NOT EXISTS idx_journal_session ON journal_caisse(session_id);
+         CREATE INDEX IF NOT EXISTS idx_paiements_date ON paiements(date);
+         CREATE INDEX IF NOT EXISTS idx_fidelite_client ON mouvements_fidelite(client_id, date);
+         CREATE INDEX IF NOT EXISTS idx_article_stocks_magasin ON article_stocks(magasin_id);",
+    )?;
+    for table in TABLES_TRACEES {
+        ajouter_colonne(conn, table, "created_at", "TEXT")?;
+        ajouter_colonne(conn, table, "created_by", "INTEGER")?;
+        ajouter_colonne(conn, table, "updated_at", "TEXT")?;
+        ajouter_colonne(conn, table, "updated_by", "INTEGER")?;
+        conn.execute_batch(&format!(
+            "CREATE TRIGGER IF NOT EXISTS trg_{t}_creation AFTER INSERT ON {t}
+             WHEN NEW.created_at IS NULL
+             BEGIN
+                 UPDATE {t} SET created_at = datetime('now', 'localtime') WHERE rowid = NEW.rowid;
+             END;",
+            t = table
+        ))?;
+    }
+    Ok(())
 }
 
 fn migration_001_base(conn: &Connection) -> Result<()> {
@@ -1481,6 +1557,58 @@ pub(crate) fn verification_factice(password: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_index_et_tracabilite() {
+        let conn = super::init_db(":memory:").unwrap();
+        for index in [
+            "idx_ventes_source",
+            "idx_ventes_statut_dtype",
+            "idx_sessions_caissier",
+            "idx_journal_session",
+            "idx_article_stocks_magasin",
+        ] {
+            let existe: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    [index],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(existe, "{index}");
+        }
+        for table in super::TABLES_TRACEES {
+            for colonne in ["created_at", "created_by", "updated_at", "updated_by"] {
+                assert!(
+                    super::colonne_existe(&conn, table, colonne).unwrap(),
+                    "{table}.{colonne}"
+                );
+            }
+        }
+        conn.execute("INSERT INTO clients (id, nom) VALUES (7, 'Tracé')", [])
+            .unwrap();
+        crate::commands::tracer_creation(&conn, "clients", 7, Some(1)).unwrap();
+        let (cree_le, cree_par, modifie_le): (Option<String>, Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT created_at, created_by, updated_at FROM clients WHERE id = 7",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(cree_le.is_some());
+        assert_eq!(cree_par, Some(1));
+        assert_eq!(modifie_le, None);
+        crate::commands::tracer_modification(&conn, "clients", 7, Some(1)).unwrap();
+        let (modifie_le, modifie_par): (Option<String>, Option<i64>) = conn
+            .query_row(
+                "SELECT updated_at, updated_by FROM clients WHERE id = 7",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(modifie_le.is_some());
+        assert_eq!(modifie_par, Some(1));
+    }
+
     #[test]
     fn test_comparaison_temps_constant() {
         assert!(super::egal_temps_constant(b"abc", b"abc"));

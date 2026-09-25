@@ -166,9 +166,13 @@ pub fn update_settings(
     ];
     for (key, value) in pairs {
         conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![key, value],
-        ).map_err(|e| e.to_string())?;
+            "INSERT INTO settings (key, value, created_by) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                 updated_at = datetime('now', 'localtime'), updated_by = ?3
+             WHERE settings.value IS NOT excluded.value",
+            params![key, value, me.user_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     log_audit(
         &conn,

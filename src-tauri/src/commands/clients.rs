@@ -62,7 +62,7 @@ pub fn add_client(
     segment: Option<String>,
 ) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "creer"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("clients", "creer"))?;
     let credit_plafond = credit_plafond
         .map(|m| montant_positif("Plafond de crédit", m))
         .transpose()?;
@@ -74,6 +74,7 @@ pub fn add_client(
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment],
     ).map_err(|e| erreur_code_client(e, code.as_deref()))?;
     let id = conn.last_insert_rowid();
+    super::tracer_creation(&conn, "clients", id, Some(me.user_id))?;
     if code.is_none() {
         attribuer_code_client(&conn, id)?;
     }
@@ -124,7 +125,7 @@ pub fn update_client(
     segment: Option<String>,
 ) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "modifier"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("clients", "modifier"))?;
     let credit_plafond = credit_plafond
         .map(|m| montant_positif("Plafond de crédit", m))
         .transpose()?;
@@ -134,6 +135,7 @@ pub fn update_client(
         "UPDATE clients SET code=?1, nom=?2, adresse=?3, telephone=?4, email=?5, credit_plafond=?6, ice=?7, segment=?8 WHERE id=?9",
         params![code, nom, adresse, telephone, email, credit_plafond, ice, segment, id],
     ).map_err(|e| erreur_code_client(e, code.as_deref()))?;
+    super::tracer_modification(&conn, "clients", id, Some(me.user_id))?;
     Ok(())
 }
 
