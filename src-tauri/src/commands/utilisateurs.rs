@@ -1,13 +1,15 @@
 use crate::db::*;
 use rusqlite::{params, Connection};
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::auth::valider_nouveau_mot_de_passe;
 use super::log_audit;
 
 #[tauri::command]
-pub fn get_utilisateurs(db: State<DbState>) -> Result<Vec<Utilisateur>, String> {
+pub fn get_utilisateurs(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<Utilisateur>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let mut stmt = conn.prepare("SELECT id, login, nom, role, must_change_password FROM utilisateurs ORDER BY nom")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
@@ -23,8 +25,9 @@ pub fn get_utilisateurs(db: State<DbState>) -> Result<Vec<Utilisateur>, String> 
 }
 
 #[tauri::command]
-pub fn add_utilisateur(db: State<DbState>, login: String, nom: String, role: String, password: String) -> Result<i64, String> {
+pub fn add_utilisateur(db: State<DbState>, auth: State<AuthState>, token: String, login: String, nom: String, role: String, password: String) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     valider_nouveau_mot_de_passe(&login, &password)?;
     let hash = hash_password(&password);
     conn.execute(
@@ -32,16 +35,21 @@ pub fn add_utilisateur(db: State<DbState>, login: String, nom: String, role: Str
         params![login, hash, nom, role],
     ).map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
-    log_audit(&conn, None, "ajouter_utilisateur",
+    log_audit(&conn, Some(me.user_id), "ajouter_utilisateur",
         &format!("Nouvel utilisateur: {} ({}) - rôle {}", nom, login, role),
         Some("utilisateur"), Some(id));
     Ok(id)
 }
 
 #[tauri::command]
-pub fn update_utilisateur(db: State<DbState>, id: i64, login: String, nom: String, role: String, password: Option<String>) -> Result<(), String> {
+pub fn update_utilisateur(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, login: String, nom: String, role: String, password: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    update_utilisateur_impl(&conn, id, &login, &nom, &role, password.as_deref())
+    let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
+    update_utilisateur_impl(&conn, id, &login, &nom, &role, password.as_deref(), Some(me.user_id))?;
+    if password.as_deref().is_some_and(|p| !p.is_empty()) && id != me.user_id {
+        auth.fermer_utilisateur(id)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn verifier_admin_restant(conn: &Connection, id_retire: i64) -> Result<(), String> {
@@ -61,7 +69,7 @@ pub(crate) fn verifier_admin_restant(conn: &Connection, id_retire: i64) -> Resul
     Ok(())
 }
 
-pub(crate) fn update_utilisateur_impl(conn: &Connection, id: i64, login: &str, nom: &str, role: &str, password: Option<&str>) -> Result<(), String> {
+pub(crate) fn update_utilisateur_impl(conn: &Connection, id: i64, login: &str, nom: &str, role: &str, password: Option<&str>, auteur: Option<i64>) -> Result<(), String> {
     if role != "admin" {
         verifier_admin_restant(conn, id)?;
     }
@@ -81,26 +89,27 @@ pub(crate) fn update_utilisateur_impl(conn: &Connection, id: i64, login: &str, n
             ).map_err(|e| e.to_string())?;
         }
     }
-    log_audit(conn, None, "modifier_utilisateur",
+    log_audit(conn, auteur, "modifier_utilisateur",
         &format!("Modification utilisateur #{}: {} ({}) - rôle {}", id, nom, login, role),
         Some("utilisateur"), Some(id));
     Ok(())
 }
 
 #[tauri::command]
-pub fn delete_utilisateur(db: State<DbState>, id: i64) -> Result<(), String> {
+pub fn delete_utilisateur(db: State<DbState>, auth: State<AuthState>, token: String, id: i64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    delete_utilisateur_impl(&conn, id)
+    let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
+    delete_utilisateur_impl(&conn, id, Some(me.user_id))
 }
 
-pub(crate) fn delete_utilisateur_impl(conn: &Connection, id: i64) -> Result<(), String> {
+pub(crate) fn delete_utilisateur_impl(conn: &Connection, id: i64, auteur: Option<i64>) -> Result<(), String> {
     verifier_admin_restant(conn, id)?;
     let nom: String = conn.query_row(
         "SELECT nom FROM utilisateurs WHERE id = ?1", params![id], |r| r.get(0)
     ).unwrap_or_else(|_| format!("ID {}", id));
     conn.execute("DELETE FROM utilisateurs WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
-    log_audit(conn, None, "supprimer_utilisateur",
+    log_audit(conn, auteur, "supprimer_utilisateur",
         &format!("Suppression utilisateur: {} (ID {})", nom, id),
         Some("utilisateur"), Some(id));
     Ok(())

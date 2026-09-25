@@ -14,7 +14,6 @@ import { Plus, ClipboardCheck, Loader2, CheckCircle, AlertTriangle, ArrowLeft } 
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatDate, formatDateTime } from "@/lib/utils"
-import { useAuth } from "@/context/AuthContext"
 
 interface Inventaire {
   id: number
@@ -52,7 +51,6 @@ interface Magasin {
 }
 
 export default function Inventaire() {
-  const { user } = useAuth()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -79,7 +77,6 @@ export default function Inventaire() {
   const createMutation = useMutation({
     mutationFn: () => invoke<{ id: number }>("create_inventaire", {
       magasinId: parseInt(newMagasinId),
-      utilisateurId: user?.id,
     }),
     onSuccess: (result) => {
       toast.success("Inventaire créé")
@@ -102,7 +99,6 @@ export default function Inventaire() {
   const validerMutation = useMutation({
     mutationFn: () => invoke("valider_inventaire", {
       inventaireId: selectedId,
-      utilisateurId: user?.id,
     }),
     onSuccess: () => {
       toast.success("Inventaire validé — stock mis à jour")

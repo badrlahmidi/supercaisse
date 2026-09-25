@@ -1,10 +1,13 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_rapport_x(db: State<DbState>, session_id: i64) -> Result<serde_json::Value, String> {
+pub fn get_rapport_x(db: State<DbState>, auth: State<AuthState>, token: String, session_id: i64) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    super::sessions::verifier_session_propre(&conn, &me, session_id, "voir")?;
 
     let (date_ouverture, fond_initial): (String, f64) = conn.query_row(
         "SELECT date_ouverture, fond_initial FROM sessions_caisse WHERE id = ?1",
@@ -65,8 +68,9 @@ pub fn get_rapport_x(db: State<DbState>, session_id: i64) -> Result<serde_json::
 }
 
 #[tauri::command]
-pub fn get_rapport_detaille(db: State<DbState>, debut: Option<String>, fin: Option<String>) -> Result<serde_json::Value, String> {
+pub fn get_rapport_detaille(db: State<DbState>, auth: State<AuthState>, token: String, debut: Option<String>, fin: Option<String>) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
     let date_filter = |col: &str| -> (String, Vec<String>) {
         let mut clause = String::new();

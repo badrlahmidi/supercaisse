@@ -1,12 +1,15 @@
 use crate::db::*;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
+use crate::session::{autoriser, verifier_acces, Acces, AuthState, SessionUtilisateur};
 
 use super::{default_magasin_id, log_audit};
 
 #[tauri::command]
-pub fn get_current_session(db: State<DbState>, caissier_id: i64) -> Result<Option<serde_json::Value>, String> {
+pub fn get_current_session(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Option<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let caissier_id = me.user_id;
     let mut stmt = conn.prepare(
         "SELECT id, caissier_id, date_ouverture, fond_initial, statut, magasin_id
          FROM sessions_caisse
@@ -32,8 +35,10 @@ pub fn get_current_session(db: State<DbState>, caissier_id: i64) -> Result<Optio
 }
 
 #[tauri::command]
-pub fn open_session(db: State<DbState>, caissier_id: i64, fond_initial: f64, magasin_id: Option<i64>) -> Result<i64, String> {
+pub fn open_session(db: State<DbState>, auth: State<AuthState>, token: String, fond_initial: f64, magasin_id: Option<i64>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let caissier_id = me.user_id;
 
     let count: i64 = conn.query_row(
         "SELECT count(*) FROM sessions_caisse WHERE caissier_id = ?1 AND statut = 'ouverte'",
@@ -87,12 +92,25 @@ pub(crate) fn totaux_especes_session(conn: &Connection, session_id: i64) -> Resu
 }
 
 #[tauri::command]
-pub fn close_session(db: State<DbState>, session_id: i64, total_especes_declare: f64) -> Result<(), String> {
+pub fn close_session(db: State<DbState>, auth: State<AuthState>, token: String, session_id: i64, total_especes_declare: f64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-    close_session_impl(&mut conn, session_id, total_especes_declare)
+    let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    verifier_session_propre(&conn, &me, session_id, "modifier")?;
+    close_session_impl(&mut conn, session_id, total_especes_declare, Some(me.user_id))
 }
 
-pub(crate) fn close_session_impl(conn: &mut Connection, session_id: i64, total_especes_declare: f64) -> Result<(), String> {
+pub(crate) fn verifier_session_propre(conn: &Connection, me: &SessionUtilisateur, session_id: i64, action: &'static str) -> Result<(), String> {
+    let caissier: Option<i64> = conn.query_row(
+        "SELECT caissier_id FROM sessions_caisse WHERE id = ?1", params![session_id], |r| r.get(0),
+    ).optional().map_err(|e| e.to_string())?;
+    match caissier {
+        None => Err("Session introuvable".to_string()),
+        Some(id) if id == me.user_id => Ok(()),
+        Some(_) => verifier_acces(conn, me, Acces::Module("journal", action)),
+    }
+}
+
+pub(crate) fn close_session_impl(conn: &mut Connection, session_id: i64, total_especes_declare: f64, utilisateur_id: Option<i64>) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let fond_initial: f64 = tx.query_row(
@@ -113,7 +131,7 @@ pub(crate) fn close_session_impl(conn: &mut Connection, session_id: i64, total_e
         params![date_cloture, total_attendu, total_especes_declare, ecart, session_id]
     ).map_err(|e| e.to_string())?;
 
-    log_audit(&tx, None, "fermer_session",
+    log_audit(&tx, utilisateur_id, "fermer_session",
         &format!("Clôture session #{} - attendu: {:.2} DH, déclaré: {:.2} DH, écart: {:.2} DH", session_id, total_attendu, total_especes_declare, ecart),
         Some("session"), Some(session_id));
 
@@ -159,7 +177,7 @@ mod tests {
         assert_eq!(totaux.ventes_especes, 170.0);
         assert_eq!(totaux.sorties, 20.0);
 
-        close_session_impl(&mut conn, 1, 250.0).unwrap();
+        close_session_impl(&mut conn, 1, 250.0, None).unwrap();
         let (attendu, ecart, statut): (f64, f64, String) = conn.query_row(
             "SELECT total_especes_attendu, ecart, statut FROM sessions_caisse WHERE id = 1", [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -173,7 +191,7 @@ mod tests {
     fn test_cloture_detecte_un_manque() {
         let mut conn = setup();
         vendre(&mut conn, "facture", json!([{ "mode": "especes", "montant": 120 }])).unwrap();
-        close_session_impl(&mut conn, 1, 200.0).unwrap();
+        close_session_impl(&mut conn, 1, 200.0, None).unwrap();
         let ecart: f64 = conn.query_row("SELECT ecart FROM sessions_caisse WHERE id = 1", [], |r| r.get(0)).unwrap();
         assert_eq!(ecart, -20.0);
     }

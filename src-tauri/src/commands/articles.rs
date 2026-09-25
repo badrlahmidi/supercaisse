@@ -1,12 +1,14 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::{default_magasin_id, adjust_article_stock, log_audit};
 
 #[tauri::command]
-pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_articles(db: State<DbState>, auth: State<AuthState>, token: String, recherche: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let image_col = "a.image_url";
     let (query, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match recherche {
         Some(ref q) if !q.is_empty() => (
@@ -65,11 +67,9 @@ pub fn get_articles(db: State<DbState>, recherche: Option<String>) -> Result<Vec
 }
 
 #[tauri::command]
-pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: String, description: Option<String>,
-    image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock: f64, stock_alerte: Option<f64>,
-    categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>,
-    prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<i64, String> {
+pub fn add_article(db: State<DbState>, auth: State<AuthState>, token: String, code_barre: Option<String>, designation: String, description: Option<String>, image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock: f64, stock_alerte: Option<f64>, categorie_id: Option<i64>, fournisseur_id: Option<i64>, suivi_lot: Option<bool>, prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "creer"))?;
     let effective_code_barre = match &code_barre {
         Some(cb) if !cb.trim().is_empty() => code_barre.clone(),
         _ => None,
@@ -95,11 +95,9 @@ pub fn add_article(db: State<DbState>, code_barre: Option<String>, designation: 
 }
 
 #[tauri::command]
-pub fn update_article(db: State<DbState>, id: i64, code_barre: Option<String>, designation: String, description: Option<String>,
-    image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock_alerte: Option<f64>,
-    categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>,
-    prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<(), String> {
+pub fn update_article(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, code_barre: Option<String>, designation: String, description: Option<String>, image_url: Option<String>, prix_achat: f64, prix_vente: f64, tva: f64, stock_alerte: Option<f64>, categorie_id: Option<i64>, fournisseur_id: Option<i64>, actif: bool, suivi_lot: Option<bool>, prix_grossiste: Option<f64>, est_kit: Option<bool>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     let old: Option<(f64, f64, String)> = conn.query_row(
         "SELECT prix_vente, prix_achat, designation FROM articles WHERE id = ?1", params![id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -114,7 +112,7 @@ pub fn update_article(db: State<DbState>, id: i64, code_barre: Option<String>, d
         if (old_pa - prix_achat).abs() > 0.001 { changes.push(format!("prix achat: {:.2} → {:.2}", old_pa, prix_achat)); }
         if old_name != designation { changes.push(format!("nom: {} → {}", old_name, designation)); }
         if !changes.is_empty() {
-            log_audit(&conn, None, "modifier_article",
+            log_audit(&conn, Some(me.user_id), "modifier_article",
                 &format!("{} (ID {}) — {}", designation, id, changes.join(", ")),
                 Some("article"), Some(id));
         }
@@ -123,21 +121,23 @@ pub fn update_article(db: State<DbState>, id: i64, code_barre: Option<String>, d
 }
 
 #[tauri::command]
-pub fn delete_article(db: State<DbState>, id: i64) -> Result<(), String> {
+pub fn delete_article(db: State<DbState>, auth: State<AuthState>, token: String, id: i64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     let designation: String = conn.query_row(
         "SELECT designation FROM articles WHERE id = ?1", params![id], |r| r.get(0)
     ).unwrap_or_else(|_| format!("ID {}", id));
     conn.execute("DELETE FROM articles WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
-    log_audit(&conn, None, "supprimer_article",
+    log_audit(&conn, Some(me.user_id), "supprimer_article",
         &format!("Suppression article: {} (ID {})", designation, id),
         Some("article"), Some(id));
     Ok(())
 }
 
 #[tauri::command]
-pub fn update_article_stock(db: State<DbState>, article_id: i64, quantite: f64) -> Result<(), String> {
+pub fn update_article_stock(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64, quantite: f64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
     adjust_article_stock(&tx, article_id, magasin_id, quantite)?;
@@ -151,8 +151,9 @@ pub fn update_article_stock(db: State<DbState>, article_id: i64, quantite: f64) 
 }
 
 #[tauri::command]
-pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<String, String> {
+pub fn import_articles_csv(db: State<DbState>, auth: State<AuthState>, token: String, csv_content: String) -> Result<String, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("articles", "creer"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
     let mut imported = 0u32;
@@ -197,7 +198,7 @@ pub fn import_articles_csv(db: State<DbState>, csv_content: String) -> Result<St
         }
     }
 
-    log_audit(&tx, None, "importer_csv",
+    log_audit(&tx, Some(me.user_id), "importer_csv",
         &format!("Import CSV: {} articles importés, {} erreurs", imported, errors.len()),
         None, None);
 

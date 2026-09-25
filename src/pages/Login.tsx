@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/ui/Card"
 import { ShoppingCart, Lock, User, Eye, EyeOff, ShieldCheck, BarChart3, Package, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { invoke } from "@/lib/tauri"
-import { useAuth, type User as AuthUser } from "@/context/AuthContext"
+import { useAuth, type SessionUser } from "@/context/AuthContext"
 
 const loginSchema = z.object({
   login: z.string().min(1, "Le login est requis"),
@@ -46,7 +46,7 @@ export default function Login() {
   const onSubmit = async (data: LoginForm) => {
     setIsLoading(true)
     try {
-      const user = await invoke<AuthUser | null>("login", { login: data.login, password: data.password })
+      const user = await invoke<SessionUser | null>("login", { login: data.login, password: data.password })
       if (user) {
         await loginAs(user)
         toast.success(`Bienvenue ${user.nom}`)

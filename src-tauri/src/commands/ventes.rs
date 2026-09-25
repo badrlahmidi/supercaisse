@@ -1,6 +1,7 @@
 use crate::db::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::calcul::{calculer_ligne, round2, totaliser, valider_pourcentage, LigneCalculee, TOLERANCE_MONTANT};
 use super::{default_magasin_id, adjust_article_stock, log_audit, document_prefixe, next_numero_document, annee_courante};
@@ -92,13 +93,10 @@ fn lire_setting(tx: &Connection, key: &str) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-pub fn create_vente(db: State<DbState>, client_id: Option<i64>, caissier_id: Option<i64>,
-    articles: Vec<serde_json::Value>, remise_globale_pct: Option<f64>, mode_paiement: String,
-    splits: Option<Vec<serde_json::Value>>, dtype: Option<String>,
-    points_utilises: Option<f64>, magasin_id: Option<i64>
-) -> Result<serde_json::Value, String> {
+pub fn create_vente(db: State<DbState>, auth: State<AuthState>, token: String, client_id: Option<i64>, articles: Vec<serde_json::Value>, remise_globale_pct: Option<f64>, mode_paiement: String, splits: Option<Vec<serde_json::Value>>, dtype: Option<String>, points_utilises: Option<f64>, magasin_id: Option<i64>) -> Result<serde_json::Value, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-    create_vente_impl(&mut conn, client_id, caissier_id, articles, remise_globale_pct, mode_paiement,
+    let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "creer"))?;
+    create_vente_impl(&mut conn, client_id, Some(me.user_id), articles, remise_globale_pct, mode_paiement,
         splits, dtype, points_utilises, magasin_id)
 }
 
@@ -297,8 +295,9 @@ pub(crate) fn create_vente_impl(conn: &mut Connection, client_id: Option<i64>, c
 }
 
 #[tauri::command]
-pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
+pub fn annuler_vente(db: State<DbState>, auth: State<AuthState>, token: String, vente_id: i64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let (statut, dtype, vente_magasin_id): (String, String, Option<i64>) = tx.query_row(
@@ -370,7 +369,7 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
         "SELECT montant_total FROM ventes WHERE id = ?1", params![vente_id], |r| r.get(0)
     ).unwrap_or(0.0);
     tx.execute("UPDATE ventes SET statut = 'annulee' WHERE id = ?1", params![vente_id]).map_err(|e| e.to_string())?;
-    log_audit(&tx, None, "annuler_vente",
+    log_audit(&tx, Some(me.user_id), "annuler_vente",
         &format!("Annulation vente #{} ({}) - Montant: {:.2}", vente_id, numero_facture.unwrap_or_default(), montant),
         Some("vente"), Some(vente_id));
     tx.commit().map_err(|e| e.to_string())?;
@@ -378,8 +377,9 @@ pub fn annuler_vente(db: State<DbState>, vente_id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_ventes(db: State<DbState>, debut: Option<String>, fin: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_ventes(db: State<DbState>, auth: State<AuthState>, token: String, debut: Option<String>, fin: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
     let mut where_clause = String::new();
     let mut query_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(d) = &debut {
@@ -428,8 +428,9 @@ pub fn get_ventes(db: State<DbState>, debut: Option<String>, fin: Option<String>
 }
 
 #[tauri::command]
-pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json::Value, String> {
+pub fn get_vente_details(db: State<DbState>, auth: State<AuthState>, token: String, vente_id: i64) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "voir"))?;
     let vente = conn.query_row(
         "SELECT v.id, v.date, v.montant_total, v.montant_remise, v.mode_paiement, v.statut, v.numero_facture,
                 c.nom as client_nom, c.telephone as client_tel, u.nom as caissier_nom, v.dtype, c.ice as client_ice,
@@ -488,8 +489,9 @@ pub fn get_vente_details(db: State<DbState>, vente_id: i64) -> Result<serde_json
 }
 
 #[tauri::command]
-pub fn convert_document(db: State<DbState>, vente_id: i64, target_type: String) -> Result<i64, String> {
+pub fn convert_document(db: State<DbState>, auth: State<AuthState>, token: String, vente_id: i64, target_type: String) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
     convert_document_impl(&mut conn, vente_id, target_type)
 }
 

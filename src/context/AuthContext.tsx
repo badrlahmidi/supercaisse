@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { Navigate, useNavigate, useLocation } from "react-router-dom"
-import { invoke } from "@/lib/tauri"
+import { invoke, onSessionExpired, setSessionToken, getSessionToken } from "@/lib/tauri"
+import { toast } from "sonner"
 import ChangePasswordRequired from "@/components/ChangePasswordRequired"
 
 export interface User {
@@ -11,12 +12,14 @@ export interface User {
   must_change_password?: boolean
 }
 
+export type SessionUser = User & { token?: string }
+
 type PermissionsMap = Record<string, Record<string, boolean>>
 
 interface AuthContextType {
   user: User | null
   login: (login: string, password: string) => Promise<void>
-  loginAs: (userData: User) => Promise<void>
+  loginAs: (userData: SessionUser) => Promise<void>
   completePasswordChange: () => void
   logout: () => void
   isLoading: boolean
@@ -56,28 +59,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const stored = localStorage.getItem("supercaisse_user")
-        if (stored) {
-          const parsed = JSON.parse(stored)
-          setUser(parsed)
-          await loadPermissions(parsed.role)
-        }
-      } catch {
-        localStorage.removeItem("supercaisse_user")
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    initAuth()
+    localStorage.removeItem("supercaisse_user")
+    setIsLoading(false)
   }, [])
 
-  const logout_ = useCallback(() => {
+  const clearSession = useCallback(() => {
+    setSessionToken(null)
     setUser(null)
-    localStorage.removeItem("supercaisse_user")
+    setPermissions({})
     navigate("/login")
   }, [navigate])
+
+  const logout_ = useCallback(() => {
+    if (getSessionToken()) {
+      invoke("logout").catch(() => undefined)
+    }
+    clearSession()
+  }, [clearSession])
+
+  useEffect(() => onSessionExpired(() => {
+    toast.error("Session expirée", { description: "Veuillez vous reconnecter" })
+    clearSession()
+  }), [clearSession])
 
   useEffect(() => {
     if (!user) return
@@ -101,27 +104,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user, logout_])
 
-  const login = useCallback(async (login: string, password: string) => {
-    const userData = await invoke<User | null>("login", { login, password })
-    if (!userData) throw new Error("Login ou mot de passe incorrect")
+  const loginAs = useCallback(async ({ token, ...userData }: SessionUser) => {
+    if (token) {
+      if (getSessionToken() && getSessionToken() !== token) {
+        await invoke("logout").catch(() => undefined)
+      }
+      setSessionToken(token)
+    }
     setUser(userData)
-    localStorage.setItem("supercaisse_user", JSON.stringify(userData))
-    await loadPermissions(userData.role)
-    navigate("/pos")
-  }, [navigate, loadPermissions])
-
-  const loginAs = useCallback(async (userData: User) => {
-    setUser(userData)
-    localStorage.setItem("supercaisse_user", JSON.stringify(userData))
     await loadPermissions(userData.role)
   }, [loadPermissions])
+
+  const login = useCallback(async (login: string, password: string) => {
+    const userData = await invoke<SessionUser | null>("login", { login, password })
+    if (!userData) throw new Error("Login ou mot de passe incorrect")
+    await loginAs(userData)
+    navigate("/pos")
+  }, [navigate, loginAs])
 
   const completePasswordChange = useCallback(() => {
     setUser((current) => {
       if (!current) return current
-      const updated = { ...current, must_change_password: false }
-      localStorage.setItem("supercaisse_user", JSON.stringify(updated))
-      return updated
+      return { ...current, must_change_password: false }
     })
   }, [])
 

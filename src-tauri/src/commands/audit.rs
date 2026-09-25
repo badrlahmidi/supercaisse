@@ -1,9 +1,11 @@
 use crate::db::*;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_audit_log(db: State<DbState>, debut: Option<String>, fin: Option<String>, action_filter: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_audit_log(db: State<DbState>, auth: State<AuthState>, token: String, debut: Option<String>, fin: Option<String>, action_filter: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("audit", "voir"))?;
     let mut where_clause = String::new();
     let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(d) = &debut { if !d.is_empty() { where_clause.push_str(" AND a.date >= ?"); qp.push(Box::new(d.clone())); } }

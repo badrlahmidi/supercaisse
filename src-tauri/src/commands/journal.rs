@@ -1,10 +1,12 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_journal_caisse(db: State<DbState>, debut: Option<String>, fin: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_journal_caisse(db: State<DbState>, auth: State<AuthState>, token: String, debut: Option<String>, fin: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "voir"))?;
     let mut where_clause = String::new();
     let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(d) = &debut { if !d.is_empty() { where_clause.push_str(" AND j.date >= ?"); qp.push(Box::new(d.clone())); } }
@@ -31,8 +33,10 @@ pub fn get_journal_caisse(db: State<DbState>, debut: Option<String>, fin: Option
 }
 
 #[tauri::command]
-pub fn add_journal_caisse(db: State<DbState>, utilisateur_id: Option<i64>, jtype: String, montant: f64, description: Option<String>) -> Result<i64, String> {
+pub fn add_journal_caisse(db: State<DbState>, auth: State<AuthState>, token: String, jtype: String, montant: f64, description: Option<String>) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("journal", "creer"))?;
+    let utilisateur_id = Some(me.user_id);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let session_id: Option<i64> = if let Some(uid) = utilisateur_id {

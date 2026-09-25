@@ -1,5 +1,26 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core"
 
+const COMMANDES_PUBLIQUES = new Set(["login", "login_pin"])
+const ERREUR_SESSION = "Session invalide ou expirée"
+
+let sessionToken: string | null = null
+const sessionExpiredListeners = new Set<() => void>()
+
+export function setSessionToken(token: string | null) {
+  sessionToken = token
+}
+
+export function getSessionToken(): string | null {
+  return sessionToken
+}
+
+export function onSessionExpired(listener: () => void): () => void {
+  sessionExpiredListeners.add(listener)
+  return () => {
+    sessionExpiredListeners.delete(listener)
+  }
+}
+
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
@@ -13,9 +34,22 @@ export function camelizeArgs(args?: Record<string, unknown>): Record<string, unk
   return Object.fromEntries(Object.entries(args).map(([k, v]) => [toCamelCase(k), v]))
 }
 
+function withToken(cmd: string, args?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (COMMANDES_PUBLIQUES.has(cmd)) return args
+  return { ...args, token: sessionToken ?? "" }
+}
+
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauriRuntime()) {
-    return tauriInvoke<T>(cmd, camelizeArgs(args))
+    try {
+      return await tauriInvoke<T>(cmd, camelizeArgs(withToken(cmd, args)))
+    } catch (err) {
+      if (String(err).startsWith(ERREUR_SESSION)) {
+        sessionToken = null
+        sessionExpiredListeners.forEach((listener) => listener())
+      }
+      throw err
+    }
   }
   if (import.meta.env.DEV) {
     const { mockInvoke } = await import("./tauri.mock")

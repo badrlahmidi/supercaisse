@@ -1,15 +1,18 @@
 mod commands;
 mod db;
 mod paths;
+mod session;
 
 use db::{init_db, DbState};
 use paths::{legacy_database_candidates, prepare_database, AppDirs};
+use session::AuthState;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AuthState::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -35,6 +38,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::login,
+            commands::logout,
             commands::get_categories,
             commands::add_category,
             commands::update_category,

@@ -1,13 +1,14 @@
 use crate::db::*;
 use rusqlite::{params, OptionalExtension};
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::default_magasin_id;
 
 #[tauri::command]
-pub fn add_article_variante(db: State<DbState>, article_id: i64, taille: Option<String>,
-    couleur: Option<String>, code_barre: Option<String>, stock_initial: f64) -> Result<i64, String> {
+pub fn add_article_variante(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64, taille: Option<String>, couleur: Option<String>, code_barre: Option<String>, stock_initial: f64) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     conn.execute(
         "INSERT INTO article_variantes (article_id, taille, couleur, code_barre, stock_dedie) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![article_id, taille, couleur, code_barre, stock_initial],
@@ -16,8 +17,9 @@ pub fn add_article_variante(db: State<DbState>, article_id: i64, taille: Option<
 }
 
 #[tauri::command]
-pub fn get_article_variantes(db: State<DbState>, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_article_variantes(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn.prepare(
         "SELECT id, taille, couleur, code_barre, stock_dedie FROM article_variantes WHERE article_id = ?1 ORDER BY taille, couleur"
     ).map_err(|e| e.to_string())?;
@@ -34,9 +36,9 @@ pub fn get_article_variantes(db: State<DbState>, article_id: i64) -> Result<Vec<
 }
 
 #[tauri::command]
-pub fn update_article_variante(db: State<DbState>, id: i64, taille: Option<String>,
-    couleur: Option<String>, code_barre: Option<String>) -> Result<(), String> {
+pub fn update_article_variante(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, taille: Option<String>, couleur: Option<String>, code_barre: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     conn.execute(
         "UPDATE article_variantes SET taille=?1, couleur=?2, code_barre=?3 WHERE id=?4",
         params![taille, couleur, code_barre, id],
@@ -45,8 +47,9 @@ pub fn update_article_variante(db: State<DbState>, id: i64, taille: Option<Strin
 }
 
 #[tauri::command]
-pub fn adjust_article_variante_stock(db: State<DbState>, id: i64, quantite: f64) -> Result<(), String> {
+pub fn adjust_article_variante_stock(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, quantite: f64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let article_id: i64 = tx.query_row("SELECT article_id FROM article_variantes WHERE id = ?1", params![id], |r| r.get(0))
         .map_err(|_| "Variante introuvable".to_string())?;
@@ -63,15 +66,17 @@ pub fn adjust_article_variante_stock(db: State<DbState>, id: i64, quantite: f64)
 }
 
 #[tauri::command]
-pub fn delete_article_variante(db: State<DbState>, id: i64) -> Result<(), String> {
+pub fn delete_article_variante(db: State<DbState>, auth: State<AuthState>, token: String, id: i64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("articles", "modifier"))?;
     conn.execute("DELETE FROM article_variantes WHERE id=?1", params![id]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn find_variante_by_barcode(db: State<DbState>, code_barre: String) -> Result<Option<serde_json::Value>, String> {
+pub fn find_variante_by_barcode(db: State<DbState>, auth: State<AuthState>, token: String, code_barre: String) -> Result<Option<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     conn.query_row(
         "SELECT v.id, v.article_id, v.taille, v.couleur, v.stock_dedie,
                 a.designation, a.prix_vente, a.tva, a.actif

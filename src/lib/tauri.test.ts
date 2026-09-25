@@ -5,11 +5,12 @@ import { join, resolve } from "node:path"
 const tauriInvokeMock = vi.fn()
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => tauriInvokeMock(...args) }))
 
-import { invoke, camelizeArgs, toCamelCase } from "./tauri"
+import { invoke, camelizeArgs, toCamelCase, setSessionToken, getSessionToken, onSessionExpired } from "./tauri"
 
 describe("invoke", () => {
   beforeEach(() => {
     tauriInvokeMock.mockReset()
+    setSessionToken(null)
   })
 
   it("propagates backend errors instead of returning mock data", async () => {
@@ -37,14 +38,55 @@ describe("invoke", () => {
   it("converts top-level argument keys to camelCase", async () => {
     tauriInvokeMock.mockResolvedValue(1)
     await invoke("add_article", { prix_achat: 5, prix_vente: 10, designation: "X" })
-    expect(tauriInvokeMock).toHaveBeenCalledWith("add_article", { prixAchat: 5, prixVente: 10, designation: "X" })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("add_article", { prixAchat: 5, prixVente: 10, designation: "X", token: "" })
   })
 
   it("leaves nested objects untouched", async () => {
     tauriInvokeMock.mockResolvedValue({ id: 1 })
     const articles = [{ article_id: 3, prix_unitaire: 10 }]
     await invoke("create_vente", { client_id: null, articles, points_utilises: 2 })
-    expect(tauriInvokeMock).toHaveBeenCalledWith("create_vente", { clientId: null, articles, pointsUtilises: 2 })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("create_vente", { clientId: null, articles, pointsUtilises: 2, token: "" })
+  })
+
+  it("adds the in-memory session token to every protected command", async () => {
+    tauriInvokeMock.mockResolvedValue([])
+    setSessionToken("abc123")
+    await invoke("get_categories")
+    await invoke("get_permissions", { role: "admin" })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("get_categories", { token: "abc123" })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("get_permissions", { role: "admin", token: "abc123" })
+    expect(localStorage.length).toBe(0)
+  })
+
+  it("never sends a token to the login commands", async () => {
+    tauriInvokeMock.mockResolvedValue(null)
+    setSessionToken("abc123")
+    await invoke("login", { login: "admin", password: "x" })
+    await invoke("login_pin", { pin: "1234" })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("login", { login: "admin", password: "x" })
+    expect(tauriInvokeMock).toHaveBeenCalledWith("login_pin", { pin: "1234" })
+  })
+
+  it("forgets the token and notifies listeners when the session expired", async () => {
+    const listener = vi.fn()
+    const unsubscribe = onSessionExpired(listener)
+    setSessionToken("abc123")
+    tauriInvokeMock.mockRejectedValue("Session invalide ou expirée : veuillez vous reconnecter")
+    await expect(invoke("get_categories")).rejects.toContain("Session invalide")
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(getSessionToken()).toBeNull()
+    unsubscribe()
+  })
+
+  it("keeps the session on other errors", async () => {
+    const listener = vi.fn()
+    const unsubscribe = onSessionExpired(listener)
+    setSessionToken("abc123")
+    tauriInvokeMock.mockRejectedValue("Accès refusé : articles / modifier")
+    await expect(invoke("update_article", { id: 1 })).rejects.toContain("Accès refusé")
+    expect(listener).not.toHaveBeenCalled()
+    expect(getSessionToken()).toBe("abc123")
+    unsubscribe()
   })
 })
 
@@ -206,7 +248,7 @@ describe("IPC contract with Rust commands", () => {
     const missing = calls
       .filter((c) => c.keys !== null)
       .flatMap((c) => {
-        const absent = commands.get(c.cmd)?.required.filter((k) => !c.keys!.includes(k)) ?? []
+        const absent = commands.get(c.cmd)?.required.filter((k) => k !== "token" && !c.keys!.includes(k)) ?? []
         return absent.length ? [`${c.location} ${c.cmd} missing ${absent.join(", ")}`] : []
       })
     expect(missing).toEqual([])

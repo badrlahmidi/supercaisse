@@ -1,9 +1,11 @@
 use crate::db::*;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_mouvements_stock(db: State<DbState>, article_id: Option<i64>, debut: Option<String>, fin: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_mouvements_stock(db: State<DbState>, auth: State<AuthState>, token: String, article_id: Option<i64>, debut: Option<String>, fin: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut where_clause = String::new();
     let mut qp: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(aid) = article_id {
@@ -36,8 +38,9 @@ pub fn get_mouvements_stock(db: State<DbState>, article_id: Option<i64>, debut: 
 }
 
 #[tauri::command]
-pub fn get_articles_stock_alerte(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_articles_stock_alerte(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("reappro", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT a.id, a.designation, a.stock, a.stock_alerte, c.nom as categorie_nom,
                 f.nom as fournisseur_nom, a.fournisseur_id, a.prix_achat,

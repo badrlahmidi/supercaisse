@@ -1,12 +1,15 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::log_audit;
 
 #[tauri::command]
-pub fn create_inventaire(db: State<DbState>, magasin_id: i64, utilisateur_id: i64) -> Result<serde_json::Value, String> {
+pub fn create_inventaire(db: State<DbState>, auth: State<AuthState>, token: String, magasin_id: i64) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "creer"))?;
+    let utilisateur_id = me.user_id;
     conn.execute(
         "INSERT INTO inventaires (magasin_id, utilisateur_id) VALUES (?1, ?2)",
         params![magasin_id, utilisateur_id],
@@ -37,8 +40,9 @@ pub fn create_inventaire(db: State<DbState>, magasin_id: i64, utilisateur_id: i6
 }
 
 #[tauri::command]
-pub fn get_inventaire(db: State<DbState>, inventaire_id: i64) -> Result<serde_json::Value, String> {
+pub fn get_inventaire(db: State<DbState>, auth: State<AuthState>, token: String, inventaire_id: i64) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "voir"))?;
 
     let (date_debut, statut, magasin_id): (String, String, i64) = conn.query_row(
         "SELECT date_debut, statut, magasin_id FROM inventaires WHERE id = ?1",
@@ -75,8 +79,9 @@ pub fn get_inventaire(db: State<DbState>, inventaire_id: i64) -> Result<serde_js
 }
 
 #[tauri::command]
-pub fn get_inventaires(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_inventaires(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT i.id, i.date_debut, i.date_fin, i.statut, i.magasin_id, m.nom, u.nom,
                 (SELECT COUNT(*) FROM inventaire_lignes WHERE inventaire_id = i.id),
@@ -103,8 +108,9 @@ pub fn get_inventaires(db: State<DbState>) -> Result<Vec<serde_json::Value>, Str
 }
 
 #[tauri::command]
-pub fn update_inventaire_ligne(db: State<DbState>, ligne_id: i64, stock_compte: f64) -> Result<(), String> {
+pub fn update_inventaire_ligne(db: State<DbState>, auth: State<AuthState>, token: String, ligne_id: i64, stock_compte: f64) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "modifier"))?;
     let stock_theorique: f64 = conn.query_row(
         "SELECT stock_theorique FROM inventaire_lignes WHERE id = ?1",
         params![ligne_id], |r| r.get(0),
@@ -118,8 +124,10 @@ pub fn update_inventaire_ligne(db: State<DbState>, ligne_id: i64, stock_compte: 
 }
 
 #[tauri::command]
-pub fn valider_inventaire(db: State<DbState>, inventaire_id: i64, utilisateur_id: i64) -> Result<(), String> {
+pub fn valider_inventaire(db: State<DbState>, auth: State<AuthState>, token: String, inventaire_id: i64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "modifier"))?;
+    let utilisateur_id = me.user_id;
 
     let statut: String = conn.query_row(
         "SELECT statut FROM inventaires WHERE id = ?1",

@@ -52,9 +52,9 @@ export const router = createBrowserRouter([
       {
         element: <Layout />,
         children: [
-          { index: true, element: <SuspensePage><ProtectedRoute><Dashboard /></ProtectedRoute></SuspensePage> },
+          { index: true, element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Dashboard /></ProtectedRoute></SuspensePage> },
           { path: "pos", element: <SuspensePage><ProtectedRoute><POS /></ProtectedRoute></SuspensePage> },
-          { path: "dashboard", element: <SuspensePage><ProtectedRoute><Dashboard /></ProtectedRoute></SuspensePage> },
+          { path: "dashboard", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Dashboard /></ProtectedRoute></SuspensePage> },
           { path: "articles", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Articles /></ProtectedRoute></SuspensePage> },
           { path: "clients", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Clients /></ProtectedRoute></SuspensePage> },
           { path: "paiements", element: <SuspensePage><ProtectedRoute allowedRoles={["admin", "manager"]}><Paiements /></ProtectedRoute></SuspensePage> },

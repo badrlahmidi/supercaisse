@@ -1,12 +1,14 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::{adjust_article_stock, log_audit};
 
 #[tauri::command]
-pub fn get_magasins(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_magasins(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn.prepare("SELECT id, nom, adresse FROM magasins ORDER BY id").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
         Ok(serde_json::json!({
@@ -19,8 +21,9 @@ pub fn get_magasins(db: State<DbState>) -> Result<Vec<serde_json::Value>, String
 }
 
 #[tauri::command]
-pub fn add_magasin(db: State<DbState>, nom: String, adresse: Option<String>) -> Result<i64, String> {
+pub fn add_magasin(db: State<DbState>, auth: State<AuthState>, token: String, nom: String, adresse: Option<String>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "creer"))?;
     conn.execute(
         "INSERT INTO magasins (nom, adresse) VALUES (?1, ?2)",
         params![nom, adresse],
@@ -29,8 +32,9 @@ pub fn add_magasin(db: State<DbState>, nom: String, adresse: Option<String>) -> 
 }
 
 #[tauri::command]
-pub fn update_magasin(db: State<DbState>, id: i64, nom: String, adresse: Option<String>) -> Result<(), String> {
+pub fn update_magasin(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, nom: String, adresse: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "modifier"))?;
     conn.execute(
         "UPDATE magasins SET nom=?1, adresse=?2 WHERE id=?3",
         params![nom, adresse, id],
@@ -39,8 +43,9 @@ pub fn update_magasin(db: State<DbState>, id: i64, nom: String, adresse: Option<
 }
 
 #[tauri::command]
-pub fn delete_magasin(db: State<DbState>, id: i64) -> Result<(), String> {
+pub fn delete_magasin(db: State<DbState>, auth: State<AuthState>, token: String, id: i64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("magasins", "modifier"))?;
     let count: i64 = conn.query_row(
         "SELECT count(*) FROM magasins", [], |r| r.get(0)
     ).unwrap_or(0);
@@ -65,8 +70,9 @@ pub fn delete_magasin(db: State<DbState>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_transferts(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_transferts(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT t.id, t.date, t.statut, ms.nom AS source_nom, md.nom AS dest_nom, u.nom AS utilisateur_nom
          FROM transferts_stock t
@@ -89,8 +95,9 @@ pub fn get_transferts(db: State<DbState>) -> Result<Vec<serde_json::Value>, Stri
 }
 
 #[tauri::command]
-pub fn get_stock_par_magasin(db: State<DbState>, magasin_id: i64) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_stock_par_magasin(db: State<DbState>, auth: State<AuthState>, token: String, magasin_id: i64) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT a.id, a.designation, a.code_barre, COALESCE(s.quantite, 0) AS stock, a.stock_alerte
          FROM articles a
@@ -111,14 +118,10 @@ pub fn get_stock_par_magasin(db: State<DbState>, magasin_id: i64) -> Result<Vec<
 }
 
 #[tauri::command]
-pub fn create_transfert(
-    db: State<DbState>,
-    source_id: i64,
-    dest_id: i64,
-    utilisateur_id: Option<i64>,
-    articles: Vec<serde_json::Value>
-) -> Result<i64, String> {
+pub fn create_transfert(db: State<DbState>, auth: State<AuthState>, token: String, source_id: i64, dest_id: i64, articles: Vec<serde_json::Value>) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("stock", "creer"))?;
+    let utilisateur_id = Some(me.user_id);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     tx.execute(
@@ -142,8 +145,9 @@ pub fn create_transfert(
 }
 
 #[tauri::command]
-pub fn validate_transfert(db: State<DbState>, transfert_id: i64) -> Result<(), String> {
+pub fn validate_transfert(db: State<DbState>, auth: State<AuthState>, token: String, transfert_id: i64) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let (source_id, dest_id, statut): (i64, i64, String) = tx.query_row(
@@ -177,7 +181,7 @@ pub fn validate_transfert(db: State<DbState>, transfert_id: i64) -> Result<(), S
 
     tx.execute("UPDATE transferts_stock SET statut = 'valide' WHERE id = ?1", params![transfert_id]).map_err(|e| e.to_string())?;
 
-    log_audit(&tx, None, "valider_transfert",
+    log_audit(&tx, Some(me.user_id), "valider_transfert",
         &format!("Validation transfert #{} (magasin {} → {})", transfert_id, source_id, dest_id),
         Some("transfert"), Some(transfert_id));
 

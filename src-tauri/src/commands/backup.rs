@@ -3,12 +3,14 @@ use crate::paths::{ensure_dir, AppDirs};
 use rusqlite::{backup::Backup, Connection};
 use std::time::Duration;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::log_audit;
 
 #[tauri::command]
-pub fn backup_database(db: State<DbState>, dirs: State<AppDirs>) -> Result<String, String> {
+pub fn backup_database(db: State<DbState>, dirs: State<AppDirs>, auth: State<AuthState>, token: String) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("settings", "exporter"))?;
     let _db_path = conn.path().ok_or("Base de données non fichier")?.to_string();
     let backup_dir = dirs.backups();
     ensure_dir(&backup_dir)?;
@@ -21,8 +23,9 @@ pub fn backup_database(db: State<DbState>, dirs: State<AppDirs>) -> Result<Strin
 }
 
 #[tauri::command]
-pub fn export_database(db: State<DbState>, dirs: State<AppDirs>) -> Result<String, String> {
+pub fn export_database(db: State<DbState>, dirs: State<AppDirs>, auth: State<AuthState>, token: String) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("settings", "exporter"))?;
     let _db_path = conn.path().ok_or("Base de données non fichier")?.to_string();
     let export_dir = dirs.exports();
     ensure_dir(&export_dir)?;
@@ -35,14 +38,15 @@ pub fn export_database(db: State<DbState>, dirs: State<AppDirs>) -> Result<Strin
 }
 
 #[tauri::command]
-pub fn import_database(db: State<DbState>, path: String) -> Result<(), String> {
+pub fn import_database(db: State<DbState>, auth: State<AuthState>, token: String, path: String) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     {
         let src = Connection::open(&path).map_err(|e| e.to_string())?;
         let backup = Backup::new(&src, &mut *conn).map_err(|e| e.to_string())?;
         backup.run_to_completion(5, Duration::from_millis(250), None).map_err(|e| e.to_string())?;
     }
-    log_audit(&*conn, None, "importer_base",
+    log_audit(&*conn, Some(me.user_id), "importer_base",
         &format!("Import base de données depuis: {}", path),
         None, None);
     Ok(())

@@ -1,12 +1,14 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::log_audit;
 
 #[tauri::command]
-pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
+pub fn get_settings(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Settings, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn.prepare("SELECT key, value FROM settings")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
@@ -42,18 +44,9 @@ pub fn get_settings(db: State<DbState>) -> Result<Settings, String> {
 }
 
 #[tauri::command]
-pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Option<String>, shop_phone: Option<String>,
-    shop_email: Option<String>, ice: Option<String>, if_number: Option<String>, rc_number: Option<String>,
-    patente: Option<String>, default_tva: f64,
-    receipt_footer: Option<String>, currency: String,
-    printer_name: Option<String>, business_type: Option<String>,
-    fidelite_actif: Option<String>, fidelite_dh_pour_1_point: Option<String>,
-    fidelite_valeur_1_point: Option<String>,
-    idle_timeout: Option<String>,
-    logo_base64: Option<String>,
-    receipt_header: Option<String>,
-    doc_primary_color: Option<String>) -> Result<(), String> {
+pub fn update_settings(db: State<DbState>, auth: State<AuthState>, token: String, shop_name: String, shop_address: Option<String>, shop_phone: Option<String>, shop_email: Option<String>, ice: Option<String>, if_number: Option<String>, rc_number: Option<String>, patente: Option<String>, default_tva: f64, receipt_footer: Option<String>, currency: String, printer_name: Option<String>, business_type: Option<String>, fidelite_actif: Option<String>, fidelite_dh_pour_1_point: Option<String>, fidelite_valeur_1_point: Option<String>, idle_timeout: Option<String>, logo_base64: Option<String>, receipt_header: Option<String>, doc_primary_color: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("settings", "modifier"))?;
     let pairs: Vec<(&str, String)> = vec![
         ("shop_name", shop_name),
         ("shop_address", shop_address.unwrap_or_default()),
@@ -86,6 +79,6 @@ pub fn update_settings(db: State<DbState>, shop_name: String, shop_address: Opti
             params![key, value],
         ).map_err(|e| e.to_string())?;
     }
-    log_audit(&conn, None, "modifier_parametres", "Mise à jour des paramètres boutique", None, None);
+    log_audit(&conn, Some(me.user_id), "modifier_parametres", "Mise à jour des paramètres boutique", None, None);
     Ok(())
 }

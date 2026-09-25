@@ -1,5 +1,7 @@
 use crate::db::*;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
+use crate::session::{autoriser, Acces, AuthState};
 use tauri::State;
 
 use super::log_audit;
@@ -60,10 +62,32 @@ pub(crate) fn login_impl(conn: &Connection, login: &str, password: &str) -> Resu
     Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role, must_change_password }))
 }
 
+#[derive(Debug, Serialize)]
+pub struct Connexion {
+    #[serde(flatten)]
+    pub utilisateur: Utilisateur,
+    pub token: String,
+}
+
+fn ouvrir_session(auth: &AuthState, utilisateur: Option<Utilisateur>) -> Result<Option<Connexion>, String> {
+    match utilisateur {
+        None => Ok(None),
+        Some(u) => {
+            let token = auth.ouvrir(u.id.ok_or("Utilisateur sans identifiant")?, &u.role)?;
+            Ok(Some(Connexion { utilisateur: u, token }))
+        }
+    }
+}
+
 #[tauri::command]
-pub fn login(db: State<DbState>, login: String, password: String) -> Result<Option<Utilisateur>, String> {
+pub fn login(db: State<DbState>, auth: State<AuthState>, login: String, password: String) -> Result<Option<Connexion>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    login_impl(&conn, &login, &password)
+    ouvrir_session(&auth, login_impl(&conn, &login, &password)?)
+}
+
+#[tauri::command]
+pub fn logout(auth: State<AuthState>, token: String) -> Result<(), String> {
+    auth.fermer(&token)
 }
 
 pub(crate) fn change_password_impl(conn: &Connection, user_id: i64, ancien: &str, nouveau: &str) -> Result<(), String> {
@@ -93,14 +117,19 @@ pub(crate) fn change_password_impl(conn: &Connection, user_id: i64, ancien: &str
 }
 
 #[tauri::command]
-pub fn change_password(db: State<DbState>, user_id: i64, ancien_mot_de_passe: String, nouveau_mot_de_passe: String) -> Result<(), String> {
+pub fn change_password(db: State<DbState>, auth: State<AuthState>, token: String, ancien_mot_de_passe: String, nouveau_mot_de_passe: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    change_password_impl(&conn, user_id, &ancien_mot_de_passe, &nouveau_mot_de_passe)
+    let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    change_password_impl(&conn, me.user_id, &ancien_mot_de_passe, &nouveau_mot_de_passe)
 }
 
 #[tauri::command]
-pub fn login_pin(db: State<DbState>, pin: String) -> Result<Option<Utilisateur>, String> {
+pub fn login_pin(db: State<DbState>, auth: State<AuthState>, pin: String) -> Result<Option<Connexion>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    ouvrir_session(&auth, login_pin_impl(&conn, &pin)?)
+}
+
+pub(crate) fn login_pin_impl(conn: &Connection, pin: &str) -> Result<Option<Utilisateur>, String> {
     let mut stmt = conn.prepare(
         "SELECT id, login, nom, role, pin_hash, must_change_password FROM utilisateurs WHERE pin_hash IS NOT NULL AND pin_hash != ''"
     ).map_err(|e| e.to_string())?;
@@ -115,7 +144,7 @@ pub fn login_pin(db: State<DbState>, pin: String) -> Result<Option<Utilisateur>,
         ))
     }).map_err(|e| e.to_string())?.filter_map(Result::ok).collect();
     for (id, ulogin, nom, role, hash, must_change_password) in users {
-        if verify_password(&pin, &hash) {
+        if verify_password(pin, &hash) {
             return Ok(Some(Utilisateur { id: Some(id), login: ulogin, nom, role, must_change_password }));
         }
     }
@@ -123,8 +152,9 @@ pub fn login_pin(db: State<DbState>, pin: String) -> Result<Option<Utilisateur>,
 }
 
 #[tauri::command]
-pub fn set_user_pin(db: State<DbState>, user_id: i64, pin: String) -> Result<(), String> {
+pub fn set_user_pin(db: State<DbState>, auth: State<AuthState>, token: String, user_id: i64, pin: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let hash = if pin.is_empty() {
         String::new()
     } else {
@@ -188,7 +218,7 @@ mod tests {
             let conn = crate::db::init_db(&path).unwrap();
             conn.execute("INSERT INTO utilisateurs (login, password_hash, nom, role) VALUES ('gerant', ?1, 'Gérant', 'admin')",
                 params![hash_password("motdepasse-solide")]).unwrap();
-            delete_utilisateur_impl(&conn, 1).unwrap();
+            delete_utilisateur_impl(&conn, 1, None).unwrap();
         }
         let conn = crate::db::init_db(&path).unwrap();
         assert!(login_impl(&conn, "admin", "admin").unwrap().is_none());
@@ -251,21 +281,21 @@ mod tests {
     #[test]
     fn test_dernier_admin_protege() {
         let conn = crate::db::init_db(":memory:").unwrap();
-        assert!(delete_utilisateur_impl(&conn, 1).is_err());
-        assert!(update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None).is_err());
-        update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "admin", None).unwrap();
+        assert!(delete_utilisateur_impl(&conn, 1, None).is_err());
+        assert!(update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None, None).is_err());
+        update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "admin", None, None).unwrap();
         conn.execute("INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'gerant', 'x', 'Gérant', 'admin')", []).unwrap();
-        update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None).unwrap();
-        assert!(delete_utilisateur_impl(&conn, 2).is_err());
-        delete_utilisateur_impl(&conn, 1).unwrap();
+        update_utilisateur_impl(&conn, 1, "admin", "Administrateur", "manager", None, None).unwrap();
+        assert!(delete_utilisateur_impl(&conn, 2, None).is_err());
+        delete_utilisateur_impl(&conn, 1, None).unwrap();
     }
 
     #[test]
     fn test_nouveau_mot_de_passe_utilisateur_valide() {
         let conn = crate::db::init_db(":memory:").unwrap();
         conn.execute("INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'karim', 'x', 'Karim', 'caissier')", []).unwrap();
-        assert!(update_utilisateur_impl(&conn, 2, "karim", "Karim", "caissier", Some("karim")).is_err());
-        update_utilisateur_impl(&conn, 2, "karim", "Karim", "caissier", Some("Vente-Karim-1")).unwrap();
+        assert!(update_utilisateur_impl(&conn, 2, "karim", "Karim", "caissier", Some("karim"), None).is_err());
+        update_utilisateur_impl(&conn, 2, "karim", "Karim", "caissier", Some("Vente-Karim-1"), None).unwrap();
         assert!(login_impl(&conn, "karim", "Vente-Karim-1").unwrap().is_some());
     }
 }

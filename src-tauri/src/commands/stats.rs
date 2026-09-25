@@ -1,9 +1,11 @@
 use crate::db::*;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_stats(db: State<DbState>) -> Result<serde_json::Value, String> {
+pub fn get_stats(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
     let total_ventes_30j: f64 = conn.query_row("SELECT COALESCE(SUM(montant_total - montant_remise),0) FROM ventes WHERE date >= datetime('now','-30 days','localtime') AND statut != 'annulee'", [], |r| r.get(0)).unwrap_or(0.0);
     let nb_articles: i64 = conn.query_row("SELECT COUNT(*) FROM articles WHERE actif=1", [], |r| r.get(0)).unwrap_or(0);

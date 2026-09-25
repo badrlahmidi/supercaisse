@@ -1,13 +1,14 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::{default_magasin_id, adjust_article_stock};
 
 #[tauri::command]
-pub fn create_achat(db: State<DbState>, fournisseur_id: Option<i64>, reference: Option<String>,
-    articles: Vec<serde_json::Value>, statut_livraison: Option<String>, statut_paiement: Option<String>) -> Result<i64, String> {
+pub fn create_achat(db: State<DbState>, auth: State<AuthState>, token: String, fournisseur_id: Option<i64>, reference: Option<String>, articles: Vec<serde_json::Value>, statut_livraison: Option<String>, statut_paiement: Option<String>) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "creer"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
     let mut montant_total = 0.0;
@@ -49,8 +50,9 @@ pub fn create_achat(db: State<DbState>, fournisseur_id: Option<i64>, reference: 
 }
 
 #[tauri::command]
-pub fn get_achats(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_achats(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT a.id, a.date, a.fournisseur_id, a.reference, a.montant_total, a.statut, f.nom as fournisseur_nom, a.statut_livraison, a.statut_paiement
          FROM achats a LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
@@ -73,8 +75,9 @@ pub fn get_achats(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> 
 }
 
 #[tauri::command]
-pub fn update_achat_status(db: State<DbState>, achat_id: i64, statut_livraison: String, statut_paiement: String) -> Result<(), String> {
+pub fn update_achat_status(db: State<DbState>, auth: State<AuthState>, token: String, achat_id: i64, statut_livraison: String, statut_paiement: String) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let old_sl: String = tx.query_row(
@@ -112,8 +115,9 @@ pub fn update_achat_status(db: State<DbState>, achat_id: i64, statut_livraison: 
 }
 
 #[tauri::command]
-pub fn compare_fournisseur_prices(db: State<DbState>, article_id: Option<i64>) -> Result<Vec<serde_json::Value>, String> {
+pub fn compare_fournisseur_prices(db: State<DbState>, auth: State<AuthState>, token: String, article_id: Option<i64>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
 
     let sql = "
         SELECT

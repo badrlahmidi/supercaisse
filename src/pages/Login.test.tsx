@@ -5,9 +5,15 @@ import { MemoryRouter } from "react-router-dom"
 import type { ReactNode } from "react"
 import { AuthProvider } from "@/context/AuthContext"
 import Login from "./Login"
+import { setSessionToken } from "@/lib/tauri"
 
 const mockInvoke = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/tauri", () => ({ invoke: mockInvoke }))
+vi.mock("@/lib/tauri", () => ({
+  invoke: mockInvoke,
+  setSessionToken: vi.fn(),
+  getSessionToken: vi.fn(() => null),
+  onSessionExpired: vi.fn(() => () => undefined),
+}))
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -57,7 +63,7 @@ describe("Login", () => {
     mockInvoke.mockImplementation((cmd: string) =>
       Promise.resolve(
         cmd === "login"
-          ? { id: 1, login: "admin", nom: "Administrateur", role: "admin", must_change_password: true }
+          ? { id: 1, login: "admin", nom: "Administrateur", role: "admin", must_change_password: true, token: "tok-login" }
           : [],
       ),
     )
@@ -65,10 +71,9 @@ describe("Login", () => {
     await user.type(await screen.findByLabelText("Login"), "admin")
     await user.type(screen.getByLabelText("Mot de passe"), "admin")
     await user.click(screen.getByRole("button", { name: /se connecter/i }))
-    await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem("supercaisse_user")!)
-      expect(stored).toMatchObject({ login: "admin", nom: "Administrateur", role: "admin", must_change_password: true })
-    })
-    expect(mockInvoke).toHaveBeenCalledWith("get_permissions", { role: "admin" })
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_permissions", { role: "admin" }))
+    expect(setSessionToken).toHaveBeenCalledWith("tok-login")
+    expect(localStorage.length).toBe(0)
   })
+
 })

@@ -1,10 +1,12 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_cheques(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_cheques(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT c.id, c.numero, c.banque, c.tireur, c.montant, c.date_emission, c.date_echeance, c.statut, c.ctype, c.client_id, c.fournisseur_id,
                 cl.nom as client_nom, f.nom as fournisseur_nom
@@ -34,10 +36,9 @@ pub fn get_cheques(db: State<DbState>) -> Result<Vec<serde_json::Value>, String>
 }
 
 #[tauri::command]
-pub fn add_cheque(db: State<DbState>, numero: String, banque: String, tireur: Option<String>, montant: f64,
-                  date_emission: String, date_echeance: String, ctype: String,
-                  client_id: Option<i64>, fournisseur_id: Option<i64>) -> Result<i64, String> {
+pub fn add_cheque(db: State<DbState>, auth: State<AuthState>, token: String, numero: String, banque: String, tireur: Option<String>, montant: f64, date_emission: String, date_echeance: String, ctype: String, client_id: Option<i64>, fournisseur_id: Option<i64>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "creer"))?;
     conn.execute(
         "INSERT INTO cheques (numero, banque, tireur, montant, date_emission, date_echeance, ctype, client_id, fournisseur_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -47,8 +48,9 @@ pub fn add_cheque(db: State<DbState>, numero: String, banque: String, tireur: Op
 }
 
 #[tauri::command]
-pub fn update_cheque_status(db: State<DbState>, cheque_id: i64, statut: String) -> Result<(), String> {
+pub fn update_cheque_status(db: State<DbState>, auth: State<AuthState>, token: String, cheque_id: i64, statut: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "modifier"))?;
     conn.execute("UPDATE cheques SET statut = ?1 WHERE id = ?2", params![statut, cheque_id])
         .map_err(|e| e.to_string())?;
     Ok(())

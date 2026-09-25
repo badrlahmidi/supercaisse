@@ -45,7 +45,6 @@ export default function ChangePasswordRequired() {
   const mutation = useMutation({
     mutationFn: (data: ChangePasswordForm) =>
       invoke("change_password", {
-        userId: user?.id,
         ancienMotDePasse: data.ancien,
         nouveauMotDePasse: data.nouveau,
       }),

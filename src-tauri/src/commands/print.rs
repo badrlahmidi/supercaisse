@@ -3,9 +3,11 @@ use crate::paths::{ensure_dir, AppDirs};
 use base64::engine::general_purpose;
 use base64::Engine;
 use tauri::State;
+use crate::session::AuthState;
 
 #[tauri::command]
-pub fn print_ticket(texte: String) -> Result<(), String> {
+pub fn print_ticket(auth: State<AuthState>, token: String, texte: String) -> Result<(), String> {
+    let _me = auth.session(&token)?;
     let path = std::env::temp_dir().join("ticket_impression.txt");
     std::fs::write(&path, &texte).map_err(|e| format!("Erreur écriture ticket: {}", e))?;
 
@@ -72,7 +74,12 @@ pub(crate) fn valider_imprimante(nom: &str) -> Result<CibleImpression, String> {
 }
 
 #[tauri::command]
-pub fn print_escpos(db: State<DbState>, base64_data: String) -> Result<(), String> {
+pub fn print_escpos(db: State<DbState>, auth: State<AuthState>, token: String, base64_data: String) -> Result<(), String> {
+    auth.session(&token)?;
+    imprimer_escpos(&db, base64_data)
+}
+
+fn imprimer_escpos(db: &DbState, base64_data: String) -> Result<(), String> {
     let printer_name: String = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row("SELECT value FROM settings WHERE key = 'printer_name'", [], |r| r.get(0))
@@ -107,14 +114,15 @@ pub fn print_escpos(db: State<DbState>, base64_data: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn open_cash_drawer(db: State<DbState>) -> Result<(), String> {
+pub fn open_cash_drawer(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<(), String> {
+    auth.session(&token)?;
     let drawer_kick = vec![0x1B, 0x70, 0x00, 0x19, 0xFA];
-    let base64_data = general_purpose::STANDARD.encode(&drawer_kick);
-    print_escpos(db, base64_data)
+    imprimer_escpos(&db, general_purpose::STANDARD.encode(&drawer_kick))
 }
 
 #[tauri::command]
-pub fn print_receipt(data: String) -> Result<(), String> {
+pub fn print_receipt(auth: State<AuthState>, token: String, data: String) -> Result<(), String> {
+    let _me = auth.session(&token)?;
     let path = std::env::temp_dir().join("ticket_impression.html");
     std::fs::write(&path, &data).map_err(|e| format!("Erreur écriture ticket: {}", e))?;
 
@@ -139,7 +147,8 @@ pub fn print_receipt(data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn save_document_pdf(dirs: State<AppDirs>, base64_data: String, filename: String) -> Result<String, String> {
+pub fn save_document_pdf(dirs: State<AppDirs>, auth: State<AuthState>, token: String, base64_data: String, filename: String) -> Result<String, String> {
+    auth.session(&token)?;
     let bytes = general_purpose::STANDARD.decode(&base64_data)
         .map_err(|e| format!("Erreur de décodage base64: {}", e))?;
 

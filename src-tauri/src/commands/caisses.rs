@@ -1,10 +1,12 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 #[tauri::command]
-pub fn get_caisses(db: State<DbState>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_caisses(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT c.id, c.nom, c.utilisateur_id, c.statut, c.ouverture_date, c.fermeture_date,
                 c.fond_initial, c.recettes_especes, c.recettes_cb, c.recettes_cheque,
@@ -36,8 +38,9 @@ pub fn get_caisses(db: State<DbState>) -> Result<Vec<serde_json::Value>, String>
 }
 
 #[tauri::command]
-pub fn open_caisse(db: State<DbState>, nom: String, fond_initial: f64, utilisateur_id: Option<i64>) -> Result<i64, String> {
+pub fn open_caisse(db: State<DbState>, auth: State<AuthState>, token: String, nom: String, fond_initial: f64, utilisateur_id: Option<i64>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "creer"))?;
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
         "INSERT INTO caisses (nom, utilisateur_id, statut, ouverture_date, fond_initial) VALUES (?1, ?2, 'ouverte', ?3, ?4)",
@@ -47,8 +50,9 @@ pub fn open_caisse(db: State<DbState>, nom: String, fond_initial: f64, utilisate
 }
 
 #[tauri::command]
-pub fn close_caisse(db: State<DbState>, id: i64, note: Option<String>) -> Result<(), String> {
+pub fn close_caisse(db: State<DbState>, auth: State<AuthState>, token: String, id: i64, note: Option<String>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("journal", "modifier"))?;
 
     let ouverture_date: String = conn.query_row(
         "SELECT ouverture_date FROM caisses WHERE id = ?1 AND statut = 'ouverte'",
@@ -91,8 +95,9 @@ pub fn close_caisse(db: State<DbState>, id: i64, note: Option<String>) -> Result
 }
 
 #[tauri::command]
-pub fn get_tresorerie(db: State<DbState>) -> Result<serde_json::Value, String> {
+pub fn get_tresorerie(db: State<DbState>, auth: State<AuthState>, token: String) -> Result<serde_json::Value, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
     let today_start = chrono::Local::now().format("%Y-%m-%d 00:00:00").to_string();
 

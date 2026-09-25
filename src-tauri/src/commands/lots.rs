@@ -1,13 +1,14 @@
 use crate::db::*;
 use rusqlite::params;
 use tauri::State;
+use crate::session::{autoriser, Acces, AuthState};
 
 use super::{default_magasin_id, adjust_article_stock};
 
 #[tauri::command]
-pub fn add_article_lot(db: State<DbState>, article_id: i64, numero_lot: Option<String>,
-    date_peremption: Option<String>, quantite: f64) -> Result<i64, String> {
+pub fn add_article_lot(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64, numero_lot: Option<String>, date_peremption: Option<String>, quantite: f64) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let magasin_id = default_magasin_id(&tx)?;
     tx.execute(
@@ -27,8 +28,9 @@ pub fn add_article_lot(db: State<DbState>, article_id: i64, numero_lot: Option<S
 }
 
 #[tauri::command]
-pub fn get_article_lots(db: State<DbState>, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_article_lots(db: State<DbState>, auth: State<AuthState>, token: String, article_id: i64) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT id, numero_lot, date_peremption, quantite, date_reception
          FROM article_lots WHERE article_id = ?1
@@ -47,8 +49,9 @@ pub fn get_article_lots(db: State<DbState>, article_id: i64) -> Result<Vec<serde
 }
 
 #[tauri::command]
-pub fn get_lots_peremption_proche(db: State<DbState>, jours: i64) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_lots_peremption_proche(db: State<DbState>, auth: State<AuthState>, token: String, jours: i64) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
         "SELECT l.id, l.article_id, a.designation, l.numero_lot, l.date_peremption, l.quantite
          FROM article_lots l
@@ -71,8 +74,9 @@ pub fn get_lots_peremption_proche(db: State<DbState>, jours: i64) -> Result<Vec<
 }
 
 #[tauri::command]
-pub fn discard_article_lot(db: State<DbState>, lot_id: i64, quantite: f64, motif: Option<String>) -> Result<(), String> {
+pub fn discard_article_lot(db: State<DbState>, auth: State<AuthState>, token: String, lot_id: i64, quantite: f64, motif: Option<String>) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "modifier"))?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let (article_id, magasin_id, lot_quantite): (i64, i64, f64) = tx.query_row(

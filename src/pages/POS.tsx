@@ -279,8 +279,11 @@ export default function POS() {
 
   const handleValidateSale = () => {
     if (cart.length === 0) return
-    if (paymentMode === "especes" && cashAmount < netAmount) {
-      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(netAmount - cashAmount)}` })
+    const montantRecu = paymentSplits.length > 0
+      ? paymentSplits.reduce((s, p) => s + p.amount, 0)
+      : paymentMode === "especes" ? cashAmount : netAmount
+    if (montantRecu < netAmount) {
+      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(netAmount - montantRecu)}` })
       return
     }
     setProcessing(true)
@@ -400,7 +403,6 @@ export default function POS() {
       const isSplit = paymentSplits.length > 0
       return invoke<{ id: number; numero_facture: string }>("create_vente", {
         clientId: selectedClient,
-        caissierId: user?.id ?? 0,
         articles: items,
         remiseGlobalePct: discount,
         modePaiement: isSplit ? paymentSplits.map((s) => s.mode).join("+") : paymentMode,

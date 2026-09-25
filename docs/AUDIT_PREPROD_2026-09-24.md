@@ -42,6 +42,14 @@ Points positifs :
 
 ### [CRITIQUE] C-5 — Aucune autorisation côté backend ; identité et rôle fournis par le client
 
+> **Statut : corrigé** sur `claude/hopeful-clarke-4uflms` (couvre aussi M-10).
+> - **Sessions :** `login`/`login_pin` ouvrent une session serveur (`src-tauri/src/session.rs`) et renvoient un jeton aléatoire de 256 bits. Le jeton expire après 1 h d'inactivité ou 16 h au total ; `logout` le révoque.
+> - **Contrôle par commande :** les 96 commandes protégées exigent le jeton et vérifient l'accès (connecté, module/action de la table `permissions`, ou administrateur). Le rôle est relu en base à chaque appel ; un utilisateur supprimé est déconnecté et ses sessions sont fermées si l'admin change son mot de passe.
+> - **Réservé à l'administrateur, codé en dur :** gestion des utilisateurs et des permissions, PIN, restauration de base. Un manager ne peut donc pas s'octroyer de droits.
+> - **Identité :** l'identifiant de caissier ou d'utilisateur vient de la session et non plus du frontend (`create_vente`, sessions de caisse, journal, inventaire, transferts, `change_password`). L'audit est attribué à l'auteur. Clôture et rapport X d'une session d'un autre caissier exigent la permission `journal`.
+> - **Frontend :** le jeton reste en mémoire (plus rien dans `localStorage`, redémarrer impose de se reconnecter). `invoke()` l'injecte et déconnecte à l'expiration. Le tableau de bord est réservé à admin/manager, un caissier arrive sur la caisse.
+> - **Tests :** 8 tests Rust, dont un qui échoue si une commande ne vérifie pas la session, et 9 tests Vitest. Vérifié en lançant l'application : connexion admin, changement de mot de passe forcé, connexion caissier, ouverture de caisse et vente attribuée au caissier de la session.
+
 **Fichier** : `src-tauri/src/commands/*.rs` (97 commandes), `src/context/AuthContext.tsx:58-62`, `src/routes/router.tsx`
 **Risque** :
 - `login` renvoie un objet `Utilisateur` sans jeton. Le frontend le stocke dans `localStorage["supercaisse_user"]` et le relit au démarrage sans le revalider.
