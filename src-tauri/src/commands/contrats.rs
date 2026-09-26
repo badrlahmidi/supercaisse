@@ -444,6 +444,21 @@ pub struct Magasin {
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(export)]
+pub struct StatsMagasin {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub nom: String,
+    pub adresse: Option<String>,
+    pub ca_mois: f64,
+    #[ts(as = "f64")]
+    pub nb_ventes: i64,
+    #[ts(as = "f64")]
+    pub nb_clients_actifs: i64,
+    pub valeur_stock: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
 pub struct TransfertResume {
     #[ts(as = "f64")]
     pub id: i64,
