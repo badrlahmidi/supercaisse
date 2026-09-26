@@ -11,7 +11,7 @@ pub fn get_permissions(
     auth: State<AuthState>,
     token: String,
     role: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::PermissionRole>, String> {
     let conn = db.lecture()?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     if role != me.role && !me.est_admin() {
@@ -22,12 +22,12 @@ pub fn get_permissions(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![role], |row| {
-            Ok(serde_json::json!({
-                "role": row.get::<_, String>(0)?,
-                "module": row.get::<_, String>(1)?,
-                "action": row.get::<_, String>(2)?,
-                "allowed": row.get::<_, i32>(3)? != 0,
-            }))
+            Ok(super::contrats::PermissionRole {
+                role: row.get(0)?,
+                module: row.get(1)?,
+                action: row.get(2)?,
+                allowed: row.get::<_, i32>(3)? != 0,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

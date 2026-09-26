@@ -54,7 +54,7 @@ pub fn get_articles_stock_alerte(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::ArticleAlerte>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("reappro", "voir"))?;
     let mut stmt = conn
@@ -71,17 +71,17 @@ pub fn get_articles_stock_alerte(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "designation": row.get::<_, String>(1)?,
-                "stock": row.get::<_, f64>(2)?,
-                "stock_alerte": row.get::<_, f64>(3)?,
-                "categorie_nom": row.get::<_, Option<String>>(4)?,
-                "fournisseur_nom": row.get::<_, Option<String>>(5)?,
-                "fournisseur_id": row.get::<_, Option<i64>>(6)?,
-                "prix_achat": row.get::<_, f64>(7)?,
-                "suggestion_qte": row.get::<_, i64>(8)?,
-            }))
+            Ok(super::contrats::ArticleAlerte {
+                id: row.get(0)?,
+                designation: row.get(1)?,
+                stock: row.get(2)?,
+                stock_alerte: row.get(3)?,
+                categorie_nom: row.get(4)?,
+                fournisseur_nom: row.get(5)?,
+                fournisseur_id: row.get(6)?,
+                prix_achat: row.get(7)?,
+                suggestion_qte: row.get(8)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

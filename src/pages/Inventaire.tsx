@@ -14,41 +14,11 @@ import { Plus, ClipboardCheck, Loader2, CheckCircle, AlertTriangle, ArrowLeft } 
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatDateTime } from "@/lib/utils"
+import type { InventaireDetail } from "@/types/generated/InventaireDetail"
+import type { InventaireResume } from "@/types/generated/InventaireResume"
+import type { Magasin } from "@/types/generated/Magasin"
 
-interface Inventaire {
-  id: number
-  date_debut: string
-  date_fin: string | null
-  statut: string
-  magasin_id: number
-  utilisateur_id: number | null
-  nb_articles: number
-  nb_comptes: number
-}
-
-interface InventaireLigne {
-  id: number
-  article_id: number
-  designation: string
-  code_barre: string | null
-  stock_theorique: number
-  stock_compte: number | null
-  ecart: number | null
-}
-
-interface InventaireDetail {
-  id: number
-  date_debut: string
-  date_fin: string | null
-  statut: string
-  magasin_id: number
-  lignes: InventaireLigne[]
-}
-
-interface Magasin {
-  id: number
-  nom: string
-}
+type Inventaire = InventaireResume
 
 export default function Inventaire() {
   const queryClient = useQueryClient()

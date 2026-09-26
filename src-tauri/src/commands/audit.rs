@@ -10,7 +10,7 @@ pub fn get_audit_log(
     debut: Option<String>,
     fin: Option<String>,
     action_filter: Option<String>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::EntreeAudit>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("audit", "voir"))?;
     let mut where_clause = String::new();
@@ -42,16 +42,16 @@ pub fn get_audit_log(
     let pr: Vec<&dyn rusqlite::types::ToSql> = qp.iter().map(|p| p.as_ref()).collect();
     let rows = stmt
         .query_map(pr.as_slice(), |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, String>(1)?,
-                "utilisateur_id": row.get::<_, Option<i64>>(2)?,
-                "action": row.get::<_, String>(3)?,
-                "detail": row.get::<_, Option<String>>(4)?,
-                "reference_type": row.get::<_, Option<String>>(5)?,
-                "reference_id": row.get::<_, Option<i64>>(6)?,
-                "user_nom": row.get::<_, Option<String>>(7)?,
-            }))
+            Ok(super::contrats::EntreeAudit {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                utilisateur_id: row.get(2)?,
+                action: row.get(3)?,
+                detail: row.get(4)?,
+                reference_type: row.get(5)?,
+                reference_id: row.get(6)?,
+                user_nom: row.get(7)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

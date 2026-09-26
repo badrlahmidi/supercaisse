@@ -31,7 +31,7 @@ pub fn get_article_composants(
     auth: State<AuthState>,
     token: String,
     article_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::ComposantArticle>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
@@ -44,13 +44,13 @@ pub fn get_article_composants(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![article_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "composant_id": row.get::<_, i64>(1)?,
-                "designation": row.get::<_, String>(2)?,
-                "stock": row.get::<_, f64>(3)?,
-                "quantite": row.get::<_, f64>(4)?,
-            }))
+            Ok(super::contrats::ComposantArticle {
+                id: row.get(0)?,
+                composant_id: row.get(1)?,
+                designation: row.get(2)?,
+                stock: row.get(3)?,
+                quantite: row.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

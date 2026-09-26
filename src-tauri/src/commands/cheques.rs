@@ -10,7 +10,7 @@ pub fn get_cheques(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::Cheque>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "voir"))?;
     let mut stmt = conn.prepare(
@@ -23,21 +23,21 @@ pub fn get_cheques(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "numero": row.get::<_, String>(1)?,
-                "banque": row.get::<_, String>(2)?,
-                "tireur": row.get::<_, Option<String>>(3)?,
-                "montant": row.get::<_, f64>(4)?,
-                "date_emission": row.get::<_, String>(5)?,
-                "date_echeance": row.get::<_, String>(6)?,
-                "statut": row.get::<_, String>(7)?,
-                "ctype": row.get::<_, String>(8)?,
-                "client_id": row.get::<_, Option<i64>>(9)?,
-                "fournisseur_id": row.get::<_, Option<i64>>(10)?,
-                "client_nom": row.get::<_, Option<String>>(11)?,
-                "fournisseur_nom": row.get::<_, Option<String>>(12)?,
-            }))
+            Ok(super::contrats::Cheque {
+                id: row.get(0)?,
+                numero: row.get(1)?,
+                banque: row.get(2)?,
+                tireur: row.get(3)?,
+                montant: row.get(4)?,
+                date_emission: row.get(5)?,
+                date_echeance: row.get(6)?,
+                statut: row.get(7)?,
+                ctype: row.get(8)?,
+                client_id: row.get(9)?,
+                fournisseur_id: row.get(10)?,
+                client_nom: row.get(11)?,
+                fournisseur_nom: row.get(12)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

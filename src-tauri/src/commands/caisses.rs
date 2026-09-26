@@ -128,7 +128,7 @@ pub fn get_tresorerie(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::Tresorerie, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
@@ -144,26 +144,26 @@ pub fn get_tresorerie(
 
     let month_start = chrono::Local::now().format("%Y-%m-01 00:00:00").to_string();
 
-    let fetch_recettes = |since: &str| -> Result<serde_json::Value, String> {
+    let fetch_recettes = |since: &str| -> Result<super::contrats::RecettesPeriode, String> {
         let r = recettes_depuis(&conn, since)?;
-        Ok(serde_json::json!({
-            "especes": r.especes,
-            "cb": r.cb,
-            "cheque": r.cheque,
-            "virement": r.virement,
-            "total": round2(r.especes + r.cb + r.cheque + r.virement),
-        }))
+        Ok(super::contrats::RecettesPeriode {
+            especes: r.especes,
+            cb: r.cb,
+            cheque: r.cheque,
+            virement: r.virement,
+            total: round2(r.especes + r.cb + r.cheque + r.virement),
+        })
     };
 
     let jour = fetch_recettes(&today_start)?;
     let semaine = fetch_recettes(&week_start)?;
     let mois = fetch_recettes(&month_start)?;
 
-    Ok(serde_json::json!({
-        "jour": jour,
-        "semaine": semaine,
-        "mois": mois,
-    }))
+    Ok(super::contrats::Tresorerie {
+        jour,
+        semaine,
+        mois,
+    })
 }
 
 #[cfg(test)]

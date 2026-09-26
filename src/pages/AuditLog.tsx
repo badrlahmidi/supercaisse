@@ -9,17 +9,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/Card"
 import { Shield, Download } from "lucide-react"
 import { formatDate } from "@/lib/utils"
+import type { EntreeAudit } from "@/types/generated/EntreeAudit"
 
-interface AuditEntry {
-  id: number
-  date: string
-  utilisateur_id: number | null
-  action: string
-  detail: string | null
-  reference_type: string | null
-  reference_id: number | null
-  user_nom: string | null
-}
+type AuditEntry = EntreeAudit
 
 const ACTION_LABELS: Record<string, string> = {
   annuler_vente: "Annulation vente",

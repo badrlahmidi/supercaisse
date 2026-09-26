@@ -14,7 +14,7 @@ const mockCategories: Category[] = [
 ]
 
 const mockArticles: Article[] = [
-  { id: 1, code_barre: "123456789", designation: "Produit Test", prix_achat: 5, prix_vente: 10, tva: 20, stock: 100, stock_alerte: 10, categorie_id: 1, fournisseur_id: null, actif: true, categorie_nom: "Alimentation" },
+  { id: 1, code_barre: "123456789", designation: "Produit Test", prix_achat: 5, prix_vente: 10, tva: 20, stock: 100, stock_alerte: 10, categorie_id: 1, fournisseur_id: null, actif: true, categorie_nom: "Alimentation", fournisseur_nom: null, image_url: null, suivi_lot: false, prix_grossiste: null, est_kit: false, a_variantes: false },
 ]
 
 const mockLots: Record<number, ArticleLot[]> = {}

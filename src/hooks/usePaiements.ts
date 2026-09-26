@@ -1,16 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { PaiementClient } from "@/types/generated/PaiementClient"
 
-export interface Paiement {
-  id: number
-  client_id: number
-  client_nom: string
-  montant: number
-  type: string
-  reference: string | null
-  date: string
-}
+export type Paiement = PaiementClient
 
 export function usePaiements(clientId?: number | null) {
   return useQuery({

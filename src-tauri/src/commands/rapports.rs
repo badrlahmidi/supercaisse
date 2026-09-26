@@ -9,7 +9,7 @@ pub fn get_rapport_x(
     auth: State<AuthState>,
     token: String,
     session_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::RapportX, String> {
     let conn = db.lecture()?;
     let me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     super::sessions::verifier_session_propre(&conn, &me, session_id, "voir")?;
@@ -66,27 +66,27 @@ pub fn get_rapport_x(
         .map_err(|e| e.to_string())?;
     let par_mode = stmt
         .query_map(params![session_id], |r| {
-            Ok(serde_json::json!({
-                "mode": r.get::<_, String>(0)?,
-                "total": r.get::<_, f64>(1)?,
-                "count": r.get::<_, i64>(2)?
-            }))
+            Ok(super::contrats::TotalParMode {
+                mode: r.get(0)?,
+                total: r.get(1)?,
+                count: r.get(2)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({
-        "session_id": session_id,
-        "date_ouverture": date_ouverture,
-        "fond_initial": fond_initial,
-        "nb_ventes": nb_ventes,
-        "ca_total": ca_total,
-        "total_remises": total_remises,
-        "nb_annulations": nb_annulations,
-        "nb_articles_vendus": nb_articles_vendus,
-        "par_mode": par_mode,
-    }))
+    Ok(super::contrats::RapportX {
+        session_id,
+        date_ouverture,
+        fond_initial,
+        nb_ventes,
+        ca_total,
+        total_remises,
+        nb_annulations,
+        nb_articles_vendus,
+        par_mode,
+    })
 }
 
 #[tauri::command(async)]
@@ -96,7 +96,7 @@ pub fn get_rapport_detaille(
     token: String,
     debut: Option<String>,
     fin: Option<String>,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::RapportDetaille, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
@@ -185,11 +185,11 @@ pub fn get_rapport_detaille(
     let mut stmt = conn.prepare(&top_sql).map_err(|e| e.to_string())?;
     let top_articles = stmt
         .query_map(params_ref4.as_slice(), |r| {
-            Ok(serde_json::json!({
-                "designation": r.get::<_, String>(0)?,
-                "quantite": r.get::<_, f64>(1)?,
-                "total": r.get::<_, f64>(2)?
-            }))
+            Ok(super::contrats::TopArticle {
+                designation: r.get(0)?,
+                quantite: r.get(1)?,
+                total: r.get(2)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -211,12 +211,12 @@ pub fn get_rapport_detaille(
     let mut stmt2 = conn.prepare(&rotation_sql).map_err(|e| e.to_string())?;
     let rotation_stock = stmt2
         .query_map(params_ref5.as_slice(), |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_, i64>(0)?,
-                "designation": r.get::<_, String>(1)?,
-                "stock_actuel": r.get::<_, f64>(2)?,
-                "quantite_vendue": r.get::<_ , f64>(3)?
-            }))
+            Ok(super::contrats::RotationArticle {
+                id: r.get(0)?,
+                designation: r.get(1)?,
+                stock_actuel: r.get(2)?,
+                quantite_vendue: r.get::<_, f64>(3)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -235,11 +235,11 @@ pub fn get_rapport_detaille(
     let mut stmt3 = conn.prepare(&daily_sql).map_err(|e| e.to_string())?;
     let ventes_par_jour = stmt3
         .query_map(params_ref6.as_slice(), |r| {
-            Ok(serde_json::json!({
-                "jour": r.get::<_, String>(0)?,
-                "total": r.get::<_, f64>(1)?,
-                "nb": r.get::<_, i64>(2)?
-            }))
+            Ok(super::contrats::VentesJour {
+                jour: r.get(0)?,
+                total: r.get(1)?,
+                nb: r.get(2)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -258,25 +258,25 @@ pub fn get_rapport_detaille(
     let mut stmt4 = conn.prepare(&mode_sql).map_err(|e| e.to_string())?;
     let par_mode = stmt4
         .query_map(params_ref7.as_slice(), |r| {
-            Ok(serde_json::json!({
-                "mode": r.get::<_, String>(0)?,
-                "total": r.get::<_, f64>(1)?,
-                "nb": r.get::<_, i64>(2)?
-            }))
+            Ok(super::contrats::VentesParMode {
+                mode: r.get(0)?,
+                total: r.get(1)?,
+                nb: r.get(2)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({
-        "ca_total": ca_total,
-        "total_remises": total_remises,
-        "nb_ventes": nb_ventes,
-        "marge_brute": marge_brute,
-        "tva_collectee": tva_collectee,
-        "top_articles": top_articles,
-        "rotation_stock": rotation_stock,
-        "ventes_par_jour": ventes_par_jour,
-        "par_mode": par_mode,
-    }))
+    Ok(super::contrats::RapportDetaille {
+        ca_total,
+        total_remises,
+        nb_ventes,
+        marge_brute,
+        tva_collectee,
+        top_articles,
+        rotation_stock,
+        ventes_par_jour,
+        par_mode,
+    })
 }

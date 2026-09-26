@@ -11,7 +11,7 @@ pub fn get_magasins(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::Magasin>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
@@ -19,11 +19,11 @@ pub fn get_magasins(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "nom": row.get::<_, String>(1)?,
-                "adresse": row.get::<_, Option<String>>(2)?
-            }))
+            Ok(super::contrats::Magasin {
+                id: row.get(0)?,
+                nom: row.get(1)?,
+                adresse: row.get(2)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -116,7 +116,7 @@ pub fn get_transferts(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::TransfertResume>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
@@ -129,14 +129,14 @@ pub fn get_transferts(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, String>(1)?,
-                "statut": row.get::<_, String>(2)?,
-                "source_nom": row.get::<_, String>(3)?,
-                "dest_nom": row.get::<_, String>(4)?,
-                "utilisateur_nom": row.get::<_, Option<String>>(5)?
-            }))
+            Ok(super::contrats::TransfertResume {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                statut: row.get(2)?,
+                source_nom: row.get(3)?,
+                dest_nom: row.get(4)?,
+                utilisateur_nom: row.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -149,7 +149,7 @@ pub fn get_stock_par_magasin(
     auth: State<AuthState>,
     token: String,
     magasin_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::StockMagasin>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn.prepare(
@@ -161,13 +161,13 @@ pub fn get_stock_par_magasin(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![magasin_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "designation": row.get::<_, String>(1)?,
-                "code_barre": row.get::<_, Option<String>>(2)?,
-                "stock": row.get::<_, f64>(3)?,
-                "stock_alerte": row.get::<_, Option<f64>>(4)?
-            }))
+            Ok(super::contrats::StockMagasin {
+                id: row.get(0)?,
+                designation: row.get(1)?,
+                code_barre: row.get(2)?,
+                stock: row.get(3)?,
+                stock_alerte: row.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

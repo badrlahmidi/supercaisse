@@ -13,18 +13,9 @@ import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
+import type { AchatResume } from "@/types/generated/AchatResume"
 
-interface Achat {
-  id: number
-  date: string
-  fournisseur_id: number | null
-  reference: string | null
-  montant_total: number
-  statut: string
-  statut_livraison: string
-  statut_paiement: string
-  fournisseur_nom: string | null
-}
+type Achat = AchatResume
 
 type StatutRapprochement = "all" | "conforme" | "ecart" | "non_rapproche"
 

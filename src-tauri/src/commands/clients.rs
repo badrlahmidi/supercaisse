@@ -181,7 +181,7 @@ pub fn get_releve_client(
     auth: State<AuthState>,
     token: String,
     client_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::ReleveClient, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "voir"))?;
 
@@ -198,16 +198,16 @@ pub fn get_releve_client(
     ).map_err(|e| e.to_string())?;
     let ventes = stmt
         .query_map(params![client_id], |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_, i64>(0)?,
-                "date": r.get::<_, String>(1)?,
-                "numero_facture": r.get::<_, Option<String>>(2)?,
-                "montant_total": r.get::<_, f64>(3)?,
-                "montant_remise": r.get::<_, f64>(4)?,
-                "mode_paiement": r.get::<_, String>(5)?,
-                "statut": r.get::<_, String>(6)?,
-                "dtype": r.get::<_, Option<String>>(7)?
-            }))
+            Ok(super::contrats::VenteReleve {
+                id: r.get(0)?,
+                date: r.get(1)?,
+                numero_facture: r.get(2)?,
+                montant_total: r.get(3)?,
+                montant_remise: r.get(4)?,
+                mode_paiement: r.get(5)?,
+                statut: r.get(6)?,
+                dtype: r.get(7)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -222,26 +222,26 @@ pub fn get_releve_client(
         .map_err(|e| e.to_string())?;
     let paiements = stmt2
         .query_map(params![client_id], |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_, i64>(0)?,
-                "date": r.get::<_, String>(1)?,
-                "montant": r.get::<_, f64>(2)?,
-                "type": r.get::<_, String>(3)?,
-                "reference": r.get::<_, Option<String>>(4)?
-            }))
+            Ok(super::contrats::PaiementReleve {
+                id: r.get(0)?,
+                date: r.get(1)?,
+                montant: r.get(2)?,
+                r#type: r.get(3)?,
+                reference: r.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({
-        "client_id": client_id,
-        "nom": nom,
-        "credit_actuel": credit_actuel,
-        "credit_plafond": credit_plafond,
-        "ventes": ventes,
-        "paiements": paiements,
-    }))
+    Ok(super::contrats::ReleveClient {
+        client_id,
+        nom,
+        credit_actuel,
+        credit_plafond,
+        ventes,
+        paiements,
+    })
 }
 
 #[tauri::command(async)]
@@ -250,7 +250,7 @@ pub fn get_mouvements_fidelite(
     auth: State<AuthState>,
     token: String,
     client_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::MouvementFidelite>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("clients", "voir"))?;
     let mut stmt = conn.prepare(
@@ -263,15 +263,15 @@ pub fn get_mouvements_fidelite(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![client_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "client_id": row.get::<_, i64>(1)?,
-                "vente_id": row.get::<_, Option<i64>>(2)?,
-                "points": row.get::<_, f64>(3)?,
-                "mtype": row.get::<_, String>(4)?,
-                "date": row.get::<_, String>(5)?,
-                "numero_facture": row.get::<_, Option<String>>(6)?
-            }))
+            Ok(super::contrats::MouvementFidelite {
+                id: row.get(0)?,
+                client_id: row.get(1)?,
+                vente_id: row.get(2)?,
+                points: row.get(3)?,
+                mtype: row.get(4)?,
+                date: row.get(5)?,
+                numero_facture: row.get(6)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

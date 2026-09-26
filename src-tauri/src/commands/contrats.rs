@@ -311,6 +311,500 @@ pub struct SessionCaisse {
     pub magasin_id: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct AchatResume {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    #[ts(as = "Option<f64>")]
+    pub fournisseur_id: Option<i64>,
+    pub reference: Option<String>,
+    pub montant_total: f64,
+    pub statut: String,
+    pub fournisseur_nom: Option<String>,
+    pub statut_livraison: String,
+    pub statut_paiement: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct EntreeAudit {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    #[ts(as = "Option<f64>")]
+    pub utilisateur_id: Option<i64>,
+    pub action: String,
+    pub detail: Option<String>,
+    pub reference_type: Option<String>,
+    #[ts(as = "Option<f64>")]
+    pub reference_id: Option<i64>,
+    pub user_nom: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct Cheque {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub numero: String,
+    pub banque: String,
+    pub tireur: Option<String>,
+    pub montant: f64,
+    pub date_emission: String,
+    pub date_echeance: String,
+    pub statut: String,
+    pub ctype: String,
+    #[ts(as = "Option<f64>")]
+    pub client_id: Option<i64>,
+    #[ts(as = "Option<f64>")]
+    pub fournisseur_id: Option<i64>,
+    pub client_nom: Option<String>,
+    pub fournisseur_nom: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MouvementFidelite {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub client_id: i64,
+    #[ts(as = "Option<f64>")]
+    pub vente_id: Option<i64>,
+    pub points: f64,
+    pub mtype: String,
+    pub date: String,
+    pub numero_facture: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ComposantArticle {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub composant_id: i64,
+    pub designation: String,
+    pub stock: f64,
+    pub quantite: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct InventaireResume {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date_debut: String,
+    pub date_fin: Option<String>,
+    pub statut: String,
+    #[ts(as = "f64")]
+    pub magasin_id: i64,
+    pub magasin_nom: String,
+    pub utilisateur_nom: Option<String>,
+    #[ts(as = "f64")]
+    pub nb_articles: i64,
+    #[ts(as = "f64")]
+    pub nb_comptes: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct LotArticle {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub numero_lot: Option<String>,
+    pub date_peremption: Option<String>,
+    pub quantite: f64,
+    pub date_reception: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct LotPeremption {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub article_id: i64,
+    pub designation: String,
+    pub numero_lot: Option<String>,
+    pub date_peremption: String,
+    pub quantite: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct Magasin {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub nom: String,
+    pub adresse: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TransfertResume {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    pub statut: String,
+    pub source_nom: String,
+    pub dest_nom: String,
+    pub utilisateur_nom: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct StockMagasin {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub designation: String,
+    pub code_barre: Option<String>,
+    pub stock: f64,
+    pub stock_alerte: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PaiementClient {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub client_id: i64,
+    pub date: String,
+    pub montant: f64,
+    pub r#type: String,
+    pub reference: Option<String>,
+    pub client_nom: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ArticleAlerte {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub designation: String,
+    pub stock: f64,
+    pub stock_alerte: f64,
+    pub categorie_nom: Option<String>,
+    pub fournisseur_nom: Option<String>,
+    #[ts(as = "Option<f64>")]
+    pub fournisseur_id: Option<i64>,
+    pub prix_achat: f64,
+    #[ts(as = "f64")]
+    pub suggestion_qte: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TableRestaurant {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub nom: String,
+    pub statut: String,
+    pub ticket_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct VarianteArticle {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub taille: Option<String>,
+    pub couleur: Option<String>,
+    pub code_barre: Option<String>,
+    pub stock_dedie: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ArticleCatalogue {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub code_barre: Option<String>,
+    pub designation: String,
+    pub prix_achat: f64,
+    pub prix_vente: f64,
+    pub tva: f64,
+    pub stock: f64,
+    pub stock_alerte: Option<f64>,
+    #[ts(as = "Option<f64>")]
+    pub categorie_id: Option<i64>,
+    #[ts(as = "Option<f64>")]
+    pub fournisseur_id: Option<i64>,
+    pub actif: bool,
+    pub image_url: Option<String>,
+    pub categorie_nom: Option<String>,
+    pub fournisseur_nom: Option<String>,
+    pub suivi_lot: bool,
+    pub prix_grossiste: Option<f64>,
+    pub est_kit: bool,
+    pub a_variantes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PrixFournisseur {
+    #[ts(as = "f64")]
+    pub fournisseur_id: i64,
+    pub fournisseur_nom: String,
+    pub prix_unitaire: f64,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ComparaisonArticle {
+    #[ts(as = "f64")]
+    pub article_id: i64,
+    pub designation: String,
+    pub code_barre: Option<String>,
+    pub fournisseurs: Vec<PrixFournisseur>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PermissionRole {
+    pub role: String,
+    pub module: String,
+    pub action: String,
+    pub allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct VarianteScannee {
+    #[ts(as = "f64")]
+    pub variante_id: i64,
+    #[ts(as = "f64")]
+    pub article_id: i64,
+    pub taille: Option<String>,
+    pub couleur: Option<String>,
+    pub stock_dedie: f64,
+    pub designation: String,
+    pub prix_vente: f64,
+    pub tva: f64,
+    pub actif: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct FichierSauvegarde {
+    pub chemin: String,
+    pub nom: String,
+    #[ts(as = "f64")]
+    pub taille: u64,
+    pub date: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct RecettesPeriode {
+    pub especes: f64,
+    pub cb: f64,
+    pub cheque: f64,
+    pub virement: f64,
+    pub total: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct Tresorerie {
+    pub jour: RecettesPeriode,
+    pub semaine: RecettesPeriode,
+    pub mois: RecettesPeriode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct VenteReleve {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    pub numero_facture: Option<String>,
+    pub montant_total: f64,
+    pub montant_remise: f64,
+    pub mode_paiement: String,
+    pub statut: String,
+    pub dtype: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PaiementReleve {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date: String,
+    pub montant: f64,
+    pub r#type: String,
+    pub reference: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ReleveClient {
+    #[ts(as = "f64")]
+    pub client_id: i64,
+    pub nom: String,
+    pub credit_actuel: f64,
+    pub credit_plafond: f64,
+    pub ventes: Vec<VenteReleve>,
+    pub paiements: Vec<PaiementReleve>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct LigneInventaire {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub article_id: i64,
+    pub designation: String,
+    pub code_barre: Option<String>,
+    pub stock_theorique: f64,
+    pub stock_compte: Option<f64>,
+    pub ecart: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct InventaireDetail {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub date_debut: String,
+    pub statut: String,
+    #[ts(as = "f64")]
+    pub magasin_id: i64,
+    pub lignes: Vec<LigneInventaire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct InventaireCree {
+    #[ts(as = "f64")]
+    pub id: i64,
+    #[ts(as = "f64")]
+    pub nb_articles: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TotalParMode {
+    pub mode: String,
+    pub total: f64,
+    #[ts(as = "f64")]
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct RapportX {
+    #[ts(as = "f64")]
+    pub session_id: i64,
+    pub date_ouverture: String,
+    pub fond_initial: f64,
+    #[ts(as = "f64")]
+    pub nb_ventes: i64,
+    pub ca_total: f64,
+    pub total_remises: f64,
+    #[ts(as = "f64")]
+    pub nb_annulations: i64,
+    pub nb_articles_vendus: f64,
+    pub par_mode: Vec<TotalParMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct TopArticle {
+    pub designation: String,
+    pub quantite: f64,
+    pub total: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct RotationArticle {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub designation: String,
+    pub stock_actuel: f64,
+    pub quantite_vendue: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct VentesJour {
+    pub jour: String,
+    pub total: f64,
+    #[ts(as = "f64")]
+    pub nb: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct VentesParMode {
+    pub mode: String,
+    pub total: f64,
+    #[ts(as = "f64")]
+    pub nb: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct RapportDetaille {
+    pub ca_total: f64,
+    pub total_remises: f64,
+    #[ts(as = "f64")]
+    pub nb_ventes: i64,
+    pub marge_brute: f64,
+    pub tva_collectee: f64,
+    pub top_articles: Vec<TopArticle>,
+    pub rotation_stock: Vec<RotationArticle>,
+    pub ventes_par_jour: Vec<VentesJour>,
+    pub par_mode: Vec<VentesParMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ArticleVendu {
+    pub designation: String,
+    pub quantite: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MeilleurClient {
+    pub nom: String,
+    pub depense: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MontantJour {
+    pub jour: String,
+    pub montant: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct StatsTableauDeBord {
+    pub ca_7_jours: Vec<MontantJour>,
+    pub total_ventes_30j: f64,
+    #[ts(as = "f64")]
+    pub nb_articles: i64,
+    #[ts(as = "f64")]
+    pub stock_alerte: i64,
+    pub credit_total: f64,
+    #[ts(as = "f64")]
+    pub nb_clients: i64,
+    pub ca_jour: f64,
+    pub ca_mois: f64,
+    pub benefice_mois: f64,
+    pub top_articles: Vec<ArticleVendu>,
+    pub top_clients: Vec<MeilleurClient>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,10 +857,8 @@ mod tests {
         .is_err());
     }
 
-    const COMMANDES_NON_TYPEES_MAX: usize = 27;
-
     #[test]
-    fn test_aucune_nouvelle_commande_non_typee() {
+    fn test_aucune_commande_non_typee() {
         let dossier = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands");
         let mut non_typees = Vec::new();
         for entree in std::fs::read_dir(dossier).unwrap() {
@@ -386,10 +878,8 @@ mod tests {
             }
         }
         assert!(
-            non_typees.len() <= COMMANDES_NON_TYPEES_MAX,
-            "{} commandes utilisent serde_json::Value (maximum {}) : typez les nouvelles commandes dans contrats.rs. {:?}",
-            non_typees.len(),
-            COMMANDES_NON_TYPEES_MAX,
+            non_typees.is_empty(),
+            "Commandes utilisant serde_json::Value : typez-les dans contrats.rs. {:?}",
             non_typees
         );
     }

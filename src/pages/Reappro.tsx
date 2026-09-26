@@ -9,18 +9,7 @@ import { Loader2, Download, ShoppingBag, Package } from "lucide-react"
 import { formatCurrency, exportCSV } from "@/lib/utils"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-
-interface ArticleAlerte {
-  id: number
-  designation: string
-  stock: number
-  stock_alerte: number
-  categorie_nom: string | null
-  fournisseur_nom: string | null
-  fournisseur_id: number | null
-  prix_achat: number
-  suggestion_qte: number
-}
+import type { ArticleAlerte } from "@/types/generated/ArticleAlerte"
 
 function getUrgencyBadge(stock: number, stockAlerte: number) {
   if (stock <= 0) {

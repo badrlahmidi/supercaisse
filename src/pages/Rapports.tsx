@@ -12,18 +12,7 @@ import { Download, TrendingUp, DollarSign, ReceiptText, Percent, Loader2 } from 
 import PageHeader from "@/components/PageHeader"
 import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { jsPDF } from "jspdf"
-
-interface RapportDetaille {
-  ca_total: number
-  total_remises: number
-  nb_ventes: number
-  marge_brute: number
-  tva_collectee: number
-  top_articles: Array<{ designation: string; quantite: number; total: number }>
-  rotation_stock: Array<{ designation: string; quantite_vendue: number; stock_actuel: number }>
-  ventes_par_jour: Array<{ jour: string; total: number; nb: number }>
-  par_mode: Array<{ mode: string; total: number; nb: number }>
-}
+import type { RapportDetaille } from "@/types/generated/RapportDetaille"
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)

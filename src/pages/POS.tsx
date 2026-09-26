@@ -28,21 +28,12 @@ import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
 import type { Article, ArticleVariante } from "@/types"
 import { estFiscal, mentionsVendeurManquantes } from "@/lib/fiscal"
 import type { LigneVenteSaisie } from "@/types/generated/LigneVenteSaisie"
+import type { VarianteScannee } from "@/types/generated/VarianteScannee"
+import type { Magasin } from "@/types/generated/Magasin"
 import type { ModePaiement } from "@/types/generated/ModePaiement"
 import type { TypeDocument } from "@/types/generated/TypeDocument"
 import type { VenteCreee } from "@/types/generated/VenteCreee"
-
-interface RapportX {
-  session_id: number
-  date_ouverture: string
-  fond_initial: number
-  nb_ventes: number
-  ca_total: number
-  total_remises: number
-  nb_annulations: number
-  nb_articles_vendus: number
-  par_mode: { mode: string; total: number; count: number }[]
-}
+import type { RapportX } from "@/types/generated/RapportX"
 
 const SHORTCUTS = [
   { key: "F1", label: "Recherche" },
@@ -88,7 +79,7 @@ export default function POS() {
 
   const { data: magasins = [] } = useQuery({
     queryKey: ["magasins"],
-    queryFn: () => invoke<{ id: number; nom: string; adresse: string | null }[]>("get_magasins"),
+    queryFn: () => invoke<Magasin[]>("get_magasins"),
   })
 
   const cart = useCartStore((s) => s.items)
@@ -251,10 +242,7 @@ export default function POS() {
       return true
     }
     try {
-      const found = await invoke<{
-        variante_id: number; article_id: number; taille: string | null; couleur: string | null
-        stock_dedie: number; designation: string; prix_vente: number; tva: number; actif: boolean
-      } | null>("find_variante_by_barcode", { code_barre: code })
+      const found = await invoke<VarianteScannee | null>("find_variante_by_barcode", { code_barre: code })
       if (found && found.actif) {
         const articleShim: Article = {
           id: found.article_id,
@@ -268,6 +256,13 @@ export default function POS() {
           stock: found.stock_dedie,
           stock_alerte: null,
           categorie_id: null,
+          image_url: null,
+          categorie_nom: null,
+          fournisseur_nom: null,
+          suivi_lot: false,
+          prix_grossiste: null,
+          est_kit: false,
+          a_variantes: true,
         }
         const varianteShim: ArticleVariante = {
           id: found.variante_id,

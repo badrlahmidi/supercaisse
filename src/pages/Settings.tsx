@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/ui/Table"
 import { Badge } from "@/ui/Badge"
 import { useForm, type DefaultValues } from "react-hook-form"
+import type { PermissionRole } from "@/types/generated/PermissionRole"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -21,7 +22,7 @@ import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye
 import { useI18nStore } from "@/store/i18n"
 import { iceSaisieValide, ifSaisieValide } from "@/lib/fiscal"
 import MisesAJour from "@/components/MisesAJour"
-
+import type { FichierSauvegarde } from "@/types/generated/FichierSauvegarde"
 
 interface User {
   id: number
@@ -84,12 +85,7 @@ const settingsSchema = z.object({
 
 type SettingsForm = z.infer<typeof settingsSchema>
 
-interface SauvegardeDisponible {
-  chemin: string
-  nom: string
-  taille: number
-  date: string | null
-}
+type SauvegardeDisponible = FichierSauvegarde
 
 const VALEURS_PAR_DEFAUT: DefaultValues<SettingsForm> = {
   shop_name: "SuperCaisse",
@@ -201,7 +197,7 @@ export default function Settings() {
 
   const { data: permissionsData } = useQuery({
     queryKey: ["permissions", permRole],
-    queryFn: () => invoke<Array<{ role: string; module: string; action: string; allowed: boolean }>>("get_permissions", { role: permRole }),
+    queryFn: () => invoke<PermissionRole[]>("get_permissions", { role: permRole }),
     enabled: permRole !== "admin",
   })
 

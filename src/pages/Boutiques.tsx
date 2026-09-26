@@ -13,12 +13,7 @@ import { Plus, Store, TrendingUp, Package, Users, MapPin, Edit, Trash2 } from "l
 import PageHeader from "@/components/PageHeader"
 import { formatCurrency } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
-
-interface Magasin {
-  id: number
-  nom: string
-  adresse: string | null
-}
+import type { Magasin } from "@/types/generated/Magasin"
 
 export default function Boutiques() {
   const [showForm, setShowForm] = useState(false)

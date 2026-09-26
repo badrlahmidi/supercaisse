@@ -87,7 +87,7 @@ pub fn get_achats(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::AchatResume>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
     let mut stmt = conn.prepare(
@@ -97,17 +97,17 @@ pub fn get_achats(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "date": row.get::<_, String>(1)?,
-                "fournisseur_id": row.get::<_, Option<i64>>(2)?,
-                "reference": row.get::<_, Option<String>>(3)?,
-                "montant_total": row.get::<_, f64>(4)?,
-                "statut": row.get::<_, String>(5)?,
-                "fournisseur_nom": row.get::<_, Option<String>>(6)?,
-                "statut_livraison": row.get::<_, String>(7)?,
-                "statut_paiement": row.get::<_, String>(8)?,
-            }))
+            Ok(super::contrats::AchatResume {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                fournisseur_id: row.get(2)?,
+                reference: row.get(3)?,
+                montant_total: row.get(4)?,
+                statut: row.get(5)?,
+                fournisseur_nom: row.get(6)?,
+                statut_livraison: row.get(7)?,
+                statut_paiement: row.get(8)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -182,7 +182,7 @@ pub fn compare_fournisseur_prices(
     auth: State<AuthState>,
     token: String,
     article_id: Option<i64>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::ComparaisonArticle>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
 
@@ -222,34 +222,26 @@ pub fn compare_fournisseur_prices(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let mut articles_map: std::collections::BTreeMap<i64, serde_json::Value> =
+    let mut articles_map: std::collections::BTreeMap<i64, super::contrats::ComparaisonArticle> =
         std::collections::BTreeMap::new();
 
     for (aid, designation, code_barre, fid, fournisseur_nom, prix, date) in all_rows {
-        let entry = articles_map.entry(aid).or_insert_with(|| {
-            serde_json::json!({
-                "article_id": aid,
-                "designation": designation,
-                "code_barre": code_barre,
-                "fournisseurs": []
-            })
-        });
-
-        let empty = vec![];
-        let fournisseurs = entry["fournisseurs"].as_array().unwrap_or(&empty);
-        let already_has = fournisseurs
-            .iter()
-            .any(|f| f["fournisseur_id"].as_i64() == Some(fid));
-
-        if !already_has {
-            if let Some(arr) = entry["fournisseurs"].as_array_mut() {
-                arr.push(serde_json::json!({
-                    "fournisseur_id": fid,
-                    "fournisseur_nom": fournisseur_nom,
-                    "prix_unitaire": prix,
-                    "date": date
-                }));
-            }
+        let entry =
+            articles_map
+                .entry(aid)
+                .or_insert_with(|| super::contrats::ComparaisonArticle {
+                    article_id: aid,
+                    designation,
+                    code_barre,
+                    fournisseurs: Vec::new(),
+                });
+        if !entry.fournisseurs.iter().any(|f| f.fournisseur_id == fid) {
+            entry.fournisseurs.push(super::contrats::PrixFournisseur {
+                fournisseur_id: fid,
+                fournisseur_nom,
+                prix_unitaire: prix,
+                date,
+            });
         }
     }
 

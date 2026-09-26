@@ -41,7 +41,7 @@ pub fn get_article_variantes(
     auth: State<AuthState>,
     token: String,
     article_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::VarianteArticle>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn.prepare(
@@ -49,13 +49,13 @@ pub fn get_article_variantes(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![article_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "taille": row.get::<_, Option<String>>(1)?,
-                "couleur": row.get::<_, Option<String>>(2)?,
-                "code_barre": row.get::<_, Option<String>>(3)?,
-                "stock_dedie": row.get::<_, f64>(4)?,
-            }))
+            Ok(super::contrats::VarianteArticle {
+                id: row.get(0)?,
+                taille: row.get(1)?,
+                couleur: row.get(2)?,
+                code_barre: row.get(3)?,
+                stock_dedie: row.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -138,7 +138,7 @@ pub fn find_variante_by_barcode(
     auth: State<AuthState>,
     token: String,
     code_barre: String,
-) -> Result<Option<serde_json::Value>, String> {
+) -> Result<Option<super::contrats::VarianteScannee>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     conn.query_row(
@@ -149,17 +149,17 @@ pub fn find_variante_by_barcode(
          WHERE v.code_barre = ?1",
         params![code_barre],
         |row| {
-            Ok(serde_json::json!({
-                "variante_id": row.get::<_, i64>(0)?,
-                "article_id": row.get::<_, i64>(1)?,
-                "taille": row.get::<_, Option<String>>(2)?,
-                "couleur": row.get::<_, Option<String>>(3)?,
-                "stock_dedie": row.get::<_, f64>(4)?,
-                "designation": row.get::<_, String>(5)?,
-                "prix_vente": row.get::<_, f64>(6)?,
-                "tva": row.get::<_, f64>(7)?,
-                "actif": row.get::<_, i32>(8)? != 0,
-            }))
+            Ok(super::contrats::VarianteScannee {
+                variante_id: row.get(0)?,
+                article_id: row.get(1)?,
+                taille: row.get(2)?,
+                couleur: row.get(3)?,
+                stock_dedie: row.get(4)?,
+                designation: row.get(5)?,
+                prix_vente: row.get(6)?,
+                tva: row.get(7)?,
+                actif: row.get::<_, i32>(8)? != 0,
+            })
         },
     )
     .optional()

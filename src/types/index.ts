@@ -1,3 +1,9 @@
+import type { ArticleCatalogue } from "@/types/generated/ArticleCatalogue"
+import type { ComposantArticle } from "@/types/generated/ComposantArticle"
+import type { LotArticle } from "@/types/generated/LotArticle"
+import type { Magasin } from "@/types/generated/Magasin"
+import type { TableRestaurant } from "@/types/generated/TableRestaurant"
+import type { VarianteArticle } from "@/types/generated/VarianteArticle"
 export interface User {
   id: number
   login: string
@@ -6,51 +12,13 @@ export interface User {
   must_change_password?: boolean
 }
 
-export interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  description?: string | null
-  image_url?: string | null
-  prix_achat: number
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  fournisseur_id: number | null
-  actif: boolean
-  categorie_nom?: string
-  fournisseur_nom?: string
-  suivi_lot?: boolean
-  prix_grossiste?: number | null
-  est_kit?: boolean
-  a_variantes?: boolean
-}
+export type Article = ArticleCatalogue
 
-export interface ArticleVariante {
-  id: number
-  taille: string | null
-  couleur: string | null
-  code_barre: string | null
-  stock_dedie: number
-}
+export type ArticleVariante = VarianteArticle
 
-export interface ArticleComposant {
-  id: number
-  composant_id: number
-  designation: string
-  stock: number
-  quantite: number
-}
+export type ArticleComposant = ComposantArticle
 
-export interface ArticleLot {
-  id: number
-  numero_lot: string | null
-  date_peremption: string | null
-  quantite: number
-  date_reception: string
-}
+export type ArticleLot = LotArticle
 
 export interface Client {
   id: number
@@ -107,17 +75,8 @@ export interface Settings {
   doc_primary_color: string | null
 }
 
-export interface TableResto {
-  id: number
-  nom: string
-  statut: "libre" | "occupee"
-  ticket_id: string | null
-}
+export type TableResto = TableRestaurant
 
-export interface Magasin {
-  id: number
-  nom: string
-  adresse: string | null
-}
+export type { Magasin }
 
 export type Saisie<T> = { [K in keyof T]?: T[K] | null }

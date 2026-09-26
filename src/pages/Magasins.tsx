@@ -15,29 +15,13 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import PageHeader from "@/components/PageHeader"
 import { Store, Plus, Pencil, Trash2, AlertTriangle, ArrowRightLeft, Loader2, Package } from "lucide-react"
+import type { Magasin } from "@/types/generated/Magasin"
+import type { TransfertResume } from "@/types/generated/TransfertResume"
+import type { StockMagasin } from "@/types/generated/StockMagasin"
 
-interface Magasin {
-  id: number
-  nom: string
-  adresse: string | null
-}
+type Transfert = TransfertResume
 
-interface Transfert {
-  id: number
-  date: string
-  statut: string
-  source_nom: string
-  dest_nom: string
-  utilisateur_nom: string | null
-}
-
-interface StockLine {
-  id: number
-  designation: string
-  code_barre: string | null
-  stock: number
-  stock_alerte: number | null
-}
+type StockLine = StockMagasin
 
 const magasinSchema = z.object({
   nom: z.string().min(1, "Nom requis"),

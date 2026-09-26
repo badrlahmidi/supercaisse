@@ -11,7 +11,7 @@ pub fn create_inventaire(
     auth: State<AuthState>,
     token: String,
     magasin_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::InventaireCree, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "creer"))?;
     create_inventaire_impl(&mut conn, magasin_id, me.user_id)
@@ -21,7 +21,7 @@ pub(crate) fn create_inventaire_impl(
     conn: &mut Connection,
     magasin_id: i64,
     utilisateur_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::InventaireCree, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let en_cours: Option<i64> = tx
         .query_row(
@@ -60,7 +60,10 @@ pub(crate) fn create_inventaire_impl(
         Some(inv_id),
     )?;
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "id": inv_id, "nb_articles": nb }))
+    Ok(super::contrats::InventaireCree {
+        id: inv_id,
+        nb_articles: nb,
+    })
 }
 
 #[tauri::command(async)]
@@ -69,7 +72,7 @@ pub fn get_inventaire(
     auth: State<AuthState>,
     token: String,
     inventaire_id: i64,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::InventaireDetail, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "voir"))?;
 
@@ -90,27 +93,27 @@ pub fn get_inventaire(
     ).map_err(|e| e.to_string())?;
     let lignes = stmt
         .query_map(params![inventaire_id], |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_, i64>(0)?,
-                "article_id": r.get::<_, i64>(1)?,
-                "designation": r.get::<_, String>(2)?,
-                "code_barre": r.get::<_, Option<String>>(3)?,
-                "stock_theorique": r.get::<_, f64>(4)?,
-                "stock_compte": r.get::<_, Option<f64>>(5)?,
-                "ecart": r.get::<_, Option<f64>>(6)?
-            }))
+            Ok(super::contrats::LigneInventaire {
+                id: r.get(0)?,
+                article_id: r.get(1)?,
+                designation: r.get(2)?,
+                code_barre: r.get(3)?,
+                stock_theorique: r.get(4)?,
+                stock_compte: r.get(5)?,
+                ecart: r.get(6)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({
-        "id": inventaire_id,
-        "date_debut": date_debut,
-        "statut": statut,
-        "magasin_id": magasin_id,
-        "lignes": lignes,
-    }))
+    Ok(super::contrats::InventaireDetail {
+        id: inventaire_id,
+        date_debut,
+        statut,
+        magasin_id,
+        lignes,
+    })
 }
 
 #[tauri::command(async)]
@@ -118,7 +121,7 @@ pub fn get_inventaires(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::InventaireResume>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("inventaire", "voir"))?;
     let mut stmt = conn.prepare(
@@ -132,17 +135,17 @@ pub fn get_inventaires(
     ).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_, i64>(0)?,
-                "date_debut": r.get::<_, String>(1)?,
-                "date_fin": r.get::<_, Option<String>>(2)?,
-                "statut": r.get::<_, String>(3)?,
-                "magasin_id": r.get::<_, i64>(4)?,
-                "magasin_nom": r.get::<_, String>(5)?,
-                "utilisateur_nom": r.get::<_, Option<String>>(6)?,
-                "nb_articles": r.get::<_, i64>(7)?,
-                "nb_comptes": r.get::<_, i64>(8)?
-            }))
+            Ok(super::contrats::InventaireResume {
+                id: r.get(0)?,
+                date_debut: r.get(1)?,
+                date_fin: r.get(2)?,
+                statut: r.get(3)?,
+                magasin_id: r.get(4)?,
+                magasin_nom: r.get(5)?,
+                utilisateur_nom: r.get(6)?,
+                nb_articles: r.get(7)?,
+                nb_comptes: r.get(8)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -329,9 +332,7 @@ mod tests {
     #[test]
     fn test_ventes_pendant_l_inventaire_conservees() {
         let mut conn = setup();
-        let inv = create_inventaire_impl(&mut conn, 1, 1).unwrap()["id"]
-            .as_i64()
-            .unwrap();
+        let inv = create_inventaire_impl(&mut conn, 1, 1).unwrap().id;
         vendre(&mut conn, 5.0);
         update_inventaire_ligne_impl(&conn, ligne(&conn, inv), 43.0).unwrap();
         vendre(&mut conn, 3.0);
@@ -354,9 +355,7 @@ mod tests {
     #[test]
     fn test_inventaire_valide_verrouille() {
         let mut conn = setup();
-        let inv = create_inventaire_impl(&mut conn, 1, 1).unwrap()["id"]
-            .as_i64()
-            .unwrap();
+        let inv = create_inventaire_impl(&mut conn, 1, 1).unwrap().id;
         let l = ligne(&conn, inv);
         update_inventaire_ligne_impl(&conn, l, 48.0).unwrap();
         valider_inventaire_impl(&mut conn, inv, 1).unwrap();
@@ -368,9 +367,7 @@ mod tests {
     #[test]
     fn test_controles() {
         let mut conn = setup();
-        let inv = create_inventaire_impl(&mut conn, 1, 1).unwrap()["id"]
-            .as_i64()
-            .unwrap();
+        let inv = create_inventaire_impl(&mut conn, 1, 1).unwrap().id;
         assert!(create_inventaire_impl(&mut conn, 1, 1)
             .unwrap_err()
             .contains("déjà en cours"));

@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import ChangePasswordRequired from "@/components/ChangePasswordRequired"
 import { accesAutorise, routeAccueil } from "@/routes/acces"
 import { basculerPanier } from "@/store/cart"
+import type { PermissionRole } from "@/types/generated/PermissionRole"
 
 export interface User {
   id: number
@@ -50,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadPermissions = useCallback(async (role: string) => {
     try {
-      const rows = await invoke<Array<{ module: string; action: string; allowed: boolean }>>("get_permissions", { role })
+      const rows = await invoke<PermissionRole[]>("get_permissions", { role })
       setPermissions(transformPermissions(rows))
     } catch {
       setPermissions({})

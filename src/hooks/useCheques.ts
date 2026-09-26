@@ -1,22 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { Cheque } from "@/types/generated/Cheque"
 
-export interface Cheque {
-  id: number
-  numero: string
-  banque: string
-  tireur: string | null
-  montant: number
-  date_emission: string
-  date_echeance: string
-  statut: string
-  ctype: string
-  client_id: number | null
-  fournisseur_id: number | null
-  client_nom: string | null
-  fournisseur_nom: string | null
-}
+export type { Cheque }
 
 export function useCheques() {
   return useQuery({

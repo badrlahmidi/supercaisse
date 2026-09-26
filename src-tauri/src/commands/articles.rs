@@ -12,7 +12,7 @@ pub fn get_articles(
     auth: State<AuthState>,
     token: String,
     recherche: Option<String>,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::ArticleCatalogue>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let image_col = "a.image_url";
@@ -50,26 +50,26 @@ pub fn get_articles(
             let suivi_lot_int: Option<i32> = row.get(14)?;
             let est_kit_int: Option<i32> = row.get(16)?;
             let a_variantes_int: i32 = row.get(17)?;
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "code_barre": row.get::<_, Option<String>>(1)?,
-                "designation": row.get::<_, String>(2)?,
-                "prix_achat": row.get::<_, f64>(3)?,
-                "prix_vente": row.get::<_, f64>(4)?,
-                "tva": row.get::<_, f64>(5)?,
-                "stock": row.get::<_, f64>(6)?,
-                "stock_alerte": row.get::<_, Option<f64>>(7)?,
-                "categorie_id": row.get::<_, Option<i64>>(8)?,
-                "fournisseur_id": row.get::<_, Option<i64>>(9)?,
-                "actif": actif_int != 0,
-                "image_url": row.get::<_, Option<String>>(11)?,
-                "categorie_nom": row.get::<_, Option<String>>(12)?,
-                "fournisseur_nom": row.get::<_, Option<String>>(13)?,
-                "suivi_lot": suivi_lot_int.unwrap_or(0) != 0,
-                "prix_grossiste": row.get::<_, Option<f64>>(15)?,
-                "est_kit": est_kit_int.unwrap_or(0) != 0,
-                "a_variantes": a_variantes_int != 0,
-            }))
+            Ok(super::contrats::ArticleCatalogue {
+                id: row.get(0)?,
+                code_barre: row.get(1)?,
+                designation: row.get(2)?,
+                prix_achat: row.get(3)?,
+                prix_vente: row.get(4)?,
+                tva: row.get(5)?,
+                stock: row.get(6)?,
+                stock_alerte: row.get(7)?,
+                categorie_id: row.get(8)?,
+                fournisseur_id: row.get(9)?,
+                actif: actif_int != 0,
+                image_url: row.get(11)?,
+                categorie_nom: row.get(12)?,
+                fournisseur_nom: row.get(13)?,
+                suivi_lot: suivi_lot_int.unwrap_or(0) != 0,
+                prix_grossiste: row.get(15)?,
+                est_kit: est_kit_int.unwrap_or(0) != 0,
+                a_variantes: a_variantes_int != 0,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

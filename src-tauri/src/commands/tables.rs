@@ -8,7 +8,7 @@ pub fn get_tables(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::TableRestaurant>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
     let mut stmt = conn
@@ -16,12 +16,12 @@ pub fn get_tables(
         .map_err(|e| e.to_string())?;
     let tables = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "nom": row.get::<_, String>(1)?,
-                "statut": row.get::<_, String>(2)?,
-                "ticket_id": row.get::<_, Option<String>>(3)?,
-            }))
+            Ok(super::contrats::TableRestaurant {
+                id: row.get(0)?,
+                nom: row.get(1)?,
+                statut: row.get(2)?,
+                ticket_id: row.get(3)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()

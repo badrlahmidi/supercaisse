@@ -18,20 +18,7 @@ import { formatCurrency, formatDateTime } from "@/lib/utils"
 import { XCircle, Monitor, Loader2, Banknote, CreditCard, Landmark, ArrowRightLeft } from "lucide-react"
 import { sommeDH } from "@/lib/totaux"
 import type { SessionSupervision } from "@/types/generated/SessionSupervision"
-
-interface TresoreriePeriode {
-  especes: number
-  cb: number
-  cheque: number
-  virement: number
-  total: number
-}
-
-interface Tresorerie {
-  jour: TresoreriePeriode
-  semaine: TresoreriePeriode
-  mois: TresoreriePeriode
-}
+import type { Tresorerie } from "@/types/generated/Tresorerie"
 
 const closeSchema = z.object({
   total_especes_declare: z.coerce.number().min(0, "Le montant doit être positif"),

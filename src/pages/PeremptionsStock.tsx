@@ -11,15 +11,7 @@ import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatDate, cn } from "@/lib/utils"
-
-interface LotPeremption {
-  id: number
-  article_id: number
-  designation: string
-  numero_lot: string | null
-  date_peremption: string
-  quantite: number
-}
+import type { LotPeremption } from "@/types/generated/LotPeremption"
 
 export default function PeremptionsStock() {
   const [horizon, setHorizon] = useState("30")

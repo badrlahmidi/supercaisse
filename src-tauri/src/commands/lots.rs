@@ -42,7 +42,7 @@ pub fn get_article_lots(
     auth: State<AuthState>,
     token: String,
     article_id: i64,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::LotArticle>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn
@@ -54,13 +54,13 @@ pub fn get_article_lots(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![article_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "numero_lot": row.get::<_, Option<String>>(1)?,
-                "date_peremption": row.get::<_, Option<String>>(2)?,
-                "quantite": row.get::<_, f64>(3)?,
-                "date_reception": row.get::<_, String>(4)?,
-            }))
+            Ok(super::contrats::LotArticle {
+                id: row.get(0)?,
+                numero_lot: row.get(1)?,
+                date_peremption: row.get(2)?,
+                quantite: row.get(3)?,
+                date_reception: row.get(4)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -73,7 +73,7 @@ pub fn get_lots_peremption_proche(
     auth: State<AuthState>,
     token: String,
     jours: i64,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::LotPeremption>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("stock", "voir"))?;
     let mut stmt = conn
@@ -88,14 +88,14 @@ pub fn get_lots_peremption_proche(
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![jours.to_string()], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "article_id": row.get::<_, i64>(1)?,
-                "designation": row.get::<_, String>(2)?,
-                "numero_lot": row.get::<_, Option<String>>(3)?,
-                "date_peremption": row.get::<_, String>(4)?,
-                "quantite": row.get::<_, f64>(5)?,
-            }))
+            Ok(super::contrats::LotPeremption {
+                id: row.get(0)?,
+                article_id: row.get(1)?,
+                designation: row.get(2)?,
+                numero_lot: row.get(3)?,
+                date_peremption: row.get(4)?,
+                quantite: row.get(5)?,
+            })
         })
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()

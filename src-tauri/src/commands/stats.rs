@@ -7,7 +7,7 @@ pub fn get_stats(
     db: State<DbState>,
     auth: State<AuthState>,
     token: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<super::contrats::StatsTableauDeBord, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
 
@@ -61,10 +61,10 @@ pub fn get_stats(
     ")).map_err(|e| e.to_string())?;
     let top_articles = stmt
         .query_map([], |r| {
-            Ok(serde_json::json!({
-                "designation": r.get::<_, String>(0)?,
-                "quantite": r.get::<_, f64>(1)?
-            }))
+            Ok(super::contrats::ArticleVendu {
+                designation: r.get(0)?,
+                quantite: r.get(1)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -87,10 +87,10 @@ pub fn get_stats(
         .map_err(|e| e.to_string())?;
     let top_clients = stmt
         .query_map([], |r| {
-            Ok(serde_json::json!({
-                "nom": r.get::<_, String>(0)?,
-                "depense": r.get::<_, f64>(1)?
-            }))
+            Ok(super::contrats::MeilleurClient {
+                nom: r.get(0)?,
+                depense: r.get(1)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -107,26 +107,26 @@ pub fn get_stats(
         .map_err(|e| e.to_string())?;
     let ca_7_jours = stmt
         .query_map([], |r| {
-            Ok(serde_json::json!({
-                "jour": r.get::<_, String>(0)?,
-                "montant": r.get::<_, f64>(1)?
-            }))
+            Ok(super::contrats::MontantJour {
+                jour: r.get(0)?,
+                montant: r.get(1)?,
+            })
         })
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({
-        "ca_7_jours": ca_7_jours,
-        "total_ventes_30j": total_ventes_30j,
-        "nb_articles": nb_articles,
-        "stock_alerte": stock_alerte,
-        "credit_total": credit_total,
-        "nb_clients": nb_clients,
-        "ca_jour": ca_jour,
-        "ca_mois": ca_mois,
-        "benefice_mois": benefice_mois,
-        "top_articles": top_articles,
-        "top_clients": top_clients,
-    }))
+    Ok(super::contrats::StatsTableauDeBord {
+        ca_7_jours,
+        total_ventes_30j,
+        nb_articles,
+        stock_alerte,
+        credit_total,
+        nb_clients,
+        ca_jour,
+        ca_mois,
+        benefice_mois,
+        top_articles,
+        top_clients,
+    })
 }

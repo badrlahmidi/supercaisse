@@ -227,7 +227,7 @@ pub fn list_backups(
     dirs: State<AppDirs>,
     auth: State<AuthState>,
     token: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<super::contrats::FichierSauvegarde>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     let mut fichiers = Vec::new();
@@ -244,16 +244,16 @@ pub fn list_backups(
                         .format("%Y-%m-%d %H:%M")
                         .to_string()
                 });
-                fichiers.push(serde_json::json!({
-                    "chemin": chemin.to_string_lossy(),
-                    "nom": entree.file_name().to_string_lossy(),
-                    "taille": meta.len(),
-                    "date": modifie,
-                }));
+                fichiers.push(super::contrats::FichierSauvegarde {
+                    chemin: chemin.to_string_lossy().to_string(),
+                    nom: entree.file_name().to_string_lossy().to_string(),
+                    taille: meta.len(),
+                    date: modifie,
+                });
             }
         }
     }
-    fichiers.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+    fichiers.sort_by(|a, b| b.date.cmp(&a.date));
     Ok(fichiers)
 }
 
