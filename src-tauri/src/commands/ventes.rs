@@ -4,8 +4,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
 use super::calcul::{
-    calculer_ligne, en_dh, round2, somme_dh, totaliser, valider_pourcentage, vers_centimes,
-    LigneCalculee, TOLERANCE_MONTANT,
+    calculer_ligne, en_dh, round2, somme_dh, totaliser, valider_pourcentage, LigneCalculee,
+    TOLERANCE_MONTANT,
 };
 use super::contrats::{
     LigneVenteDetail, LigneVenteSaisie, ListeVentes, ModePaiement, PaiementSaisi, TypeDocument,
@@ -534,16 +534,6 @@ fn rembourser_avoir(
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|e| e.to_string())?;
         paiements.extend(lignes);
-    }
-    if paiements.is_empty() {
-        let (mode, net): (String, f64) = tx
-            .query_row(
-                "SELECT mode_paiement, montant_total - montant_remise FROM ventes WHERE id = ?1",
-                params![facture_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .map_err(|e| e.to_string())?;
-        paiements.push((mode, vers_centimes(net.abs())));
     }
     let remboursements: Vec<(String, i64)> = paiements
         .into_iter()
@@ -1717,6 +1707,43 @@ mod tests {
         annuler_vente_impl(&mut conn, avoir, Some(1), Some("Erreur")).unwrap();
         assert_eq!(points(&conn), apres_vente);
         assert_eq!(especes(&conn), 570.0);
+    }
+
+    #[test]
+    fn test_avoir_sur_devis_converti_ne_rembourse_rien_en_caisse() {
+        let mut conn = setup();
+        conn.execute(
+            "INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (1, 1, 0, 'ouverte', 1)",
+            [],
+        )
+        .unwrap();
+        let devis = vendre(
+            &mut conn,
+            None,
+            json!([{ "article_id": 1, "quantite": 1 }]),
+            None,
+            json!([{ "mode": "especes", "montant": 120 }]),
+            "devis",
+            None,
+        )
+        .unwrap()
+        .id;
+        let facture = convert_document_impl(&mut conn, devis, "facture".into(), 1).unwrap();
+        let avoir = convert_document_impl(&mut conn, facture, "avoir".into(), 1).unwrap();
+        let paiements: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM vente_paiements WHERE vente_id = ?1",
+                params![avoir],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(paiements, 0);
+        assert_eq!(
+            crate::commands::sessions::totaux_especes_session(&conn, 1)
+                .unwrap()
+                .ventes_especes,
+            0.0
+        );
     }
 
     #[test]

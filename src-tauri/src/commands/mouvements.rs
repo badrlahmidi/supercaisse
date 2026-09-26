@@ -149,16 +149,21 @@ pub(crate) fn consommer_lots(
         reste -= pris;
     }
     if reste > 1e-9 {
-        let perime: f64 = conn
+        let (perime, en_lots, en_stock): (f64, f64, f64) = conn
             .query_row(
-                "SELECT COALESCE(SUM(quantite), 0) FROM article_lots
-                 WHERE article_id = ?1 AND magasin_id = ?2 AND quantite > 0
-                   AND date(date_peremption) < date('now', 'localtime')",
+                "SELECT
+                    COALESCE((SELECT SUM(quantite) FROM article_lots
+                              WHERE article_id = ?1 AND magasin_id = ?2 AND quantite > 0
+                                AND date(date_peremption) < date('now', 'localtime')), 0),
+                    COALESCE((SELECT SUM(quantite) FROM article_lots
+                              WHERE article_id = ?1 AND magasin_id = ?2 AND quantite > 0), 0),
+                    COALESCE((SELECT quantite FROM article_stocks
+                              WHERE article_id = ?1 AND magasin_id = ?2), 0)",
                 params![article_id, magasin_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(|e| e.to_string())?;
-        if perime > 1e-9 {
+        if perime > 1e-9 && en_stock < en_lots - 1e-9 {
             return Err(format!(
                 "Vente refusée : il manque {} unité(s) de {} dans des lots non périmés, et {} unité(s) en stock sont périmées. Sortez les lots périmés par un ajustement de stock.",
                 reste,
@@ -514,7 +519,16 @@ mod tests {
             .unwrap();
         assert_eq!(ventes, 0);
 
-        vendre(&mut conn, 2, None, 9.0, 1, "facture").unwrap();
+        adjust_article_stock(&conn, 2, 1, 2.0).unwrap();
+        vendre(&mut conn, 2, None, 10.0, 1, "facture").unwrap();
+        assert_eq!(
+            (stock(&conn, 2, 1), lot(&conn, 1), lot(&conn, 3)),
+            (6.0, 0.0, 5.0)
+        );
+        assert!(vendre(&mut conn, 2, None, 2.0, 1, "facture")
+            .unwrap_err()
+            .contains("lots non périmés"));
+        vendre(&mut conn, 2, None, 1.0, 1, "facture").unwrap();
         adjust_article_stock(&conn, 2, 2, 3.0).unwrap();
         vendre(&mut conn, 2, None, 2.0, 2, "facture").unwrap();
         assert_eq!(stock(&conn, 2, 2), 1.0);
