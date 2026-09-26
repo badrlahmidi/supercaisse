@@ -42,7 +42,7 @@ describe("Dashboard", () => {
         credit_total: 2500,
         nb_clients: 45,
       })
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ lignes: [], total: 0, page: 0, par_page: 5, chiffre_affaires: 0 })
 
     render(<Dashboard />, { wrapper: Wrapper })
 
@@ -62,7 +62,7 @@ describe("Dashboard", () => {
         credit_total: 0,
         nb_clients: 0,
       })
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ lignes: [], total: 0, page: 0, par_page: 5, chiffre_affaires: 0 })
 
     render(<Dashboard />, { wrapper: Wrapper })
 
@@ -82,7 +82,7 @@ describe("Dashboard", () => {
         credit_total: 0,
         nb_clients: 0,
       })
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ lignes: [], total: 0, page: 0, par_page: 5, chiffre_affaires: 0 })
 
     render(<Dashboard />, { wrapper: Wrapper })
 

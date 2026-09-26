@@ -1,20 +1,29 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import { Navigate, useNavigate, useLocation } from "react-router-dom"
-import { invoke } from "@/lib/tauri"
+import { invoke, onSessionExpired, setSessionToken, getSessionToken } from "@/lib/tauri"
+import { toast } from "sonner"
+import ChangePasswordRequired from "@/components/ChangePasswordRequired"
+import { accesAutorise, routeAccueil } from "@/routes/acces"
+import { basculerPanier } from "@/store/cart"
+import type { PermissionRole } from "@/types/generated/PermissionRole"
 
 export interface User {
   id: number
   login: string
   nom: string
   role: "admin" | "manager" | "caissier"
+  must_change_password?: boolean
 }
+
+export type SessionUser = User & { token?: string }
 
 type PermissionsMap = Record<string, Record<string, boolean>>
 
 interface AuthContextType {
   user: User | null
   login: (login: string, password: string) => Promise<void>
-  loginAs: (userData: User) => void
+  loginAs: (userData: SessionUser) => Promise<void>
+  completePasswordChange: () => void
   logout: () => void
   isLoading: boolean
   hasPermission: (roles: string[]) => boolean
@@ -23,8 +32,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
-
-const AUTO_LOCK_MS = 15 * 60 * 1000
 
 function transformPermissions(rows: Array<{ module: string; action: string; allowed: boolean }>): PermissionsMap {
   const map: PermissionsMap = {}
@@ -41,11 +48,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const navigate = useNavigate()
 
-  const lastActivity = useRef(Date.now())
 
   const loadPermissions = useCallback(async (role: string) => {
     try {
-      const rows = await invoke<Array<{ module: string; action: string; allowed: boolean }>>("get_permissions", { role })
+      const rows = await invoke<PermissionRole[]>("get_permissions", { role })
       setPermissions(transformPermissions(rows))
     } catch {
       setPermissions({})
@@ -53,63 +59,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const stored = localStorage.getItem("supercaisse_user")
-        if (stored) {
-          const parsed = JSON.parse(stored)
-          setUser(parsed)
-          await loadPermissions(parsed.role)
-        }
-      } catch {
-        localStorage.removeItem("supercaisse_user")
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    initAuth()
+    localStorage.removeItem("supercaisse_user")
+    setIsLoading(false)
   }, [])
 
-  const logout_ = useCallback(() => {
+  const clearSession = useCallback(() => {
+    setSessionToken(null)
+    void basculerPanier(null)
     setUser(null)
-    localStorage.removeItem("supercaisse_user")
+    setPermissions({})
     navigate("/login")
   }, [navigate])
 
-  useEffect(() => {
-    if (!user) return
-    const resetActivity = () => { lastActivity.current = Date.now() }
-    const checkInactivity = () => {
-      if (Date.now() - lastActivity.current > AUTO_LOCK_MS) {
-        logout_()
+  const logout_ = useCallback(() => {
+    if (getSessionToken()) {
+      invoke("logout").catch(() => undefined)
+    }
+    clearSession()
+  }, [clearSession])
+
+  useEffect(() => onSessionExpired(() => {
+    toast.error("Session expirée", { description: "Veuillez vous reconnecter" })
+    clearSession()
+  }), [clearSession])
+
+  const loginAs = useCallback(async ({ token, ...userData }: SessionUser) => {
+    if (token) {
+      if (getSessionToken() && getSessionToken() !== token) {
+        await invoke("logout").catch(() => undefined)
       }
+      setSessionToken(token)
     }
-    window.addEventListener("mousedown", resetActivity)
-    window.addEventListener("keydown", resetActivity)
-    window.addEventListener("touchstart", resetActivity)
-    window.addEventListener("scroll", resetActivity, { passive: true })
-    const interval = setInterval(checkInactivity, 60000)
-    return () => {
-      window.removeEventListener("mousedown", resetActivity)
-      window.removeEventListener("keydown", resetActivity)
-      window.removeEventListener("touchstart", resetActivity)
-      window.removeEventListener("scroll", resetActivity)
-      clearInterval(interval)
-    }
-  }, [user, logout_])
+    await basculerPanier(userData.id)
+    setUser(userData)
+    await loadPermissions(userData.role)
+  }, [loadPermissions])
 
   const login = useCallback(async (login: string, password: string) => {
-    const userData = await invoke<User | null>("login", { login, password })
+    const userData = await invoke<SessionUser | null>("login", { login, password })
     if (!userData) throw new Error("Login ou mot de passe incorrect")
-    setUser(userData)
-    localStorage.setItem("supercaisse_user", JSON.stringify(userData))
-    await loadPermissions(userData.role)
+    await loginAs(userData)
     navigate("/pos")
-  }, [navigate, loadPermissions])
+  }, [navigate, loginAs])
 
-  const loginAs = useCallback((userData: User) => {
-    setUser(userData)
-    localStorage.setItem("supercaisse_user", JSON.stringify(userData))
+  const completePasswordChange = useCallback(() => {
+    setUser((current) => {
+      if (!current) return current
+      return { ...current, must_change_password: false }
+    })
   }, [])
 
   const logout = useCallback(() => {
@@ -136,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, loginAs, logout, isLoading, hasPermission, permissions, hasModulePermission }}>
+    <AuthContext.Provider value={{ user, login, loginAs, completePasswordChange, logout, isLoading, hasPermission, permissions, hasModulePermission }}>
       {children}
     </AuthContext.Provider>
   )
@@ -148,8 +145,8 @@ export function useAuth() {
   return context
 }
 
-export function ProtectedRoute({ children, allowedRoles }: { children: ReactNode; allowedRoles?: string[] }) {
-  const { user, isLoading } = useAuth()
+export function ProtectedRoute({ children, chemin }: { children: ReactNode; chemin?: string }) {
+  const { user, isLoading, hasModulePermission } = useAuth()
   const location = useLocation()
 
   if (isLoading) return null
@@ -158,9 +155,26 @@ export function ProtectedRoute({ children, allowedRoles }: { children: ReactNode
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/pos" replace />
+  if (user.must_change_password) {
+    return <ChangePasswordRequired />
+  }
+
+  const habilitations = { role: user.role, aLaPermission: hasModulePermission }
+  if (!chemin || !accesAutorise(chemin, habilitations)) {
+    const accueil = routeAccueil(habilitations)
+    if (accueil && accueil !== chemin) return <Navigate to={accueil} replace />
+    return <AccesRefuse />
   }
 
   return <>{children}</>
 }
+
+function AccesRefuse() {
+  return (
+    <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
+      <p className="text-lg font-semibold">Accès non autorisé</p>
+      <p className="text-sm text-muted-foreground">Aucune page n'est ouverte à votre rôle. Contactez un administrateur.</p>
+    </div>
+  )
+}
+

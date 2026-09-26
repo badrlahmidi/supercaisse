@@ -1,0 +1,132 @@
+use crate::db::*;
+use crate::session::{autoriser, Acces, AuthState};
+use tauri::State;
+
+#[tauri::command(async)]
+pub fn get_stats(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+) -> Result<super::contrats::StatsTableauDeBord, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("rapports", "voir"))?;
+
+    let total_ventes_30j: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= datetime('now','-30 days','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let nb_articles: i64 = conn
+        .query_row("SELECT COUNT(*) FROM articles WHERE actif=1", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    let stock_alerte: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM articles WHERE stock <= stock_alerte AND stock_alerte > 0",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let credit_total: f64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(ROUND((credit_actuel) * 100)) / 100.0,0) FROM clients",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let nb_clients: i64 = conn
+        .query_row("SELECT COUNT(*) FROM clients", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+
+    let ca_jour: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE date >= date('now','localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let ca_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((montant_total - montant_remise) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
+
+    let ht_mois: f64 = conn.query_row(concat!("SELECT COALESCE(SUM(ROUND((COALESCE(montant_ht, montant_total - montant_remise)) * 100)) / 100.0,0) FROM ventes v WHERE strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!()), [], |r| r.get(0)).map_err(|e| e.to_string())?;
+
+    let cout_achats_mois: f64 = conn.query_row(concat!("
+        SELECT COALESCE(SUM(ROUND((vl.quantite * a.prix_achat * (CASE WHEN vl.total_ligne < 0 THEN -1 ELSE 1 END)) * 100)) / 100.0, 0)
+        FROM vente_articles vl
+        JOIN ventes v ON v.id = vl.vente_id
+        JOIN articles a ON a.id = vl.article_id
+        WHERE strftime('%Y-%m', v.date) = strftime('%Y-%m', 'now', 'localtime') AND ", filtre_ca!(), "
+    "), [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let benefice_mois = ht_mois - cout_achats_mois;
+
+    let mut stmt = conn.prepare(concat!("
+        SELECT a.designation, SUM(CASE WHEN v.dtype = 'avoir' THEN -vl.quantite ELSE vl.quantite END) as qte_vendue
+        FROM vente_articles vl
+        JOIN ventes v ON v.id = vl.vente_id
+        JOIN articles a ON a.id = vl.article_id
+        WHERE v.date >= datetime('now','-30 days','localtime') AND ", filtre_ca!(), "
+        GROUP BY a.id
+        ORDER BY qte_vendue DESC
+        LIMIT 5
+    ")).map_err(|e| e.to_string())?;
+    let top_articles = stmt
+        .query_map([], |r| {
+            Ok(super::contrats::ArticleVendu {
+                designation: r.get(0)?,
+                quantite: r.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(concat!(
+            "
+        SELECT c.nom, SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0 as depense
+        FROM ventes v
+        JOIN clients c ON c.id = v.client_id
+        WHERE v.date >= datetime('now','-30 days','localtime') AND ",
+            filtre_ca!(),
+            "
+        GROUP BY c.id
+        ORDER BY depense DESC
+        LIMIT 5
+    "
+        ))
+        .map_err(|e| e.to_string())?;
+    let top_clients = stmt
+        .query_map([], |r| {
+            Ok(super::contrats::MeilleurClient {
+                nom: r.get(0)?,
+                depense: r.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(concat!(
+            "SELECT date(v.date) AS jour, SUM(ROUND((v.montant_total - v.montant_remise) * 100)) / 100.0
+             FROM ventes v
+             WHERE v.date >= date('now', '-6 days', 'localtime') AND ",
+            filtre_ca!(),
+            " GROUP BY jour ORDER BY jour"
+        ))
+        .map_err(|e| e.to_string())?;
+    let ca_7_jours = stmt
+        .query_map([], |r| {
+            Ok(super::contrats::MontantJour {
+                jour: r.get(0)?,
+                montant: r.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(super::contrats::StatsTableauDeBord {
+        ca_7_jours,
+        total_ventes_30j,
+        nb_articles,
+        stock_alerte,
+        credit_total,
+        nb_clients,
+        ca_jour,
+        ca_mois,
+        benefice_mois,
+        top_articles,
+        top_clients,
+    })
+}

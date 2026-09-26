@@ -19,25 +19,7 @@ import { formatCurrency, formatDate } from "@/lib/utils"
 import { useNavigate } from "react-router-dom"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  prix_vente: number
-  stock: number
-  stock_alerte: number | null
-  categorie_nom?: string
-  suivi_lot?: boolean
-}
-
-interface ArticleLot {
-  id: number
-  numero_lot: string | null
-  date_peremption: string | null
-  quantite: number
-  date_reception: string
-}
+import type { Article, ArticleLot } from "@/types"
 
 const lotSchema = z.object({
   numero_lot: z.string().optional(),

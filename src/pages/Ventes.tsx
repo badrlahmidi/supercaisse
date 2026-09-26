@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
-import { useSalesList, useCancelSale } from "@/hooks/useSales"
+import { useSalesList, useCancelSale, toutesLesVentes } from "@/hooks/useSales"
+import { useDebounce } from "@/hooks/useDebounce"
+import Pagination from "@/components/Pagination"
 import { Card, CardContent } from "@/ui/Card"
 import { Button } from "@/ui/Button"
 import { Input } from "@/ui/Input"
@@ -16,42 +18,12 @@ import { format, subDays } from "date-fns"
 import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import type { Settings } from "@/lib/tauri"
+import type { Settings } from "@/types"
+import type { VenteDetail } from "@/types/generated/VenteDetail"
+import type { VenteResume } from "@/types/generated/VenteResume"
+import { annulationDirecte, DELAI_ANNULATION_MINUTES } from "@/lib/fiscal"
 
-interface Vente {
-  id: number
-  date: string
-  client_id: number | null
-  caissier_id: number | null
-  montant_total: number
-  montant_remise: number
-  mode_paiement: string
-  statut: string
-  dtype: string
-  numero_facture: string | null
-  client_nom: string | null
-  caissier_nom: string | null
-  client_telephone?: string | null
-  client_email?: string | null
-  client_ice?: string | null
-  source_vente_id?: number | null
-  source_dtype?: string | null
-  source_numero?: string | null
-}
-
-interface VenteDetail {
-  vente: Vente
-  lignes: Array<{
-    id: number
-    article_id: number
-    designation: string
-    quantite: number
-    prix_unitaire: number
-    tva: number
-    total_ligne: number
-    remise_ligne?: number | null
-  }>
-}
+type Vente = VenteResume
 
 export default function Ventes() {
   const [search, setSearch] = useState("")
@@ -60,10 +32,14 @@ export default function Ventes() {
   const [selectedVente, setSelectedVente] = useState<VenteDetail | null>(null)
   const [showDetail, setShowDetail] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState<Vente | null>(null)
+  const [cancelMotif, setCancelMotif] = useState("")
   const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null)
 
-  const { data: ventes, isLoading } = useSalesList(dateDebut, dateFin)
+  const [page, setPage] = useState(0)
+  const recherche = useDebounce(search.trim(), 300)
+  const { data: liste, isLoading } = useSalesList(dateDebut, dateFin, recherche, page)
   const cancelMutation = useCancelSale()
+  const modeAnnulation = cancelConfirm ? annulationDirecte(cancelConfirm) : "libre"
   const queryClient = useQueryClient()
 
   const convertMutation = useMutation({
@@ -116,6 +92,8 @@ export default function Ventes() {
         venteId: detail.vente.id,
         docType: detail.vente.dtype,
         docNumero: detail.vente.numero_facture,
+        docSourceNumero: detail.vente.dtype === "avoir" ? detail.vente.source_numero ?? null : null,
+        montantHT: detail.vente.montant_ht ?? null,
         date: detail.vente.date,
         caissier: detail.vente.caissier_nom || "",
         client: detail.vente.client_nom || "Client de passage",
@@ -126,6 +104,7 @@ export default function Ventes() {
           prix_unitaire: l.prix_unitaire,
           tva: l.tva,
           total_ligne: l.total_ligne,
+          montant_tva: l.montant_tva ?? null,
           remise_ligne: l.remise_ligne || 0,
         })),
         montantTotal: detail.vente.montant_total,
@@ -171,29 +150,29 @@ export default function Ventes() {
     window.open(`mailto:${vente.client_email}?subject=${subject}&body=${body}`, "_self")
   }
 
-  const filteredVentes = ventes?.filter((v) =>
-    v.client_nom?.toLowerCase().includes(search.toLowerCase()) ||
-    v.caissier_nom?.toLowerCase().includes(search.toLowerCase()) ||
-    v.numero_facture?.toLowerCase().includes(search.toLowerCase()) ||
-    v.id.toString().includes(search) ||
-    v.mode_paiement.toLowerCase().includes(search.toLowerCase())
-  ) || []
+  const filteredVentes = liste?.lignes ?? []
+  const totalVentes = liste?.chiffre_affaires ?? 0
+  const nbVentes = liste?.total ?? 0
 
-  const totalVentes = filteredVentes.reduce((s, v) => s + (v.montant_total - v.montant_remise), 0)
-  const nbVentes = filteredVentes.length
+  const exporter = async () => {
+    try {
+      const ventes = await toutesLesVentes(dateDebut, dateFin, recherche)
+      const headers = ["Référence", "Type", "Date", "Client", "Caissier", "Total", "Remise", "Mode paiement", "Statut"]
+      const rows = ventes.map((v) => [
+        v.numero_facture || String(v.id), v.dtype, formatDateTime(v.date), v.client_nom || "Client de passage",
+        v.caissier_nom || "", formatCurrency(v.montant_total), formatCurrency(v.montant_remise),
+        v.mode_paiement, v.statut,
+      ])
+      exportCSV(headers, rows, `documents_${dateDebut}_${dateFin}.csv`)
+    } catch (e) {
+      toast.error("Export impossible", { description: String(e) })
+    }
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader title="Documents de Vente" description="Historique des factures, BL et devis">
-        <Button variant="outline" onClick={() => {
-          const headers = ["Référence", "Type", "Date", "Client", "Caissier", "Total", "Remise", "Mode paiement", "Statut"]
-          const rows = filteredVentes.map((v) => [
-            v.numero_facture || String(v.id), v.dtype, formatDateTime(v.date), v.client_nom || "Client de passage",
-            v.caissier_nom || "", formatCurrency(v.montant_total), formatCurrency(v.montant_remise),
-            v.mode_paiement, v.statut,
-          ])
-          exportCSV(headers, rows, `documents_${dateDebut}_${dateFin}.csv`)
-        }}>
+        <Button variant="outline" onClick={exporter}>
           <Download className="h-4 w-4 mr-2" />
           Exporter
         </Button>
@@ -205,7 +184,7 @@ export default function Ventes() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Total ventes</p>
+                <p className="text-sm text-muted-foreground">Chiffre d'affaires</p>
                 <p className="text-2xl font-bold">{formatCurrency(totalVentes)}</p>
               </div>
               <div className="p-3 bg-primary/10 rounded-xl">
@@ -218,7 +197,7 @@ export default function Ventes() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Nombre de ventes</p>
+                <p className="text-sm text-muted-foreground">Nombre de documents</p>
                 <p className="text-2xl font-bold">{nbVentes}</p>
               </div>
               <div className="p-3 bg-success/10 rounded-xl">
@@ -235,7 +214,7 @@ export default function Ventes() {
                 id="dateDebut"
                 type="date"
                 value={dateDebut}
-                onChange={(e) => setDateDebut(e.target.value)}
+                onChange={(e) => { setDateDebut(e.target.value); setPage(0) }}
                 className="w-full"
               />
             </div>
@@ -249,7 +228,7 @@ export default function Ventes() {
                 id="dateFin"
                 type="date"
                 value={dateFin}
-                onChange={(e) => setDateFin(e.target.value)}
+                onChange={(e) => { setDateFin(e.target.value); setPage(0) }}
                 className="w-full"
               />
             </div>
@@ -265,7 +244,7 @@ export default function Ventes() {
               <Input
                 placeholder="Rechercher (client, caissier, mode paiement, ID)..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0) }}
                 className="pl-10"
               />
             </div>
@@ -360,6 +339,9 @@ export default function Ventes() {
               </TableBody>
             </Table>
           </div>
+          {liste && (
+            <Pagination page={liste.page} parPage={liste.par_page} total={liste.total} onPageChange={setPage} />
+          )}
         </CardContent>
       </Card>
 
@@ -435,6 +417,12 @@ export default function Ventes() {
                   <span>Net payé</span>
                   <span>{formatCurrency(selectedVente.vente.montant_total - selectedVente.vente.montant_remise)}</span>
                 </div>
+                {selectedVente.vente.montant_ht != null && selectedVente.vente.montant_tva != null && (
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>dont HT / TVA</span>
+                    <span>{formatCurrency(selectedVente.vente.montant_ht)} / {formatCurrency(selectedVente.vente.montant_tva)}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -503,7 +491,7 @@ export default function Ventes() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!cancelConfirm} onOpenChange={() => setCancelConfirm(null)}>
+      <Dialog open={!!cancelConfirm} onOpenChange={() => { setCancelConfirm(null); setCancelMotif("") }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
@@ -511,21 +499,56 @@ export default function Ventes() {
               Annuler {cancelConfirm?.numero_facture || `#${cancelConfirm?.id}`}
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Êtes-vous sûr de vouloir annuler ce document ? Si c'est une facture ou un BL, le stock sera réajusté. <strong>Cette action est irréversible.</strong>
-          </p>
+          {modeAnnulation === "avoir" ? (
+            <p className="text-sm text-muted-foreground">
+              Ce document a été émis il y a plus de {DELAI_ANNULATION_MINUTES} minutes : il ne peut plus être annulé directement.
+              {cancelConfirm?.dtype === "avoir"
+                ? " Un avoir émis est définitif : émettez une nouvelle facture si nécessaire."
+                : " Émettez un avoir qui référence cette facture."}
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Êtes-vous sûr de vouloir annuler ce document ? Si c'est une facture ou un BL, le stock, le crédit client et les points fidélité seront réajustés. <strong>Cette action est irréversible.</strong>
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="cancel_motif">{modeAnnulation === "motif" ? "Motif (obligatoire)" : "Motif"}</Label>
+                <Input id="cancel_motif" value={cancelMotif} onChange={(e) => setCancelMotif(e.target.value)} placeholder="Erreur de saisie, retour client…" />
+              </div>
+            </>
+          )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCancelConfirm(null)}>Fermer</Button>
+            {modeAnnulation === "avoir" ? (
+              cancelConfirm?.dtype === "facture" && (
+                <Button
+                  disabled={convertMutation.isPending}
+                  onClick={() => {
+                    if (cancelConfirm) convertMutation.mutate(
+                      { venteId: cancelConfirm.id, targetType: "avoir" },
+                      { onSuccess: () => { setCancelConfirm(null); setCancelMotif("") } },
+                    )
+                  }}
+                >
+                  {convertMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
+                  Émettre un avoir
+                </Button>
+              )
+            ) : (
             <Button
               variant="destructive"
-              disabled={cancelMutation.isPending}
+              disabled={cancelMutation.isPending || (modeAnnulation === "motif" && cancelMotif.trim().length < 3)}
               onClick={() => {
-                if (cancelConfirm) cancelMutation.mutate(cancelConfirm.id, { onSuccess: () => setCancelConfirm(null) })
+                if (cancelConfirm) cancelMutation.mutate(
+                  { venteId: cancelConfirm.id, motif: cancelMotif },
+                  { onSuccess: () => { setCancelConfirm(null); setCancelMotif("") } },
+                )
               }}
             >
               {cancelMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
               Annuler la vente
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

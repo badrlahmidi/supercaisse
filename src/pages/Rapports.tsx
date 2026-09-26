@@ -12,18 +12,7 @@ import { Download, TrendingUp, DollarSign, ReceiptText, Percent, Loader2 } from 
 import PageHeader from "@/components/PageHeader"
 import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { jsPDF } from "jspdf"
-
-interface RapportDetaille {
-  ca_total: number
-  total_remises: number
-  nb_ventes: number
-  marge_brute: number
-  tva_collectee: number
-  top_articles: Array<{ designation: string; quantite: number; total: number }>
-  rotation_stock: Array<{ designation: string; quantite_vendue: number; stock_actuel: number }>
-  ventes_par_jour: Array<{ jour: string; total: number; nb: number }>
-  par_mode: Array<{ mode: string; total: number; nb: number }>
-}
+import type { RapportDetaille } from "@/types/generated/RapportDetaille"
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -38,9 +27,10 @@ export default function Rapports() {
   const [debut, setDebut] = useState(thirtyDaysAgoISO)
   const [fin, setFin] = useState(todayISO)
 
-  const { data: rapport, isLoading } = useQuery({
+  const { data: rapport, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["rapport_detaille", debut, fin],
     queryFn: () => invoke<RapportDetaille>("get_rapport_detaille", { debut, fin }),
+    meta: { erreurGeree: true },
   })
 
   const maxVente = rapport?.ventes_par_jour?.length
@@ -146,6 +136,16 @@ export default function Rapports() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
+      )}
+
+      {isError && (
+        <Card className="mt-4">
+          <CardContent className="py-8 text-center">
+            <p className="text-destructive font-medium">Erreur de chargement du rapport</p>
+            <p className="text-sm text-muted-foreground mt-1">{String(error)}</p>
+            <Button className="mt-4" onClick={() => refetch()}>Réessayer</Button>
+          </CardContent>
+        </Card>
       )}
 
       {rapport && (

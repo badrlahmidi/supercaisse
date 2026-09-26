@@ -1,28 +1,74 @@
+#![allow(clippy::too_many_arguments)]
+
 mod commands;
 mod db;
+mod paths;
+mod session;
 
 use db::{init_db, DbState};
-use std::sync::{Arc, Mutex};
+use paths::{legacy_database_candidates, prepare_database, AppDirs};
+use session::AuthState;
+use tauri::Manager;
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+
+fn journal() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let mut cibles = vec![Target::new(TargetKind::LogDir {
+        file_name: Some("supercaisse".into()),
+    })];
+    if cfg!(debug_assertions) {
+        cibles.push(Target::new(TargetKind::Stdout));
+    }
+    tauri_plugin_log::Builder::new()
+        .targets(cibles)
+        .level(log::LevelFilter::Info)
+        .level_for("tao", log::LevelFilter::Warn)
+        .level_for("wry", log::LevelFilter::Warn)
+        .timezone_strategy(TimezoneStrategy::UseLocal)
+        .rotation_strategy(RotationStrategy::KeepSome(10))
+        .max_file_size(5_000_000)
+        .build()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db_path = dirs_db_path();
-    let conn = init_db(&db_path).expect("Failed to initialize database");
-
-    tauri::Builder::default()
-        .manage(DbState { conn: Arc::new(Mutex::new(conn)) })
+    commands::installer_hook_panique();
+    let resultat = tauri::Builder::default()
+        .plugin(journal())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(AuthState::default())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+            log::info!("Démarrage de SuperCaisse {}", app.package_info().version);
+            let data = app.path().app_data_dir()?;
+            let documents = app
+                .path()
+                .document_dir()
+                .map(|d| d.join("SuperCaisse"))
+                .unwrap_or_else(|_| data.clone());
+            let dirs = AppDirs { data, documents };
+            let db_path = prepare_database(&dirs, &legacy_database_candidates())?;
+            let conn = init_db(&db_path.to_string_lossy()).map_err(|e| {
+                format!(
+                    "Initialisation de la base {} impossible : {}",
+                    db_path.display(),
+                    e
+                )
+            })?;
+            log::info!("Base de données : {}", db_path.display());
+            match commands::sauvegarde_quotidienne(&conn, &dirs) {
+                Ok(Some(chemin)) => log::info!("Sauvegarde automatique : {}", chemin.display()),
+                Ok(None) => {}
+                Err(e) => log::error!("Sauvegarde automatique impossible : {}", e),
             }
+            app.manage(DbState::avec_lecteurs(conn, &db_path, db::LECTEURS)?);
+            app.manage(dirs);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::login,
+            commands::logout,
+            commands::journaliser_frontend,
+            commands::verifier_mise_a_jour,
+            commands::installer_mise_a_jour,
             commands::get_categories,
             commands::add_category,
             commands::update_category,
@@ -87,6 +133,7 @@ pub fn run() {
             commands::backup_database,
             commands::export_database,
             commands::import_database,
+            commands::list_backups,
             commands::get_current_session,
             commands::open_session,
             commands::close_session,
@@ -105,6 +152,8 @@ pub fn run() {
             commands::get_releve_client,
             commands::get_audit_log,
             commands::login_pin,
+            commands::get_comptes_pin,
+            commands::change_password,
             commands::set_user_pin,
             commands::get_rapport_detaille,
             commands::create_inventaire,
@@ -115,22 +164,14 @@ pub fn run() {
             commands::get_permissions,
             commands::update_permission,
             commands::get_caisses,
-            commands::open_caisse,
-            commands::close_caisse,
             commands::get_tresorerie,
             commands::compare_fournisseur_prices,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
-
-fn dirs_db_path() -> String {
-    let app_dir = dirs_next().unwrap_or_else(|| std::path::PathBuf::from("."));
-    std::fs::create_dir_all(&app_dir).ok();
-    app_dir.join("supercaisse.db").to_string_lossy().to_string()
-}
-
-fn dirs_next() -> Option<std::path::PathBuf> {
-    // Use app data directory
-    std::env::current_dir().ok().map(|p| p.join("data"))
+        .run(tauri::generate_context!());
+    if let Err(e) = resultat {
+        log::error!("Arrêt de l'application sur erreur : {}", e);
+        log::logger().flush();
+        eprintln!("SuperCaisse n'a pas pu démarrer : {}", e);
+        std::process::exit(1);
+    }
 }

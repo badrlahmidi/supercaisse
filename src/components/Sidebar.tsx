@@ -5,6 +5,7 @@ import { useUIStore } from "@/store/ui"
 import { useI18nStore } from "@/store/i18n"
 import { Button } from "@/ui/Button"
 import { cn } from "@/lib/utils"
+import { accesAutorise } from "@/routes/acces"
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -41,7 +42,6 @@ interface NavItem {
   path: string
   labelKey: string
   icon: LucideIcon
-  roles: string[]
 }
 
 interface NavGroup {
@@ -53,56 +53,56 @@ const navGroups: NavGroup[] = [
   {
     labelKey: "nav.shortcuts",
     items: [
-      { path: "/pos", labelKey: "nav.pos", icon: ShoppingCart, roles: ["admin", "manager", "caissier"] },
-      { path: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard, roles: ["admin", "manager", "caissier"] },
+      { path: "/pos", labelKey: "nav.pos", icon: ShoppingCart },
+      { path: "/dashboard", labelKey: "nav.dashboard", icon: LayoutDashboard },
     ],
   },
   {
     labelKey: "nav.management",
     items: [
-      { path: "/articles", labelKey: "nav.articles", icon: Package, roles: ["admin", "manager"] },
-      { path: "/categories", labelKey: "nav.categories", icon: Archive, roles: ["admin", "manager"] },
-      { path: "/clients", labelKey: "nav.clients", icon: Users, roles: ["admin", "manager"] },
-      { path: "/paiements", labelKey: "nav.clientPayments", icon: Banknote, roles: ["admin", "manager"] },
-      { path: "/fournisseurs", labelKey: "nav.suppliers", icon: Truck, roles: ["admin", "manager"] },
-      { path: "/reappro", labelKey: "nav.restock", icon: TrendingUp, roles: ["admin", "manager"] },
+      { path: "/articles", labelKey: "nav.articles", icon: Package },
+      { path: "/categories", labelKey: "nav.categories", icon: Archive },
+      { path: "/clients", labelKey: "nav.clients", icon: Users },
+      { path: "/paiements", labelKey: "nav.clientPayments", icon: Banknote },
+      { path: "/fournisseurs", labelKey: "nav.suppliers", icon: Truck },
+      { path: "/reappro", labelKey: "nav.restock", icon: TrendingUp },
     ],
   },
   {
     labelKey: "nav.salesAndPurchases",
     items: [
-      { path: "/ventes", labelKey: "nav.sales", icon: ReceiptText, roles: ["admin", "manager"] },
-      { path: "/achats", labelKey: "nav.purchases", icon: ShoppingBag, roles: ["admin", "manager"] },
-      { path: "/comparaison-prix", labelKey: "nav.priceComparison", icon: Scale, roles: ["admin", "manager"] },
-      { path: "/rapprochement", labelKey: "nav.reconciliation", icon: FileCheck, roles: ["admin", "manager"] },
-      { path: "/stock", labelKey: "nav.stock", icon: Package, roles: ["admin", "manager"] },
-      { path: "/inventaire", labelKey: "nav.inventory", icon: ClipboardCheck, roles: ["admin", "manager"] },
+      { path: "/ventes", labelKey: "nav.sales", icon: ReceiptText },
+      { path: "/achats", labelKey: "nav.purchases", icon: ShoppingBag },
+      { path: "/comparaison-prix", labelKey: "nav.priceComparison", icon: Scale },
+      { path: "/rapprochement", labelKey: "nav.reconciliation", icon: FileCheck },
+      { path: "/stock", labelKey: "nav.stock", icon: Package },
+      { path: "/inventaire", labelKey: "nav.inventory", icon: ClipboardCheck },
     ],
   },
   {
     labelKey: "nav.finance",
     items: [
-      { path: "/journal", labelKey: "nav.cashJournal", icon: BarChart3, roles: ["admin", "manager"] },
-      { path: "/cheques", labelKey: "nav.checkTracking", icon: Banknote, roles: ["admin", "manager"] },
-      { path: "/rapports", labelKey: "nav.reports", icon: FileBarChart, roles: ["admin", "manager"] },
-      { path: "/caisses", labelKey: "nav.multiCaisse", icon: Monitor, roles: ["admin", "manager"] },
+      { path: "/journal", labelKey: "nav.cashJournal", icon: BarChart3 },
+      { path: "/cheques", labelKey: "nav.checkTracking", icon: Banknote },
+      { path: "/rapports", labelKey: "nav.reports", icon: FileBarChart },
+      { path: "/caisses", labelKey: "nav.multiCaisse", icon: Monitor },
     ],
   },
   {
     labelKey: "nav.restaurant",
     items: [
-      { path: "/cuisine", labelKey: "nav.kitchen", icon: ChefHat, roles: ["admin", "manager", "caissier"] },
+      { path: "/cuisine", labelKey: "nav.kitchen", icon: ChefHat },
     ],
   },
   {
     labelKey: "nav.system",
     items: [
-      { path: "/magasins", labelKey: "nav.shops", icon: Store, roles: ["admin"] },
-      { path: "/boutiques", labelKey: "nav.multiShops", icon: Store, roles: ["admin"] },
-      { path: "/veille-dgi", labelKey: "nav.dgiCompliance", icon: Landmark, roles: ["admin"] },
-      { path: "/peripheriques", labelKey: "nav.peripherals", icon: CreditCard, roles: ["admin"] },
-      { path: "/audit", labelKey: "nav.auditLog", icon: Shield, roles: ["admin"] },
-      { path: "/settings", labelKey: "nav.settings", icon: Settings, roles: ["admin"] },
+      { path: "/magasins", labelKey: "nav.shops", icon: Store },
+      { path: "/boutiques", labelKey: "nav.multiShops", icon: Store },
+      { path: "/veille-dgi", labelKey: "nav.dgiCompliance", icon: Landmark },
+      { path: "/peripheriques", labelKey: "nav.peripherals", icon: CreditCard },
+      { path: "/audit", labelKey: "nav.auditLog", icon: Shield },
+      { path: "/settings", labelKey: "nav.settings", icon: Settings },
     ],
   },
 ]
@@ -113,7 +113,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
-  const { user, logout } = useAuth()
+  const { user, logout, hasModulePermission } = useAuth()
   const { sidebarCollapsed: collapsed, toggleSidebar, setTheme } = useUIStore()
   const t = useI18nStore((s) => s.t)
   const navigate = useNavigate()
@@ -128,10 +128,10 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
       navGroups
         .map((group) => ({
           ...group,
-          items: group.items.filter((item) => item.roles.includes(user?.role || "")),
+          items: group.items.filter((item) => !!user && accesAutorise(item.path, { role: user.role, aLaPermission: hasModulePermission })),
         }))
         .filter((group) => group.items.length > 0),
-    [user?.role]
+    [user, hasModulePermission]
   )
 
   return (

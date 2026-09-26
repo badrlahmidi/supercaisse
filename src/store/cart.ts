@@ -1,8 +1,9 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
 
 interface PaymentSplit {
-  mode: string
+  mode: ModePaiement
   amount: number
 }
 
@@ -20,6 +21,8 @@ interface CartItem {
   stock_max?: number
 }
 
+type NouvelArticlePanier = Omit<CartItem, "remise_ligne" | "note"> & Partial<Pick<CartItem, "remise_ligne" | "note">>
+
 function sameLigne(item: CartItem, articleId: number, varianteId?: number | null): boolean {
   return item.article_id === articleId && (item.variante_id ?? null) === (varianteId ?? null)
 }
@@ -34,7 +37,7 @@ interface HeldCart {
 interface CartState {
   items: CartItem[]
   selectedClient: number | null
-  paymentMode: string
+  paymentMode: ModePaiement
   discountPercent: string
   cashGiven: string
   paymentSplits: PaymentSplit[]
@@ -42,43 +45,51 @@ interface CartState {
   useLoyaltyPoints: boolean
   activeTableId: number | null
   activeTableNom: string | null
-  addItem: (item: CartItem) => void
+  addItem: (item: NouvelArticlePanier) => void
   updateQuantity: (articleId: number, quantity: number, varianteId?: number | null) => void
   removeItem: (articleId: number, varianteId?: number | null) => void
   clearCart: () => void
   setSelectedClient: (clientId: number | null) => void
-  setPaymentMode: (mode: string) => void
+  setPaymentMode: (mode: ModePaiement) => void
   setDiscountPercent: (percent: string) => void
   setCashGiven: (cash: string) => void
   setLineDiscount: (articleId: number, percent: number, varianteId?: number | null) => void
   setLineNote: (articleId: number, note: string, varianteId?: number | null) => void
   setLinePrice: (articleId: number, prixUnitaire: number, prixType: "public" | "grossiste", varianteId?: number | null) => void
-  addSplit: (mode: string) => void
+  addSplit: (mode: ModePaiement) => void
   removeSplit: (index: number) => void
   updateSplitAmount: (index: number, amount: number) => void
-  updateSplitMode: (index: number, mode: string) => void
+  updateSplitMode: (index: number, mode: ModePaiement) => void
   holdCart: (label: string, customId?: string) => string
   resumeCart: (id: string) => void
   deleteHeldCart: (id: string) => void
   setUseLoyaltyPoints: (use: boolean) => void
-  activeTableId: number | null
-  activeTableNom: string | null
   setActiveTable: (id: number | null, nom: string | null) => void
+}
+
+const PANIER_VIDE = {
+  items: [] as CartItem[],
+  selectedClient: null,
+  paymentMode: "especes" as ModePaiement,
+  discountPercent: "0",
+  cashGiven: "",
+  paymentSplits: [] as PaymentSplit[],
+  heldCarts: [] as HeldCart[],
+  useLoyaltyPoints: false,
+  activeTableId: null,
+  activeTableNom: null,
+}
+
+const CLE_PARTAGEE_OBSOLETE = "supercaisse-cart"
+
+export function clePanier(userId: number | null): string {
+  return userId ? `supercaisse-cart-${userId}` : "supercaisse-cart-anonyme"
 }
 
 export const useCartStore = create<CartState>()(
   persist(
     (set) => ({
-      items: [],
-      selectedClient: null,
-      paymentMode: "especes",
-      discountPercent: "0",
-      cashGiven: "",
-      paymentSplits: [],
-      heldCarts: [],
-      useLoyaltyPoints: false,
-      activeTableId: null,
-      activeTableNom: null,
+      ...PANIER_VIDE,
       setActiveTable: (id, nom) => set({ activeTableId: id, activeTableNom: nom }),
       addItem: (item) =>
         set((state) => {
@@ -185,8 +196,26 @@ export const useCartStore = create<CartState>()(
       setUseLoyaltyPoints: (use) => set({ useLoyaltyPoints: use }),
     }),
     {
-      name: "supercaisse-cart",
+      name: clePanier(null),
       version: 2,
     }
   )
 )
+
+export async function basculerPanier(userId: number | null): Promise<void> {
+  const nom = clePanier(userId)
+  if (useCartStore.persist.getOptions().name === nom) return
+  useCartStore.persist.setOptions({ name: nom })
+  let enregistre = false
+  try {
+    localStorage.removeItem(CLE_PARTAGEE_OBSOLETE)
+    enregistre = localStorage.getItem(nom) !== null
+  } catch {
+    enregistre = false
+  }
+  if (enregistre) {
+    await useCartStore.persist.rehydrate()
+  } else {
+    useCartStore.setState(PANIER_VIDE)
+  }
+}

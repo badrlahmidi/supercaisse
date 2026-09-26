@@ -6,7 +6,6 @@ import { Button } from "@/ui/Button"
 import { Input } from "@/ui/Input"
 import { Label } from "@/ui/Label"
 import { Badge } from "@/ui/Badge"
-import { Textarea } from "@/ui/Textarea"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/ui/Table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/ui/Dialog"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/ui/Tabs"
@@ -16,62 +15,31 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import PageHeader from "@/components/PageHeader"
 import { formatCurrency, formatDateTime } from "@/lib/utils"
-import { Plus, XCircle, Monitor, Loader2, Banknote, CreditCard, Landmark, ArrowRightLeft } from "lucide-react"
-
-interface Caisse {
-  id: number
-  nom: string
-  utilisateur_id: number | null
-  statut: string
-  ouverture_date: string | null
-  fermeture_date: string | null
-  fond_initial: number
-  recettes_especes: number
-  recettes_cb: number
-  recettes_cheque: number
-  recettes_virement: number
-  depenses: number
-  ecart: number
-  note: string | null
-  utilisateur_nom: string | null
-}
-
-interface TresoreriePeriode {
-  especes: number
-  cb: number
-  cheque: number
-  virement: number
-  total: number
-}
-
-interface Tresorerie {
-  jour: TresoreriePeriode
-  semaine: TresoreriePeriode
-  mois: TresoreriePeriode
-}
-
-const openSchema = z.object({
-  nom: z.string().min(1, "Nom requis"),
-  fond_initial: z.coerce.number().min(0, "Le fond initial doit être positif"),
-})
-
-type OpenForm = z.infer<typeof openSchema>
+import { XCircle, Monitor, Loader2, Banknote, CreditCard, Landmark, ArrowRightLeft } from "lucide-react"
+import { sommeDH } from "@/lib/totaux"
+import type { SessionSupervision } from "@/types/generated/SessionSupervision"
+import type { Tresorerie } from "@/types/generated/Tresorerie"
 
 const closeSchema = z.object({
-  note: z.string().optional(),
+  total_especes_declare: z.coerce.number().min(0, "Le montant doit être positif"),
 })
 
 type CloseForm = z.infer<typeof closeSchema>
 
+const totalRecettes = (s: SessionSupervision) =>
+  sommeDH([s.recettes_especes, s.recettes_cb, s.recettes_cheque, s.recettes_virement])
+
+const especesAttendues = (s: SessionSupervision) =>
+  s.especes_attendu ?? sommeDH([s.fond_initial, s.recettes_especes, s.entrees, -s.sorties])
+
 export default function Caisses() {
   const queryClient = useQueryClient()
-  const [showOpen, setShowOpen] = useState(false)
-  const [closingCaisse, setClosingCaisse] = useState<Caisse | null>(null)
+  const [closingSession, setClosingSession] = useState<SessionSupervision | null>(null)
   const [tresoTab, setTresoTab] = useState("jour")
 
-  const { data: caisses = [], isLoading } = useQuery({
+  const { data: sessions = [], isLoading } = useQuery({
     queryKey: ["caisses"],
-    queryFn: () => invoke<Caisse[]>("get_caisses"),
+    queryFn: () => invoke<SessionSupervision[]>("get_caisses"),
   })
 
   const { data: tresorerie } = useQuery({
@@ -79,52 +47,28 @@ export default function Caisses() {
     queryFn: () => invoke<Tresorerie>("get_tresorerie"),
   })
 
-  const openForm = useForm<OpenForm>({
-    resolver: zodResolver(openSchema),
-    defaultValues: { nom: "", fond_initial: 0 },
-  })
-
   const closeForm = useForm<CloseForm>({
     resolver: zodResolver(closeSchema),
-    defaultValues: { note: "" },
-  })
-
-  const openMutation = useMutation({
-    mutationFn: (data: OpenForm) =>
-      invoke<number>("open_caisse", {
-        nom: data.nom,
-        fondInitial: data.fond_initial,
-        utilisateurId: null,
-      }),
-    onSuccess: () => {
-      toast.success("Caisse ouverte")
-      queryClient.invalidateQueries({ queryKey: ["caisses"] })
-      queryClient.invalidateQueries({ queryKey: ["tresorerie"] })
-      setShowOpen(false)
-      openForm.reset()
-    },
-    onError: (e) => toast.error("Erreur", { description: String(e) }),
+    defaultValues: { total_especes_declare: 0 },
   })
 
   const closeMutation = useMutation({
-    mutationFn: (data: { id: number; note?: string }) =>
-      invoke("close_caisse", { id: data.id, note: data.note || null }),
+    mutationFn: (data: { sessionId: number; totalEspecesDeclare: number }) =>
+      invoke("close_session", data),
     onSuccess: () => {
-      toast.success("Caisse fermée")
+      toast.success("Session clôturée")
       queryClient.invalidateQueries({ queryKey: ["caisses"] })
       queryClient.invalidateQueries({ queryKey: ["tresorerie"] })
-      setClosingCaisse(null)
+      queryClient.invalidateQueries({ queryKey: ["session"] })
+      setClosingSession(null)
       closeForm.reset()
     },
-    onError: (e) => toast.error("Erreur", { description: String(e) }),
+    onError: (e) => toast.error("Erreur à la clôture", { description: String(e) }),
   })
 
-  const caissesOuvertes = caisses.filter((c) => c.statut === "ouverte")
+  const sessionsOuvertes = sessions.filter((s) => s.statut === "ouverte")
   const recettesDuJour = tresorerie?.jour?.total ?? 0
-  const fondTotal = caissesOuvertes.reduce((s, c) => s + c.fond_initial, 0)
-
-  const totalRecettes = (c: Caisse) =>
-    c.recettes_especes + c.recettes_cb + c.recettes_cheque + c.recettes_virement
+  const fondTotal = sommeDH(sessionsOuvertes.map((s) => s.fond_initial))
 
   const currentTreso = tresorerie
     ? tresoTab === "jour"
@@ -136,21 +80,16 @@ export default function Caisses() {
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader title="Gestion des caisses" description="Multi-caisse avec vue trésorerie consolidée">
-        <Button onClick={() => setShowOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Ouvrir une caisse
-        </Button>
-      </PageHeader>
+      <PageHeader title="Gestion des caisses" description="Sessions ouvertes par les caissiers depuis le point de vente, et trésorerie consolidée" />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Caisses ouvertes</CardTitle>
+            <CardTitle className="text-sm font-medium">Sessions ouvertes</CardTitle>
             <Monitor className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{caissesOuvertes.length}</div>
+            <div className="text-2xl font-bold">{sessionsOuvertes.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -175,58 +114,67 @@ export default function Caisses() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Liste des caisses</CardTitle>
+          <CardTitle>Sessions de caisse</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : caisses.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8">Aucune caisse enregistrée</p>
+          ) : sessions.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">Aucune session de caisse. Les caissiers ouvrent leur session depuis le point de vente.</p>
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nom</TableHead>
+                    <TableHead>Session</TableHead>
+                    <TableHead>Caissier</TableHead>
                     <TableHead>Statut</TableHead>
-                    <TableHead>Utilisateur</TableHead>
                     <TableHead>Ouverture</TableHead>
-                    <TableHead>Fermeture</TableHead>
+                    <TableHead>Clôture</TableHead>
                     <TableHead className="text-right">Fond initial</TableHead>
-                    <TableHead className="text-right">Total recettes</TableHead>
+                    <TableHead className="text-right">Recettes</TableHead>
+                    <TableHead className="text-right">Espèces attendues</TableHead>
                     <TableHead className="text-right">Écart</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead><span className="sr-only">Actions</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {caisses.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.nom}</TableCell>
+                  {sessions.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-medium">
+                        #{s.id}
+                        {s.magasin_nom && <span className="block text-xs text-muted-foreground">{s.magasin_nom}</span>}
+                      </TableCell>
+                      <TableCell>{s.caissier_nom ?? "—"}</TableCell>
                       <TableCell>
-                        <Badge variant={c.statut === "ouverte" ? "default" : "secondary"}>
-                          {c.statut === "ouverte" ? "Ouverte" : "Fermée"}
+                        <Badge variant={s.statut === "ouverte" ? "default" : "secondary"}>
+                          {s.statut === "ouverte" ? "Ouverte" : "Clôturée"}
                         </Badge>
                       </TableCell>
-                      <TableCell>{c.utilisateur_nom ?? "—"}</TableCell>
-                      <TableCell>{formatDateTime(c.ouverture_date)}</TableCell>
-                      <TableCell>{formatDateTime(c.fermeture_date)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(c.fond_initial)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(totalRecettes(c))}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(c.ecart)}</TableCell>
+                      <TableCell>{formatDateTime(s.date_ouverture)}</TableCell>
+                      <TableCell>{s.date_cloture ? formatDateTime(s.date_cloture) : "—"}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(s.fond_initial)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(totalRecettes(s))}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(especesAttendues(s))}</TableCell>
+                      <TableCell className="text-right">
+                        {s.ecart === null ? "—" : (
+                          <span className={s.ecart === 0 ? "" : "text-destructive font-medium"}>{formatCurrency(s.ecart)}</span>
+                        )}
+                      </TableCell>
                       <TableCell>
-                        {c.statut === "ouverte" && (
+                        {s.statut === "ouverte" && (
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                              setClosingCaisse(c)
-                              closeForm.reset({ note: "" })
+                              setClosingSession(s)
+                              closeForm.reset({ total_especes_declare: especesAttendues(s) })
                             }}
                           >
                             <XCircle className="h-4 w-4 mr-1" />
-                            Fermer
+                            Clôturer
                           </Button>
                         )}
                       </TableCell>
@@ -306,72 +254,54 @@ export default function Caisses() {
         </CardContent>
       </Card>
 
-      <Dialog open={showOpen} onOpenChange={setShowOpen}>
+      <Dialog open={!!closingSession} onOpenChange={(open) => { if (!open) setClosingSession(null) }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ouvrir une nouvelle caisse</DialogTitle>
+            <DialogTitle>Clôturer la session #{closingSession?.id} ({closingSession?.caissier_nom ?? "—"})</DialogTitle>
           </DialogHeader>
-          <form onSubmit={openForm.handleSubmit((data) => openMutation.mutate(data))} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="nom">Nom de la caisse</Label>
-              <Input id="nom" {...openForm.register("nom")} placeholder="Caisse 1" />
-              {openForm.formState.errors.nom && (
-                <p className="text-sm text-destructive">{openForm.formState.errors.nom.message}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="fond_initial">Fond initial (DH)</Label>
-              <Input id="fond_initial" type="number" step="0.01" {...openForm.register("fond_initial")} />
-              {openForm.formState.errors.fond_initial && (
-                <p className="text-sm text-destructive">{openForm.formState.errors.fond_initial.message}</p>
-              )}
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowOpen(false)}>
-                Annuler
-              </Button>
-              <Button type="submit" disabled={openMutation.isPending}>
-                {openMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Ouvrir
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!closingCaisse} onOpenChange={(open) => { if (!open) setClosingCaisse(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Fermer la caisse : {closingCaisse?.nom}</DialogTitle>
-          </DialogHeader>
-          {closingCaisse && (
+          {closingSession && (
             <form
               onSubmit={closeForm.handleSubmit((data) =>
-                closeMutation.mutate({ id: closingCaisse.id, note: data.note })
+                closeMutation.mutate({ sessionId: closingSession.id, totalEspecesDeclare: data.total_especes_declare })
               )}
               className="space-y-4"
             >
               <div className="rounded-lg border p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Fond initial</span>
-                  <span className="font-medium">{formatCurrency(closingCaisse.fond_initial)}</span>
+                  <span className="font-medium">{formatCurrency(closingSession.fond_initial)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Ouverture</span>
-                  <span className="font-medium">{formatDateTime(closingCaisse.ouverture_date)}</span>
+                  <span className="text-muted-foreground">Ventes en espèces</span>
+                  <span className="font-medium">{formatCurrency(closingSession.recettes_especes)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Entrées de caisse</span>
+                  <span className="font-medium">{formatCurrency(closingSession.entrees)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Sorties de caisse</span>
+                  <span className="font-medium">{formatCurrency(-closingSession.sorties)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Espèces attendues</span>
+                  <span className="font-medium">{formatCurrency(especesAttendues(closingSession))}</span>
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="note">Note de fermeture</Label>
-                <Textarea id="note" {...closeForm.register("note")} placeholder="Observations..." rows={3} />
+                <Label htmlFor="total_especes_declare">Espèces comptées (DH)</Label>
+                <Input id="total_especes_declare" type="number" step="0.01" min="0" {...closeForm.register("total_especes_declare")} />
+                {closeForm.formState.errors.total_especes_declare && (
+                  <p className="text-sm text-destructive">{closeForm.formState.errors.total_especes_declare.message}</p>
+                )}
               </div>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setClosingCaisse(null)}>
+                <Button type="button" variant="outline" onClick={() => setClosingSession(null)}>
                   Annuler
                 </Button>
                 <Button type="submit" variant="destructive" disabled={closeMutation.isPending}>
                   {closeMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Confirmer la fermeture
+                  Confirmer la clôture
                 </Button>
               </DialogFooter>
             </form>

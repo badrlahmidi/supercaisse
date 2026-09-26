@@ -9,20 +9,9 @@ import { Loader2, Download, Search, Scale } from "lucide-react"
 import { formatCurrency, exportCSV } from "@/lib/utils"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
+import type { ComparaisonArticle } from "@/types/generated/ComparaisonArticle"
 
-interface FournisseurPrix {
-  fournisseur_id: number
-  fournisseur_nom: string
-  prix_unitaire: number
-  date: string
-}
-
-interface ArticleComparaison {
-  article_id: number
-  designation: string
-  code_barre: string | null
-  fournisseurs: FournisseurPrix[]
-}
+type ArticleComparaison = ComparaisonArticle
 
 export default function ComparaisonPrix() {
   const [search, setSearch] = useState("")

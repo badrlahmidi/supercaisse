@@ -1,0 +1,328 @@
+use crate::db::*;
+use crate::session::{autoriser, Acces, AuthState};
+use rusqlite::{params, Connection};
+use tauri::State;
+
+use super::calcul::{montant_saisi, somme_dh};
+use super::{adjust_article_stock, default_magasin_id};
+
+pub(crate) fn lire_ligne_achat(
+    ligne: &super::contrats::LigneAchatSaisie,
+) -> Result<(i64, f64, f64, f64), String> {
+    if !ligne.quantite.is_finite() || ligne.quantite <= 0.0 {
+        return Err(format!(
+            "Quantité invalide pour l'article {} : {}",
+            ligne.article_id, ligne.quantite
+        ));
+    }
+    if !ligne.prix_unitaire.is_finite() || ligne.prix_unitaire < 0.0 {
+        return Err(format!(
+            "Prix unitaire invalide pour l'article {} : {}",
+            ligne.article_id, ligne.prix_unitaire
+        ));
+    }
+    let total = montant_saisi(
+        "Total de ligne d'achat",
+        ligne.quantite * ligne.prix_unitaire,
+    )?;
+    Ok((ligne.article_id, ligne.quantite, ligne.prix_unitaire, total))
+}
+
+#[tauri::command(async)]
+pub fn create_achat(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    fournisseur_id: Option<i64>,
+    reference: Option<String>,
+    articles: Vec<super::contrats::LigneAchatSaisie>,
+    statut_livraison: Option<String>,
+    statut_paiement: Option<String>,
+) -> Result<i64, String> {
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "creer"))?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let magasin_id = default_magasin_id(&tx)?;
+    if articles.is_empty() {
+        return Err("L'achat ne contient aucun article".to_string());
+    }
+    let lignes = articles
+        .iter()
+        .map(lire_ligne_achat)
+        .collect::<Result<Vec<_>, String>>()?;
+    let montant_total = somme_dh(lignes.iter().map(|l| l.3));
+    let sl = statut_livraison.unwrap_or_else(|| "recu".to_string());
+    let sp = statut_paiement.unwrap_or_else(|| "non_paye".to_string());
+
+    tx.execute(
+        "INSERT INTO achats (fournisseur_id, reference, montant_total, statut_livraison, statut_paiement) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![fournisseur_id, reference, montant_total, sl, sp],
+    ).map_err(|e| e.to_string())?;
+    let achat_id = tx.last_insert_rowid();
+    for &(article_id, qte, pu, total_ligne) in &lignes {
+        tx.execute(
+            "INSERT INTO achat_articles (achat_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![achat_id, article_id, qte, pu, total_ligne],
+        ).map_err(|e| e.to_string())?;
+
+        if sl == "recu" {
+            tx.execute(
+                "UPDATE articles SET prix_achat = ?1 WHERE id = ?2",
+                params![pu, article_id],
+            )
+            .map_err(|e| e.to_string())?;
+            adjust_article_stock(&tx, article_id, magasin_id, qte)?;
+            tx.execute(
+                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'achat', ?4)",
+                params![article_id, qte, achat_id, magasin_id],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(achat_id)
+}
+
+#[tauri::command(async)]
+pub fn get_achats(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+) -> Result<Vec<super::contrats::AchatResume>, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.date, a.fournisseur_id, a.reference, a.montant_total, a.statut, f.nom as fournisseur_nom, a.statut_livraison, a.statut_paiement
+         FROM achats a LEFT JOIN fournisseurs f ON a.fournisseur_id = f.id
+         ORDER BY a.date DESC LIMIT 200"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(super::contrats::AchatResume {
+                id: row.get(0)?,
+                date: row.get(1)?,
+                fournisseur_id: row.get(2)?,
+                reference: row.get(3)?,
+                montant_total: row.get(4)?,
+                statut: row.get(5)?,
+                fournisseur_nom: row.get(6)?,
+                statut_livraison: row.get(7)?,
+                statut_paiement: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn update_achat_status(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    achat_id: i64,
+    statut_livraison: String,
+    statut_paiement: String,
+) -> Result<(), String> {
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "modifier"))?;
+    update_achat_status_impl(&mut conn, achat_id, &statut_livraison, &statut_paiement)
+}
+
+const STATUTS_LIVRAISON: &[&str] = &["en_attente", "partiel", "recu"];
+const STATUTS_PAIEMENT: &[&str] = &["non_paye", "partiel", "paye"];
+
+pub(crate) fn update_achat_status_impl(
+    conn: &mut Connection,
+    achat_id: i64,
+    statut_livraison: &str,
+    statut_paiement: &str,
+) -> Result<(), String> {
+    super::valeur_autorisee("Statut de livraison", statut_livraison, STATUTS_LIVRAISON)?;
+    super::valeur_autorisee("Statut de paiement", statut_paiement, STATUTS_PAIEMENT)?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let old_sl: String = tx
+        .query_row(
+            "SELECT COALESCE(statut_livraison, 'recu') FROM achats WHERE id = ?1",
+            params![achat_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "Achat introuvable".to_string())?;
+
+    if old_sl == "recu" && statut_livraison != "recu" {
+        return Err("Cet achat est déjà réceptionné et son stock est entré : il ne peut plus repasser en attente. Pour corriger, faites un ajustement de stock.".to_string());
+    }
+
+    tx.execute(
+        "UPDATE achats SET statut_livraison = ?1, statut_paiement = ?2 WHERE id = ?3",
+        params![statut_livraison, statut_paiement, achat_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    if old_sl != "recu" && statut_livraison == "recu" {
+        let magasin_id = default_magasin_id(&tx)?;
+        let mut stmt = tx.prepare("SELECT article_id, quantite, prix_unitaire FROM achat_articles WHERE achat_id = ?1").map_err(|e| e.to_string())?;
+        let lignes = stmt
+            .query_map(params![achat_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, f64>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let lignes: Vec<(i64, f64, f64)> = lignes
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        drop(stmt);
+
+        for (article_id, qte, pu) in lignes {
+            tx.execute(
+                "UPDATE articles SET prix_achat = ?1 WHERE id = ?2",
+                params![pu, article_id],
+            )
+            .map_err(|e| e.to_string())?;
+            adjust_article_stock(&tx, article_id, magasin_id, qte)?;
+            tx.execute(
+                "INSERT INTO mouvements_stock (article_id, quantite, mtype, reference_id, reference_type, magasin_id) VALUES (?1, ?2, 'entree', ?3, 'achat_reception', ?4)",
+                params![article_id, qte, achat_id, magasin_id],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn compare_fournisseur_prices(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    article_id: Option<i64>,
+) -> Result<Vec<super::contrats::ComparaisonArticle>, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "voir"))?;
+
+    let sql = "
+        SELECT
+            art.id AS article_id,
+            art.designation,
+            art.code_barre,
+            f.id AS fournisseur_id,
+            f.nom AS fournisseur_nom,
+            aa.prix_unitaire,
+            a.date
+        FROM achat_articles aa
+        JOIN achats a ON aa.achat_id = a.id
+        JOIN fournisseurs f ON a.fournisseur_id = f.id
+        JOIN articles art ON aa.article_id = art.id
+        WHERE a.fournisseur_id IS NOT NULL AND (?1 IS NULL OR aa.article_id = ?1)
+        ORDER BY art.designation, f.nom, a.date DESC
+    ";
+
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![article_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let all_rows: Vec<_> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut articles_map: std::collections::BTreeMap<i64, super::contrats::ComparaisonArticle> =
+        std::collections::BTreeMap::new();
+
+    for (aid, designation, code_barre, fid, fournisseur_nom, prix, date) in all_rows {
+        let entry =
+            articles_map
+                .entry(aid)
+                .or_insert_with(|| super::contrats::ComparaisonArticle {
+                    article_id: aid,
+                    designation,
+                    code_barre,
+                    fournisseurs: Vec::new(),
+                });
+        if !entry.fournisseurs.iter().any(|f| f.fournisseur_id == fid) {
+            entry.fournisseurs.push(super::contrats::PrixFournisseur {
+                fournisseur_id: fid,
+                fournisseur_nom,
+                prix_unitaire: prix,
+                date,
+            });
+        }
+    }
+
+    Ok(articles_map.into_values().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_lignes_d_achat_incompletes_refusees() {
+        let ligne = |v: serde_json::Value| {
+            serde_json::from_value::<crate::commands::contrats::LigneAchatSaisie>(v)
+                .map_err(|e| e.to_string())
+                .and_then(|l| lire_ligne_achat(&l))
+        };
+        assert_eq!(
+            ligne(json!({ "article_id": 1, "quantite": 3, "prix_unitaire": 3.335 })).unwrap(),
+            (1, 3.0, 3.335, 10.01)
+        );
+        assert!(ligne(json!({ "article_id": 1, "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": "2", "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": 0, "prix_unitaire": 2 })).is_err());
+        assert!(ligne(json!({ "article_id": 1, "quantite": 1, "prix_unitaire": -2 })).is_err());
+        assert!(ligne(json!({ "quantite": 1, "prix_unitaire": 2 })).is_err());
+    }
+
+    #[test]
+    fn test_reception_d_achat_comptee_une_seule_fois() {
+        let mut conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute_batch(
+            "INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Huile', 20, 20);
+             INSERT INTO achats (id, montant_total, statut_livraison, statut_paiement) VALUES (1, 50, 'en_attente', 'non_paye');
+             INSERT INTO achat_articles (achat_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (1, 1, 5, 10, 50);",
+        )
+        .unwrap();
+        let stock = |conn: &Connection| -> f64 {
+            conn.query_row("SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        update_achat_status_impl(&mut conn, 1, "recu", "non_paye").unwrap();
+        assert_eq!(stock(&conn), 5.0);
+        update_achat_status_impl(&mut conn, 1, "recu", "paye").unwrap();
+        assert_eq!(stock(&conn), 5.0);
+
+        let refus = update_achat_status_impl(&mut conn, 1, "en_attente", "paye").unwrap_err();
+        assert!(refus.contains("déjà réceptionné"), "{}", refus);
+        update_achat_status_impl(&mut conn, 1, "recu", "paye").unwrap();
+        assert_eq!(stock(&conn), 5.0);
+        let statut: String = conn
+            .query_row(
+                "SELECT statut_livraison FROM achats WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(statut, "recu");
+
+        assert!(update_achat_status_impl(&mut conn, 1, "livre", "paye").is_err());
+        assert!(update_achat_status_impl(&mut conn, 99, "recu", "paye").is_err());
+    }
+}

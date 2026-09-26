@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@/lib/tauri"
+import { buildPaiements } from "@/lib/paiements"
+import { calculerTotaux, round2, sommeDH } from "@/lib/totaux"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/context/AuthContext"
 import { usePOSProducts } from "@/hooks/useProducts"
@@ -13,7 +15,7 @@ import { Button } from "@/ui/Button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/Dialog"
 import { Toaster } from "@/ui/Toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
-import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, FileText, LockOpen, Coffee, Store, BarChart3 } from "lucide-react"
+import { Search, Package, Barcode, Loader2, Keyboard, PauseCircle, PlayCircle, Trash2, X, LockOpen, Coffee, Store, BarChart3 } from "lucide-react"
 import { formatCurrency, cn } from "@/lib/utils"
 import { printViaTauri, saveFacturePdf, type ReceiptData } from "@/lib/receipt"
 import { useDebounce } from "@/hooks/useDebounce"
@@ -23,51 +25,15 @@ import CategoryPills from "@/components/pos/CategoryPills"
 import ProductGrid from "@/components/pos/ProductGrid"
 import CartPanel from "@/components/pos/CartPanel"
 import { useTables, useUpdateTable, type TableResto } from "@/hooks/useTables"
-
-interface Article {
-  id: number
-  code_barre: string | null
-  designation: string
-  prix_vente: number
-  tva: number
-  stock: number
-  stock_alerte: number | null
-  categorie_id: number | null
-  categorie_nom?: string
-  a_variantes?: boolean
-}
-
-interface ArticleVariante {
-  id: number
-  taille: string | null
-  couleur: string | null
-  code_barre: string | null
-  stock_dedie: number
-}
-
-interface Category {
-  id: number
-  nom: string
-}
-
-interface RapportX {
-  session_id: number
-  date_ouverture: string
-  fond_initial: number
-  nb_ventes: number
-  ca_total: number
-  total_remises: number
-  nb_annulations: number
-  nb_articles_vendus: number
-  par_mode: { mode: string; total: number; count: number }[]
-}
-
-interface Client {
-  id: number
-  nom: string
-  ice: string | null
-  credit_actuel: number
-}
+import type { Article, ArticleVariante } from "@/types"
+import { estFiscal, mentionsVendeurManquantes } from "@/lib/fiscal"
+import type { LigneVenteSaisie } from "@/types/generated/LigneVenteSaisie"
+import type { VarianteScannee } from "@/types/generated/VarianteScannee"
+import type { Magasin } from "@/types/generated/Magasin"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
+import type { TypeDocument } from "@/types/generated/TypeDocument"
+import type { VenteCreee } from "@/types/generated/VenteCreee"
+import type { RapportX } from "@/types/generated/RapportX"
 
 const SHORTCUTS = [
   { key: "F1", label: "Recherche" },
@@ -79,7 +45,7 @@ const SHORTCUTS = [
   { key: "F8", label: "Reprendre ticket" },
 ]
 
-const PAYMENT_CYCLE = ["especes", "carte", "cheque", "credit", "virement"]
+const PAYMENT_CYCLE: ModePaiement[] = ["especes", "carte", "cheque", "credit", "virement"]
 
 export default function POS() {
   const { user } = useAuth()
@@ -92,7 +58,7 @@ export default function POS() {
   const { data: tables = [], isLoading: tablesLoading } = useTables()
   const updateTableMutation = useUpdateTable()
 
-  const [debouncedSearch] = useDebounce(search, 300)
+  const debouncedSearch = useDebounce(search, 300)
   const [activeCategory, setActiveCategory] = useState<number | "all">("all")
   const [processing, setProcessing] = useState(false)
   const [lastReceipt, setLastReceipt] = useState<ReceiptData | null>(null)
@@ -100,7 +66,8 @@ export default function POS() {
   const [showHeldPanel, setShowHeldPanel] = useState(false)
   const [, setLastSync] = useState<Date>(new Date())
 
-  const [documentType, setDocumentType] = useState<string>("facture")
+  const [documentType, setDocumentType] = useState<TypeDocument>("facture")
+  const mentionsManquantes = mentionsVendeurManquantes(settings)
   const [variantPickerArticle, setVariantPickerArticle] = useState<Article | null>(null)
   const [showVariantPicker, setShowVariantPicker] = useState(false)
   const [showRapportX, setShowRapportX] = useState(false)
@@ -112,7 +79,7 @@ export default function POS() {
 
   const { data: magasins = [] } = useQuery({
     queryKey: ["magasins"],
-    queryFn: () => invoke<{ id: number; nom: string; adresse: string | null }[]>("get_magasins"),
+    queryFn: () => invoke<Magasin[]>("get_magasins"),
   })
 
   const cart = useCartStore((s) => s.items)
@@ -130,7 +97,6 @@ export default function POS() {
   const resumeCart = useCartStore((s) => s.resumeCart)
   const deleteHeldCart = useCartStore((s) => s.deleteHeldCart)
   const useLoyaltyPoints = useCartStore((s) => s.useLoyaltyPoints)
-  const setUseLoyaltyPoints = useCartStore((s) => s.setUseLoyaltyPoints)
   const activeTableId = useCartStore((s) => s.activeTableId)
   const activeTableNom = useCartStore((s) => s.activeTableNom)
   const setActiveTable = useCartStore((s) => s.setActiveTable)
@@ -160,27 +126,23 @@ export default function POS() {
     searchRef.current?.focus()
   }, [])
 
-  const subtotal = cart.reduce((s, i) => s + i.quantite * i.prix_unitaire, 0)
-  const totalTVA = cart.reduce((s, i) => s + i.quantite * i.prix_unitaire * (i.tva / 100), 0)
-  const totalTTC = subtotal + totalTVA
   const discount = parseFloat(discountPercent) || 0
-  const discountAmount = totalTTC * (discount / 100)
-  
-  // -- Fidélité --
+  const totaux = calculerTotaux(cart, discount)
+  const subtotal = totaux.sousTotalHT
+  const totalTVA = totaux.totalTVABrut
+  const discountAmount = totaux.montantRemise
+
   const activeClient = clients.find(c => c.id === selectedClient)
   const isLoyaltyActive = settings.fidelite_actif === "true"
   const ptsValueDH = parseFloat(settings.fidelite_valeur_1_point) || 1
   const ptsFor1DH = parseFloat(settings.fidelite_dh_pour_1_point) || 100
-  
-  // Points que le client va gagner avec ce panier
-  const ptsEarned = isLoyaltyActive ? Math.floor((totalTTC - discountAmount) / ptsFor1DH) : 0
-  
-  // Points que le client va utiliser
-  const maxPtsUsable = Math.floor((totalTTC - discountAmount) / ptsValueDH) // Ne pas rendre d'argent sur les points
-  const ptsToUse = (useLoyaltyPoints && activeClient) ? Math.min(activeClient.points_fidelite, maxPtsUsable) : 0
-  const loyaltyDiscount = ptsToUse * ptsValueDH
 
-  const netAmount = Math.max(0, totalTTC - discountAmount - loyaltyDiscount)
+  const maxPtsUsable = Math.floor(totaux.netTTC / ptsValueDH)
+  const ptsToUse = (useLoyaltyPoints && activeClient) ? Math.min(activeClient.points_fidelite, maxPtsUsable) : 0
+  const loyaltyDiscount = round2(ptsToUse * ptsValueDH)
+
+  const netAmount = Math.max(0, round2(totaux.netTTC - loyaltyDiscount))
+  const ptsEarned = isLoyaltyActive && activeClient ? Math.floor(netAmount / ptsFor1DH) : 0
   const cashAmount = parseFloat(cashGiven) || 0
   const change = paymentMode === "especes" ? Math.max(0, cashAmount - netAmount) : 0
   const itemCount = cart.reduce((s, i) => s + i.quantite, 0)
@@ -280,20 +242,27 @@ export default function POS() {
       return true
     }
     try {
-      const found = await invoke<{
-        variante_id: number; article_id: number; taille: string | null; couleur: string | null
-        stock_dedie: number; designation: string; prix_vente: number; tva: number; actif: boolean
-      } | null>("find_variante_by_barcode", { code_barre: code })
+      const found = await invoke<VarianteScannee | null>("find_variante_by_barcode", { code_barre: code })
       if (found && found.actif) {
         const articleShim: Article = {
           id: found.article_id,
           code_barre: null,
           designation: found.designation,
+          prix_achat: 0,
+          fournisseur_id: null,
+          actif: found.actif,
           prix_vente: found.prix_vente,
           tva: found.tva,
           stock: found.stock_dedie,
           stock_alerte: null,
           categorie_id: null,
+          image_url: null,
+          categorie_nom: null,
+          fournisseur_nom: null,
+          suivi_lot: false,
+          prix_grossiste: null,
+          est_kit: false,
+          a_variantes: true,
         }
         const varianteShim: ArticleVariante = {
           id: found.variante_id,
@@ -313,8 +282,11 @@ export default function POS() {
 
   const handleValidateSale = () => {
     if (cart.length === 0) return
-    if (paymentMode === "especes" && cashAmount < netAmount) {
-      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(netAmount - cashAmount)}` })
+    const montantRecu = paymentSplits.length > 0
+      ? sommeDH(paymentSplits.map((p) => p.amount))
+      : paymentMode === "especes" ? cashAmount : netAmount
+    if (montantRecu < netAmount) {
+      toast.error("Montant insuffisant", { description: `Il manque ${formatCurrency(sommeDH([netAmount, -montantRecu]))}` })
       return
     }
     setProcessing(true)
@@ -354,7 +326,7 @@ export default function POS() {
 
   useEffect(() => {
     handlerRef.current = { handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode }
-  }, [handleValidateSale, clearCart, removeLastItem, addToCart, handleHoldCart, resolveAndAddByBarcode])
+  })
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -421,28 +393,22 @@ export default function POS() {
 
   const createSaleMutation = useMutation({
     mutationFn: async () => {
-      const items = cart.map((i) => ({
+      const items: LigneVenteSaisie[] = cart.map((i) => ({
         article_id: i.article_id,
         variante_id: i.variante_id || null,
         quantite: i.quantite,
-        prix_unitaire: i.prix_unitaire,
-        tva: i.tva,
         remise_ligne: i.remise_ligne || 0,
         note: i.note || null,
         prix_type: i.prix_type || "public",
       }))
-      const isSplit = paymentSplits.length > 0
-      const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
-      return invoke<{ id: number; numero_facture: string }>("create_vente", {
+      return invoke<VenteCreee>("create_vente", {
         clientId: selectedClient,
-        caissierId: user?.id ?? 0,
         articles: items,
-        montantRemise: discountAmount,
-        modePaiement: isSplit ? paymentSplits.map((s) => s.mode).join("+") : paymentMode,
-        splits: isSplit ? paymentSplits : null,
+        remiseGlobalePct: discount,
+        modePaiement: paymentMode,
+        splits: buildPaiements(paymentSplits, paymentMode, netAmount, loyaltyDiscount),
         dtype: documentType,
-        points_utilises: ptsToUse,
-        points_gagnes: ptsEarned,
+        pointsUtilises: ptsToUse,
         magasinId: currentSession?.magasin_id ?? null,
       })
     },
@@ -466,26 +432,26 @@ export default function POS() {
         venteId,
         docType: documentType,
         docNumero: numeroFacture,
+        montantHT: totaux.montantHT,
         date: new Date().toISOString(),
         caissier: user?.nom || "",
         client: clientName,
         clientIce,
-        items: cart.map((i) => {
-          const baseTotal = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
-          const remiseLigne = baseTotal * ((i.remise_ligne || 0) / 100)
-          return {
-            designation: i.designation,
-            quantite: i.quantite,
-            prix_unitaire: i.prix_unitaire,
-            tva: i.tva,
-            total_ligne: baseTotal - remiseLigne,
-            remise_ligne: i.remise_ligne || 0,
-          }
-        }),
-        montantTotal: subtotal,
-        montantRemise: discountAmount + loyaltyDiscount,
-        netPaye: netAmount,
-        modePaiement: isSplit ? paymentSplits.map((s) => `${s.mode} ${formatCurrency(s.amount)}`).join(" + ") : paymentMode,
+        items: cart.map((i, idx) => ({
+          designation: i.designation,
+          quantite: i.quantite,
+          prix_unitaire: i.prix_unitaire,
+          tva: i.tva,
+          total_ligne: totaux.lignes[idx].total_ligne,
+          montant_tva: totaux.lignes[idx].montant_tva,
+          remise_ligne: i.remise_ligne || 0,
+        })),
+        montantTotal: totaux.montantTotal,
+        montantRemise: totaux.montantRemise,
+        netPaye: totaux.netTTC,
+        modePaiement: buildPaiements(paymentSplits, paymentMode, netAmount, loyaltyDiscount)
+          .map((p) => (isSplit || loyaltyDiscount > 0 ? `${p.mode} ${formatCurrency(p.montant)}` : p.mode))
+          .join(" + "),
         monnaie: change,
       })
 
@@ -534,12 +500,12 @@ export default function POS() {
           </p>
           {magasins.length > 1 && (
             <div className="space-y-2 text-left">
-              <label className="text-sm font-medium flex items-center gap-2">
+              <label htmlFor="session-boutique" className="text-sm font-medium flex items-center gap-2">
                 <Store className="h-4 w-4" />
                 Boutique
               </label>
               <Select value={selectedMagasinId} onValueChange={setSelectedMagasinId}>
-                <SelectTrigger className="h-12">
+                <SelectTrigger id="session-boutique" className="h-12">
                   <SelectValue placeholder="Sélectionner une boutique" />
                 </SelectTrigger>
                 <SelectContent>
@@ -551,8 +517,9 @@ export default function POS() {
             </div>
           )}
           <div className="space-y-2 text-left">
-            <label className="text-sm font-medium">Fond de caisse initial (DH)</label>
+            <label htmlFor="session-fond" className="text-sm font-medium">Fond de caisse initial (DH)</label>
             <Input
+              id="session-fond"
               type="number"
               value={fondInitial}
               onChange={(e) => setFondInitial(e.target.value)}
@@ -584,6 +551,11 @@ export default function POS() {
     <div className="flex h-screen w-full bg-background overflow-hidden">
       {/* Left Panel - Products */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {estFiscal(documentType) && mentionsManquantes.length > 0 && (
+          <div role="alert" className="flex-shrink-0 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            Mentions légales manquantes ({mentionsManquantes.join(", ")}) : aucune facture ne peut être émise. Renseignez-les dans Paramètres &gt; Général.
+          </div>
+        )}
         {/* Top Bar */}
         <div className="flex-shrink-0 border-b border-border bg-card">
           <div className="flex items-center gap-4 p-3 lg:px-6">
@@ -616,6 +588,7 @@ export default function POS() {
               className="relative"
               onClick={handleHoldCart}
               title="Mettre en attente (F7)"
+              aria-keyshortcuts="F7"
             >
               <PauseCircle className="h-5 w-5" />
             </Button>
@@ -625,6 +598,7 @@ export default function POS() {
               className="relative"
               onClick={() => setShowHeldPanel((p) => !p)}
               title="Tickets en attente (F8)"
+              aria-keyshortcuts="F8"
             >
               <PlayCircle className="h-5 w-5" />
               {heldCarts.length > 0 && (
@@ -705,8 +679,6 @@ export default function POS() {
         netAmount={netAmount}
         discount={discount}
         discountAmount={discountAmount}
-        cashAmount={cashAmount}
-        change={change}
         itemCount={itemCount}
         onUpdateQuantity={updateQuantity}
         onRemoveItem={removeFromCart}
@@ -727,11 +699,14 @@ export default function POS() {
 
       {/* Held Tickets Panel */}
       {showHeldPanel && (
-        <div className="absolute inset-0 z-50 flex justify-end" onClick={() => setShowHeldPanel(false)}>
-          <div
-            className="relative w-80 h-full bg-card border-l border-border shadow-2xl flex flex-col animate-slide-in-right"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="absolute inset-0 z-50 flex justify-end">
+          <button
+            type="button"
+            aria-label="Fermer les tickets en attente"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setShowHeldPanel(false)}
+          />
+          <aside aria-label="Tickets en attente" className="relative w-80 h-full bg-card border-l border-border shadow-2xl flex flex-col animate-slide-in-right">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <PauseCircle className="h-5 w-5 text-primary" />
@@ -813,7 +788,7 @@ export default function POS() {
                 F7 — Mettre en attente · F8 — Ouvrir ce panneau
               </p>
             </div>
-          </div>
+          </aside>
         </div>
       )}
 

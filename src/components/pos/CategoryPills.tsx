@@ -1,11 +1,7 @@
 import { Button } from "@/ui/Button"
 import { Badge } from "@/ui/Badge"
 import { Package, Tag } from "lucide-react"
-
-interface Category {
-  id: number
-  nom: string
-}
+import type { Category } from "@/types"
 
 interface CategoryPillsProps {
   categories: Category[]

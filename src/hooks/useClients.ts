@@ -1,19 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { Client, Saisie } from "@/types"
 
-export interface Client {
-  id: number
-  nom: string
-  adresse?: string
-  telephone?: string
-  email: string | null
-  ice: string | null
-  credit_plafond: number | null
-  credit_actuel: number
-  points_fidelite: number
-  segment: string | null
-}
+export type { Client }
 
 export function useClientsList() {
   return useQuery({
@@ -26,7 +16,7 @@ export function useClientsList() {
 export function useCreateClient() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: Omit<Client, "id" | "credit_actuel">) =>
+    mutationFn: (data: Saisie<Omit<Client, "id" | "credit_actuel">> & { nom: string }) =>
       invoke<Client>("add_client", data),
     onSuccess: () => { toast.success("Client créé"); qc.invalidateQueries({ queryKey: ["clients"] }) },
     onError: (e) => toast.error(String(e)),
@@ -36,7 +26,7 @@ export function useCreateClient() {
 export function useUpdateClient() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...data }: Partial<Client> & { id: number }) => invoke<Client>("update_client", { id, ...data }),
+    mutationFn: ({ id, ...data }: Saisie<Client> & { id: number }) => invoke<Client>("update_client", { id, ...data }),
     onSuccess: () => { toast.success("Client mis à jour"); qc.invalidateQueries({ queryKey: ["clients"] }) },
     onError: (e) => toast.error(String(e)),
   })

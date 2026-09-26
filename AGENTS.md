@@ -20,7 +20,7 @@
 - `src/store/` — Zustand stores (cart.ts, ui.ts)
 - `src/ui/` — Reusable UI primitives (Button, Card, Dialog, Input, Table, Badge, Label, Textarea, Select)
 - `src/lib/` — utils (formatCurrency, formatDate, cn)
-- `src/routes/` — router.tsx (all routes + code-split config)
+- `src/routes/` — router.tsx (all routes), pages.tsx (lazy page imports), acces.ts (route → permission map)
 - `src/test/` — test setup (jest-dom matchers)
 
 ## Important conventions
@@ -41,6 +41,16 @@
 ## Build commands
 - `npm run dev` — Vite dev server
 - `npm run build` — Vite production build
-- `npm run lint` — ESLint
-- `npx tsc --noEmit` — TypeScript check
+- `npm run lint` — oxlint with `--deny-warnings` (react, typescript, jsx-a11y plugins; exceptions in `.oxlintrc.json`); CI fails on any warning
+- `npx tsc -b` — TypeScript check (the root `tsc --noEmit` checks no file: the root tsconfig only has references)
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (in `src-tauri/`) — Rust checks run by CI
 - `npx vite build` — verify production build
+
+## IPC contracts
+- Payloads and results shared with the frontend are Rust structs in `src-tauri/src/commands/contrats.rs` (`#[derive(TS)]`, strict `deny_unknown_fields` inputs)
+- `cargo test` regenerates `src/types/generated/*.ts` (never edit them by hand; commit them, CI fails if stale); import them directly, e.g. `@/types/generated/VenteResume`
+- Commands must not use `serde_json::Value` in their signature (a Rust test enforces it): every result is a typed struct
+
+## Versioning & releases
+- `package.json` holds the version; `tauri.conf.json` reads it (`"version": "../package.json"`) and `npm version <x.y.z>` syncs `Cargo.toml`/`Cargo.lock` (a Rust test fails if they diverge)
+- Pushing a `v<x.y.z>` tag runs `.github/workflows/release.yml` (signed Windows installer + `latest.json`, draft release); setup steps in `docs/RELEASE.md`

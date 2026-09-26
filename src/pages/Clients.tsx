@@ -17,39 +17,10 @@ import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { formatCurrency, formatDate, exportCSV } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
-
-interface Client {
-  id: number
-  code: string | null
-  nom: string
-  adresse: string | null
-  telephone: string | null
-  email: string | null
-  ice: string | null
-  credit_plafond: number | null
-  credit_actuel: number | null
-  points_fidelite: number | null
-  segment: string | null
-}
-
-interface MouvementFidelite {
-  id: number
-  client_id: number
-  vente_id: number | null
-  points: number
-  mtype: "gain" | "depense"
-  date: string
-  numero_facture: string | null
-}
-
-interface ReleveClient {
-  client_id: number
-  nom: string
-  credit_actuel: number
-  credit_plafond: number
-  ventes: { id: number; date: string; numero_facture: string; montant_total: number; mode_paiement: string; statut: string }[]
-  paiements: { id: number; date: string; montant: number; type_paiement: string; reference: string | null }[]
-}
+import type { Client } from "@/types"
+import { iceSaisieValide } from "@/lib/fiscal"
+import type { ReleveClient } from "@/types/generated/ReleveClient"
+import type { MouvementFidelite } from "@/types/generated/MouvementFidelite"
 
 const SEGMENTS = ["Particulier", "Professionnel", "Grossiste", "VIP", "Revendeur"] as const
 
@@ -58,8 +29,8 @@ const clientSchema = z.object({
   nom: z.string().min(1, "Nom requis"),
   adresse: z.string().optional().nullable(),
   telephone: z.string().optional().nullable(),
-  email: z.string().email("Email invalide").optional().nullable(),
-  ice: z.string().optional().nullable(),
+  email: z.union([z.literal(""), z.string().trim().email("Email invalide")]).optional().nullable(),
+  ice: z.string().optional().nullable().refine(iceSaisieValide, "ICE invalide : 15 chiffres attendus"),
   credit_plafond: z.number().min(0).optional().nullable(),
   segment: z.string().optional().nullable(),
 })
@@ -119,7 +90,7 @@ export default function Clients() {
       `"Vente","${v.date}","${v.numero_facture}","${v.montant_total}","${v.mode_paiement}"`
     )
     const paiementRows = releveData.paiements.map(p =>
-      `"Paiement","${p.date}","${p.reference || ""}","${p.montant}","${p.type_paiement}"`
+      `"Paiement","${p.date}","${p.reference || ""}","${p.montant}","${p.type}"`
     )
     const csv = [header, ...venteRows, ...paiementRows].join("\n")
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" })
@@ -381,6 +352,9 @@ export default function Clients() {
               <div className="space-y-2">
                 <Label htmlFor="ice">ICE (B2B)</Label>
                 <Input {...form.register("ice")} id="ice" placeholder="Numéro ICE (15 chiffres)" />
+                {form.formState.errors.ice && (
+                  <p className="text-sm text-destructive">{form.formState.errors.ice.message}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="credit_plafond">Plafond crédit</Label>
@@ -653,7 +627,7 @@ export default function Clients() {
                       {releveData.paiements.map((p) => (
                         <TableRow key={p.id}>
                           <TableCell className="text-xs">{formatDate(p.date)}</TableCell>
-                          <TableCell className="text-xs capitalize">{p.type_paiement}</TableCell>
+                          <TableCell className="text-xs capitalize">{p.type}</TableCell>
                           <TableCell className="text-xs">{p.reference || "—"}</TableCell>
                           <TableCell className="text-right font-medium text-green-600">{formatCurrency(p.montant)}</TableCell>
                         </TableRow>

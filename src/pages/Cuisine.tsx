@@ -59,14 +59,6 @@ export default function Cuisine() {
     }
   }
 
-  const getNextStatus = (statut: OrderItem["statut"]): OrderItem["statut"] | null => {
-    switch (statut) {
-      case "en_attente": return "en_preparation"
-      case "en_preparation": return "pret"
-      case "pret": return "servi"
-      default: return null
-    }
-  }
 
   const grouped = {
     en_attente: orders.filter((o) => o.statut === "en_attente"),

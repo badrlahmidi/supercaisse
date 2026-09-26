@@ -1,16 +1,17 @@
 {
   "name": "supercaisse",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "version": "node scripts/synchroniser-version.mjs && git add src-tauri/Cargo.toml src-tauri/Cargo.lock"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

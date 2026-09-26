@@ -21,9 +21,9 @@ import {
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
 import { cn, formatCurrency, formatNumber, formatDate } from "@/lib/utils"
-import { format } from "date-fns"
+import { format, subDays } from "date-fns"
 import { fr } from "date-fns/locale"
-import { useState, useEffect } from "react"
+import { useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 
 interface Stats {
@@ -37,19 +37,6 @@ interface Stats {
   benefice_mois: number
   top_articles: Array<{ designation: string; quantite: number }>
   top_clients: Array<{ nom: string; depense: number }>
-}
-
-interface Vente {
-  id: number
-  date: string
-  client_id: number | null
-  caissier_id: number | null
-  montant_total: number
-  montant_remise: number
-  mode_paiement: string
-  statut: string
-  client_nom: string | null
-  caissier_nom: string | null
 }
 
 const statCards = [
@@ -68,26 +55,16 @@ export default function Dashboard() {
 
   const { data: ventes, isLoading: ventesLoading } = useRecentSales()
 
-  // Prepare chart data
-  const [chartData, setChartData] = useState<{ label: string; value: number }[]>([])
-
-  useEffect(() => {
-    if (!ventes) return
-    const days: { label: string; value: number }[] = []
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const dateStr = d.toISOString().slice(0, 10)
-      const total = ventes
-        .filter((v) => v.date && v.date.startsWith(dateStr))
-        .reduce((s, v) => s + (v.montant_total - v.montant_remise), 0)
-      days.push({
+  const chartData = useMemo(() => {
+    const parJour = new Map((stats?.ca_7_jours ?? []).map((j) => [j.jour, j.montant]))
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = subDays(new Date(), 6 - i)
+      return {
         label: format(d, "EEE dd", { locale: fr }),
-        value: total,
-      })
-    }
-    setChartData(days)
-  }, [ventes])
+        value: parJour.get(format(d, "yyyy-MM-dd")) ?? 0,
+      }
+    })
+  }, [stats])
 
   if (statsLoading) {
     return (
@@ -210,7 +187,7 @@ export default function Dashboard() {
                   <div key={i} className="h-12 animate-pulse bg-muted rounded" />
                 ))}
               </div>
-            ) : ventes && ventes.length > 0 ? (
+            ) : ventes && ventes.lignes.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -222,7 +199,7 @@ export default function Dashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {ventes.slice(0, 5).map((vente) => (
+                  {ventes.lignes.map((vente) => (
                     <TableRow key={vente.id}>
                       <TableCell className="font-medium">#{vente.id}</TableCell>
                       <TableCell>{vente.client_nom || "Client de passage"}</TableCell>

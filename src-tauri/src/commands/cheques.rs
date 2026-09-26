@@ -1,0 +1,91 @@
+use crate::db::*;
+use crate::session::{autoriser, Acces, AuthState};
+use rusqlite::params;
+use tauri::State;
+
+use super::calcul::montant_positif;
+
+#[tauri::command(async)]
+pub fn get_cheques(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+) -> Result<Vec<super::contrats::Cheque>, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "voir"))?;
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.numero, c.banque, c.tireur, c.montant, c.date_emission, c.date_echeance, c.statut, c.ctype, c.client_id, c.fournisseur_id,
+                cl.nom as client_nom, f.nom as fournisseur_nom
+         FROM cheques c
+         LEFT JOIN clients cl ON c.client_id = cl.id
+         LEFT JOIN fournisseurs f ON c.fournisseur_id = f.id
+         ORDER BY c.date_echeance ASC"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(super::contrats::Cheque {
+                id: row.get(0)?,
+                numero: row.get(1)?,
+                banque: row.get(2)?,
+                tireur: row.get(3)?,
+                montant: row.get(4)?,
+                date_emission: row.get(5)?,
+                date_echeance: row.get(6)?,
+                statut: row.get(7)?,
+                ctype: row.get(8)?,
+                client_id: row.get(9)?,
+                fournisseur_id: row.get(10)?,
+                client_nom: row.get(11)?,
+                fournisseur_nom: row.get(12)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn add_cheque(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    numero: String,
+    banque: String,
+    tireur: Option<String>,
+    montant: f64,
+    date_emission: String,
+    date_echeance: String,
+    ctype: String,
+    client_id: Option<i64>,
+    fournisseur_id: Option<i64>,
+) -> Result<i64, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "creer"))?;
+    let montant = montant_positif("Montant du chèque", montant)?;
+    super::valeur_autorisee("Type de chèque", &ctype, TYPES_CHEQUE)?;
+    conn.execute(
+        "INSERT INTO cheques (numero, banque, tireur, montant, date_emission, date_echeance, ctype, client_id, fournisseur_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![numero, banque, tireur, montant, date_emission, date_echeance, ctype, client_id, fournisseur_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command(async)]
+pub fn update_cheque_status(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+    cheque_id: i64,
+    statut: String,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Module("cheques", "modifier"))?;
+    super::valeur_autorisee("Statut du chèque", &statut, STATUTS_CHEQUE)?;
+    conn.execute(
+        "UPDATE cheques SET statut = ?1 WHERE id = ?2",
+        params![statut, cheque_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

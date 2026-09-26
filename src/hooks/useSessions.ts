@@ -1,21 +1,16 @@
+import type { SessionCaisse } from "@/types/generated/SessionCaisse"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
 
-export interface SessionCaisse {
-  id: number
-  caissier_id: number
-  date_ouverture: string
-  fond_initial: number
-  statut: string
-}
+export type { SessionCaisse }
 
 export function useCurrentSession(caissierId?: number) {
   return useQuery({
     queryKey: ["session", caissierId],
     queryFn: async () => {
       if (!caissierId) return null
-      return invoke<SessionCaisse | null>("get_current_session", { caissierId })
+      return invoke<SessionCaisse | null>("get_current_session")
     },
     enabled: !!caissierId,
   })
@@ -24,8 +19,8 @@ export function useCurrentSession(caissierId?: number) {
 export function useOpenSession() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ caissierId, fondInitial, magasinId }: { caissierId: number, fondInitial: number, magasinId?: number }) =>
-      invoke<number>("open_session", { caissierId, fondInitial, magasinId }),
+    mutationFn: ({ fondInitial, magasinId }: { caissierId: number, fondInitial: number, magasinId?: number }) =>
+      invoke<number>("open_session", { fondInitial, magasinId }),
     onSuccess: (_, variables) => {
       toast.success("Session de caisse ouverte")
       qc.invalidateQueries({ queryKey: ["session", variables.caissierId] })

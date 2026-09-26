@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Loader2, SearchX, Package, ArrowDownRight, ArrowUpRight } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import { formatCurrency, formatDateTime } from "@/lib/utils"
+import { formatNumber, formatDateTime } from "@/lib/utils"
+import Pagination from "@/components/Pagination"
 import { useDebounce } from "@/hooks/useDebounce"
 import { cn } from "@/lib/utils"
 
@@ -19,6 +20,7 @@ const TYPE_LABELS: Record<string, string> = {
   vente: "Vente",
   achat: "Achat",
   ajustement: "Ajustement",
+  inventaire: "Inventaire",
   transfert: "Transfert",
 }
 
@@ -28,32 +30,31 @@ const TYPE_VARIANTS: Record<string, "success" | "destructive" | "outline" | "war
   vente: "destructive",
   achat: "success",
   ajustement: "warning",
+  inventaire: "warning",
   transfert: "outline",
 }
 
 export default function MouvementsStock() {
   const [search, setSearch] = useState("")
-  const [debouncedSearch] = useDebounce(search, 300)
+  const debouncedSearch = useDebounce(search, 300)
   const [articleFilter, setArticleFilter] = useState<string>("all")
   const [typeFilter, setTypeFilter] = useState<string>("all")
 
   const { data: articles } = useProductsList(debouncedSearch)
-  const { data: mouvements, isLoading } = useMouvementsStock()
-
-  const filtered = mouvements?.filter((m) => {
-    if (typeFilter !== "all" && m.mtype !== typeFilter) return false
-    if (articleFilter !== "all" && m.article_id !== parseInt(articleFilter)) return false
-    if (debouncedSearch) {
-      const q = debouncedSearch.toLowerCase()
-      return m.designation.toLowerCase().includes(q)
-    }
-    return true
-  })
+  const [page, setPage] = useState(0)
+  const { data: resultat, isLoading } = useMouvementsStock(
+    articleFilter === "all" ? null : parseInt(articleFilter),
+    typeFilter === "all" ? null : typeFilter,
+    debouncedSearch.trim(),
+    page,
+  )
+  const mouvements = resultat?.lignes
+  const filtered = mouvements
 
   const stats = {
     entree: mouvements?.filter((m) => m.mtype === "entree" || m.mtype === "achat").reduce((s, m) => s + m.quantite, 0) || 0,
     sortie: mouvements?.filter((m) => m.mtype === "sortie" || m.mtype === "vente").reduce((s, m) => s + m.quantite, 0) || 0,
-    total: mouvements?.length || 0,
+    total: resultat?.total || 0,
   }
 
   return (
@@ -67,8 +68,8 @@ export default function MouvementsStock() {
               <ArrowDownRight className="h-5 w-5 text-success" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Entrées</p>
-              <p className="text-xl font-bold text-success">{formatCurrency(stats.entree)}</p>
+              <p className="text-sm text-muted-foreground">Quantités entrées (page)</p>
+              <p className="text-xl font-bold text-success">{formatNumber(stats.entree)}</p>
             </div>
           </CardContent>
         </Card>
@@ -78,8 +79,8 @@ export default function MouvementsStock() {
               <ArrowUpRight className="h-5 w-5 text-destructive" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Sorties</p>
-              <p className="text-xl font-bold text-destructive">{formatCurrency(stats.sortie)}</p>
+              <p className="text-sm text-muted-foreground">Quantités sorties (page)</p>
+              <p className="text-xl font-bold text-destructive">{formatNumber(stats.sortie)}</p>
             </div>
           </CardContent>
         </Card>
@@ -104,11 +105,11 @@ export default function MouvementsStock() {
               <Input
                 placeholder="Rechercher par article..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0) }}
                 className="pl-10"
               />
             </div>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0) }}>
               <SelectTrigger className="w-36">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
@@ -116,12 +117,10 @@ export default function MouvementsStock() {
                 <SelectItem value="all">Tous</SelectItem>
                 <SelectItem value="entree">Entrée</SelectItem>
                 <SelectItem value="sortie">Sortie</SelectItem>
-                <SelectItem value="vente">Vente</SelectItem>
-                <SelectItem value="achat">Achat</SelectItem>
-                <SelectItem value="ajustement">Ajustement</SelectItem>
+                <SelectItem value="inventaire">Inventaire</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={articleFilter} onValueChange={setArticleFilter}>
+            <Select value={articleFilter} onValueChange={(v) => { setArticleFilter(v); setPage(0) }}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Article" />
               </SelectTrigger>
@@ -184,6 +183,9 @@ export default function MouvementsStock() {
               </TableBody>
             </Table>
           </div>
+          {resultat && (
+            <Pagination page={resultat.page} parPage={resultat.par_page} total={resultat.total} onPageChange={setPage} />
+          )}
         </CardContent>
       </Card>
     </div>

@@ -12,22 +12,14 @@ import { z } from "zod"
 import { Plus, Edit, Trash2, Search, Loader2, AlertTriangle, SearchX } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-
-interface Fournisseur {
-  id: number
-  nom: string
-  adresse: string | null
-  telephone: string | null
-  ice: string | null
-  email: string | null
-}
+import type { Fournisseur } from "@/types"
 
 const fournisseurSchema = z.object({
   nom: z.string().min(1, "Nom requis"),
   adresse: z.string().optional().nullable(),
   telephone: z.string().optional().nullable(),
   ice: z.string().optional().nullable(),
-  email: z.string().email("Email invalide").optional().nullable(),
+  email: z.union([z.literal(""), z.string().trim().email("Email invalide")]).optional().nullable(),
 })
 
 type FournisseurForm = z.infer<typeof fournisseurSchema>

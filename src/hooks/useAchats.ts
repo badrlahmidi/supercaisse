@@ -1,17 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
 import { toast } from "sonner"
+import type { AchatResume } from "@/types/generated/AchatResume"
 
-export interface Achat {
-  id: number
-  reference: string
-  fournisseur_nom: string
-  date: string
-  montant_total: number
-  statut: string
-  statut_livraison: string
-  statut_paiement: string
-}
+export type Achat = AchatResume
 
 export function useAchatsList() {
   return useQuery({

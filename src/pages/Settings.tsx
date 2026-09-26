@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/ui/Dialog"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/ui/Table"
 import { Badge } from "@/ui/Badge"
-import { useForm } from "react-hook-form"
+import { useForm, type DefaultValues } from "react-hook-form"
+import type { PermissionRole } from "@/types/generated/PermissionRole"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -19,7 +20,9 @@ import { useAuth } from "@/context/AuthContext"
 import { Checkbox } from "@/ui/Checkbox"
 import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages } from "lucide-react"
 import { useI18nStore } from "@/store/i18n"
-
+import { iceSaisieValide, ifSaisieValide } from "@/lib/fiscal"
+import MisesAJour from "@/components/MisesAJour"
+import type { FichierSauvegarde } from "@/types/generated/FichierSauvegarde"
 
 interface User {
   id: number
@@ -39,7 +42,7 @@ const userSchema = z.object({
   login: z.string().min(3, "Login minimum 3 caractères"),
   nom: z.string().min(1, "Nom requis"),
   role: z.enum(["admin", "manager", "caissier"]),
-  password: z.string().min(6, "Mot de passe minimum 6 caractères").optional(),
+  password: z.string().min(8, "Mot de passe minimum 8 caractères").optional().or(z.literal("")),
   confirmPassword: z.string().optional(),
 }).refine((data) => !data.password || data.password === data.confirmPassword, {
   message: "Les mots de passe ne correspondent pas",
@@ -48,13 +51,19 @@ const userSchema = z.object({
 
 type UserForm = z.infer<typeof userSchema>
 
+function pourcentageValide(valeur: string | undefined): boolean {
+  if (!valeur?.trim()) return true
+  const pct = Number(valeur.replace(",", "."))
+  return Number.isFinite(pct) && pct >= 0 && pct <= 100
+}
+
 const settingsSchema = z.object({
   shop_name: z.string().min(1),
   shop_address: z.string().optional(),
   shop_phone: z.string().optional(),
   shop_email: z.string().email().optional().or(z.literal("")),
-  ice: z.string().optional(),
-  if_number: z.string().optional(),
+  ice: z.string().optional().refine(iceSaisieValide, "ICE invalide : 15 chiffres attendus"),
+  if_number: z.string().optional().refine(ifSaisieValide, "IF invalide : chiffres uniquement"),
   rc_number: z.string().optional(),
   patente: z.string().optional(),
   default_tva: z.number().min(0).max(100).default(20),
@@ -62,6 +71,9 @@ const settingsSchema = z.object({
   currency: z.string().default("MAD"),
   printer_name: z.string().optional().default("POS-80"),
   fidelite_actif: z.string().optional().default("true"),
+  autoriser_stock_negatif: z.enum(["true", "false"]).optional().default("false"),
+  remise_max_caissier: z.string().optional().default("10").refine(pourcentageValide, "Pourcentage entre 0 et 100 attendu"),
+  remise_max_manager: z.string().optional().default("100").refine(pourcentageValide, "Pourcentage entre 0 et 100 attendu"),
   fidelite_dh_pour_1_point: z.string().optional().default("100"),
   fidelite_valeur_1_point: z.string().optional().default("1"),
   business_type: z.enum(["standard", "restaurant"]).default("standard"),
@@ -73,15 +85,69 @@ const settingsSchema = z.object({
 
 type SettingsForm = z.infer<typeof settingsSchema>
 
+type SauvegardeDisponible = FichierSauvegarde
+
+const VALEURS_PAR_DEFAUT: DefaultValues<SettingsForm> = {
+  shop_name: "SuperCaisse",
+  shop_address: "",
+  shop_phone: "",
+  shop_email: "",
+  ice: "",
+  if_number: "",
+  rc_number: "",
+  patente: "",
+  default_tva: 20,
+  receipt_footer: "Merci de votre visite",
+  currency: "MAD",
+}
+
 export default function Settings() {
   const queryClient = useQueryClient()
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, logout } = useAuth()
   const { locale, setLocale, t } = useI18nStore()
   const [showPassword, setShowPassword] = useState(false)
   const [activeTab, setActiveTab] = useState("general")
   const [editingUser, setEditingUser] = useState<Utilisateur | null>(null)
   const [showUserForm, setShowUserForm] = useState(false)
   const [deleteUserConfirm, setDeleteUserConfirm] = useState<Utilisateur | null>(null)
+  const [showImportConfirm, setShowImportConfirm] = useState(false)
+  const [importPath, setImportPath] = useState("")
+
+  const exportMutation = useMutation({
+    mutationFn: () => invoke<string>("export_database"),
+    onSuccess: (path) => toast.success("Base exportée", { description: path }),
+    onError: (err) => toast.error("Échec de l'export", { description: String(err) }),
+  })
+
+  const backupMutation = useMutation({
+    mutationFn: () => invoke<string>("backup_database"),
+    onSuccess: (path) => {
+      toast.success("Sauvegarde créée", { description: path })
+      queryClient.invalidateQueries({ queryKey: ["sauvegardes"] })
+    },
+    onError: (err) => toast.error("Échec de la sauvegarde", { description: String(err) }),
+  })
+
+  const { data: sauvegardes = [], isLoading: sauvegardesLoading } = useQuery({
+    queryKey: ["sauvegardes"],
+    queryFn: () => invoke<SauvegardeDisponible[]>("list_backups"),
+    enabled: showImportConfirm,
+  })
+
+  const importMutation = useMutation({
+    mutationFn: (path: string) => invoke<string>("import_database", { path }),
+    onSuccess: (securite) => {
+      toast.success("Sauvegarde restaurée", {
+        description: `Copie de la base précédente : ${securite}. Reconnectez-vous.`,
+        duration: 10000,
+      })
+      setShowImportConfirm(false)
+      setImportPath("")
+      queryClient.clear()
+      logout()
+    },
+    onError: (err) => toast.error("Restauration refusée", { description: String(err) }),
+  })
   const [pinValue, setPinValue] = useState("")
   const [savingPin, setSavingPin] = useState(false)
   const [permRole, setPermRole] = useState("manager")
@@ -131,7 +197,7 @@ export default function Settings() {
 
   const { data: permissionsData } = useQuery({
     queryKey: ["permissions", permRole],
-    queryFn: () => invoke<Array<{ role: string; module: string; action: string; allowed: boolean }>>("get_permissions", { role: permRole }),
+    queryFn: () => invoke<PermissionRole[]>("get_permissions", { role: permRole }),
     enabled: permRole !== "admin",
   })
 
@@ -162,11 +228,10 @@ export default function Settings() {
     onError: (err) => toast.error(String(err)),
   })
 
-  useEffect(() => {
-    if (settings) {
-      settingsForm.reset(settings)
-    }
-  }, [settings])
+  const signalerChampsInvalides = (erreurs: Record<string, { message?: string } | undefined>) => {
+    const messages = Object.entries(erreurs).map(([champ, erreur]) => erreur?.message || champ)
+    toast.error("Paramètres non enregistrés", { description: messages.join(" · ") })
+  }
 
   const createUserMutation = useMutation({
     mutationFn: (data: UserForm) => invoke("add_utilisateur", data),
@@ -210,20 +275,15 @@ export default function Settings() {
 
   const settingsForm = useForm<SettingsForm>({
     resolver: zodResolver(settingsSchema),
-    defaultValues: {
-      shop_name: "SuperCaisse",
-      shop_address: "",
-      shop_phone: "",
-      shop_email: "",
-      ice: "",
-      if_number: "",
-      rc_number: "",
-      patente: "",
-      default_tva: 20,
-      receipt_footer: "Merci de votre visite",
-      currency: "MAD",
-    },
+    defaultValues: VALEURS_PAR_DEFAUT,
   })
+
+  useEffect(() => {
+    if (settings) {
+      const renseignes = Object.fromEntries(Object.entries(settings).filter(([, valeur]) => valeur !== null && valeur !== undefined))
+      settingsForm.reset({ ...VALEURS_PAR_DEFAUT, ...renseignes } as SettingsForm)
+    }
+  }, [settings, settingsForm])
 
   const handleUserSubmit = (data: UserForm) => {
     const userData = {
@@ -269,7 +329,7 @@ export default function Settings() {
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
-          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -316,15 +376,21 @@ export default function Settings() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="ice">ICE (Identifiant Commun de l'Entreprise)</Label>
-                    <Input {...settingsForm.register("ice")} id="ice" placeholder="15 chiffres" />
+                    <Input {...settingsForm.register("ice")} id="ice" placeholder="15 chiffres (obligatoire pour facturer)" />
+                    {settingsForm.formState.errors.ice && (
+                      <p className="text-sm text-destructive">{settingsForm.formState.errors.ice.message}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="if_number">IF (Identifiant Fiscal)</Label>
-                    <Input {...settingsForm.register("if_number")} id="if_number" placeholder="Optionnel" />
+                    <Input {...settingsForm.register("if_number")} id="if_number" placeholder="Obligatoire pour facturer" />
+                    {settingsForm.formState.errors.if_number && (
+                      <p className="text-sm text-destructive">{settingsForm.formState.errors.if_number.message}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="rc_number">RC (Registre de Commerce)</Label>
-                    <Input {...settingsForm.register("rc_number")} id="rc_number" placeholder="Optionnel" />
+                    <Input {...settingsForm.register("rc_number")} id="rc_number" placeholder="Obligatoire pour facturer" />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="patente">Patente</Label>
@@ -388,6 +454,57 @@ export default function Settings() {
                     <Label htmlFor="fidelite_valeur_1_point">Valeur de réduction d'1 Point (DH)</Label>
                     <Input id="fidelite_valeur_1_point" type="number" {...settingsForm.register("fidelite_valeur_1_point")} />
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Stock</CardTitle>
+                <CardDescription>
+                  Par défaut, une vente, une conversion ou un transfert est refusé si le magasin n'a pas le stock suffisant.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4">
+                  <Label htmlFor="autoriser_stock_negatif" className="flex-1">Autoriser la vente en stock négatif</Label>
+                  <Select
+                    value={settingsForm.watch("autoriser_stock_negatif") || "false"}
+                    onValueChange={(v) => settingsForm.setValue("autoriser_stock_negatif", v as "true" | "false")}
+                  >
+                    <SelectTrigger id="autoriser_stock_negatif" className="w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="false">Non</SelectItem>
+                      <SelectItem value="true">Oui</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Remises</CardTitle>
+                <CardDescription>
+                  Remise maximale par ligne, remise document comprise. L'administrateur n'est pas plafonné.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="remise_max_caissier">Caissier (%)</Label>
+                  <Input {...settingsForm.register("remise_max_caissier")} id="remise_max_caissier" inputMode="decimal" placeholder="10" />
+                  {settingsForm.formState.errors.remise_max_caissier && (
+                    <p className="text-sm text-destructive">{settingsForm.formState.errors.remise_max_caissier.message}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="remise_max_manager">Manager (%)</Label>
+                  <Input {...settingsForm.register("remise_max_manager")} id="remise_max_manager" inputMode="decimal" placeholder="100" />
+                  {settingsForm.formState.errors.remise_max_manager && (
+                    <p className="text-sm text-destructive">{settingsForm.formState.errors.remise_max_manager.message}</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -548,17 +665,17 @@ export default function Settings() {
                   </Button>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="pin">PIN rapide (4 chiffres, optionnel)</Label>
+                  <Label htmlFor="pin">PIN rapide (4 à 6 chiffres, optionnel)</Label>
                   <div className="flex gap-2">
                     <Input
                       type="text"
                       inputMode="numeric"
-                      maxLength={4}
+                      maxLength={6}
                       pattern="[0-9]*"
-                      placeholder="ex: 1234"
+                      placeholder="ex : 4826"
                       id="pin"
                       value={pinValue}
-                      onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      onChange={(e) => setPinValue(e.target.value.replace(/\D/g, "").slice(0, 6))}
                       className="max-w-[120px]"
                     />
                     {editingUser && (
@@ -566,9 +683,9 @@ export default function Settings() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={pinValue.length !== 4 || savingPin}
+                        disabled={pinValue.length < 4 || savingPin}
                         onClick={async () => {
-                          if (!editingUser || pinValue.length !== 4) return
+                          if (!editingUser || pinValue.length < 4) return
                           setSavingPin(true)
                           try {
                             await invoke("set_user_pin", { userId: editingUser.id, pin: pinValue })
@@ -585,7 +702,7 @@ export default function Settings() {
                       </Button>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">Permet le changement rapide de caissier sans saisir le mot de passe complet</p>
+                  <p className="text-xs text-muted-foreground">Changement rapide de caissier depuis l'écran de verrouillage. Évitez les chiffres identiques ou qui se suivent ; 5 erreurs bloquent le PIN 5 minutes.</p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setShowUserForm(false)}>
@@ -676,7 +793,7 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="receipt" className="space-y-6">
-          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -864,7 +981,8 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="system" className="space-y-6">
-          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+          <MisesAJour />
+          <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit, signalerChampsInvalides)} className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -940,11 +1058,21 @@ export default function Settings() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-medium">Exporter la base de données</p>
-                  <p className="text-sm text-muted-foreground">Télécharger une copie complète au format SQL</p>
+                  <p className="font-medium">Créer une sauvegarde</p>
+                  <p className="text-sm text-muted-foreground">Copie immédiate dans le dossier des sauvegardes (une sauvegarde automatique est faite chaque jour au démarrage, 30 conservées)</p>
                 </div>
-                <Button onClick={() => invoke("export_database")}>
-                  <Download className="h-4 w-4 mr-2" />
+                <Button variant="outline" onClick={() => backupMutation.mutate()} disabled={backupMutation.isPending}>
+                  {backupMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Database className="h-4 w-4 mr-2" />}
+                  Sauvegarder
+                </Button>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">Exporter la base de données</p>
+                  <p className="text-sm text-muted-foreground">Copie complète de la base SQLite dans Documents/SuperCaisse/exports</p>
+                </div>
+                <Button onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+                  {exportMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
                   Exporter
                 </Button>
               </div>
@@ -953,7 +1081,7 @@ export default function Settings() {
                   <p className="font-medium">Importer une sauvegarde</p>
                   <p className="text-sm text-muted-foreground text-destructive">⚠️ Remplace toutes les données actuelles</p>
                 </div>
-                <Button variant="destructive" onClick={() => invoke("import_database")}>
+                <Button variant="destructive" onClick={() => setShowImportConfirm(true)}>
                   Importer
                 </Button>
               </div>
@@ -961,6 +1089,64 @@ export default function Settings() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={showImportConfirm} onOpenChange={(open) => { if (!importMutation.isPending) setShowImportConfirm(open) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Restaurer une sauvegarde
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Toutes les données actuelles seront remplacées par le contenu du fichier. Une copie de la base actuelle est faite
+            automatiquement avant la restauration, et tous les utilisateurs devront se reconnecter.
+          </p>
+          <div className="min-w-0 space-y-2">
+            <Label>Sauvegardes disponibles</Label>
+            <div className="max-h-48 overflow-y-auto rounded-md border divide-y">
+              {sauvegardesLoading ? (
+                <p className="p-3 text-sm text-muted-foreground">Chargement…</p>
+              ) : sauvegardes.length === 0 ? (
+                <p className="p-3 text-sm text-muted-foreground">Aucune sauvegarde trouvée</p>
+              ) : (
+                sauvegardes.map((s) => (
+                  <button
+                    key={s.chemin}
+                    type="button"
+                    title={s.chemin}
+                    onClick={() => setImportPath(s.chemin)}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-muted ${importPath === s.chemin ? "bg-muted font-medium" : ""}`}
+                  >
+                    <span className="block truncate">{s.nom}</span>
+                    <span className="text-xs text-muted-foreground">{s.date ?? "—"} · {(s.taille / 1024).toFixed(0)} Ko</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="import_path">Ou chemin d'un autre fichier (.db)</Label>
+            <Input
+              id="import_path"
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              placeholder="Documents/SuperCaisse/exports/supercaisse_export_20260101_120000.db"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowImportConfirm(false)} disabled={importMutation.isPending}>Annuler</Button>
+            <Button
+              variant="destructive"
+              onClick={() => importMutation.mutate(importPath.trim())}
+              disabled={!importPath.trim() || importMutation.isPending}
+            >
+              {importMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+              Restaurer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteUserConfirm} onOpenChange={() => setDeleteUserConfirm(null)}>
         <DialogContent className="max-w-sm">

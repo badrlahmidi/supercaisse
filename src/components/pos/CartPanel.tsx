@@ -5,21 +5,11 @@ import { Badge } from "@/ui/Badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/Select"
 import { useCartStore } from "@/store/cart"
 import { cn, formatCurrency } from "@/lib/utils"
-import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, MessageSquare, ChefHat, Send, FileText } from "lucide-react"
-
-interface Article {
-  id: number
-  stock: number
-  prix_vente?: number
-  prix_grossiste?: number | null
-}
-
-interface Client {
-  id: number
-  nom: string
-  credit_actuel: number
-  points_fidelite: number
-}
+import { Plus, Minus, Trash2, Check, X, RotateCcw, ShoppingCart, Printer, Banknote, CreditCard, Users, Receipt, Loader2, ChevronUp, Clock, PauseCircle, PlayCircle, Percent, ChefHat, FileText } from "lucide-react"
+import type { Article, Client } from "@/types"
+import { calculerLigne, round2, sommeDH } from "@/lib/totaux"
+import type { ModePaiement } from "@/types/generated/ModePaiement"
+import type { TypeDocument } from "@/types/generated/TypeDocument"
 
 interface ReceiptData {
   shopName: string
@@ -48,8 +38,6 @@ interface CartPanelProps {
   netAmount: number
   discount: number
   discountAmount: number
-  cashAmount: number
-  change: number
   itemCount: number
   onUpdateQuantity: (articleId: number, quantity: number, maxStock?: number, varianteId?: number | null) => void
   onRemoveItem: (articleId: number, varianteId?: number | null) => void
@@ -58,8 +46,8 @@ interface CartPanelProps {
   onPrintLastReceipt: () => void
   onGeneratePdf: () => void
   generatingPdf?: boolean
-  documentType: string
-  setDocumentType: (type: string) => void
+  documentType: TypeDocument
+  setDocumentType: (type: TypeDocument) => void
   isLoyaltyActive: boolean
   ptsValueDH: number
   ptsEarned: number
@@ -80,7 +68,7 @@ const QUICK_AMOUNTS = [10, 20, 50, 100, 200, 500]
 
 export default function CartPanel({
   articles, clients, processing, lastReceipt,
-  subtotal, totalTVA, netAmount, discount, discountAmount, cashAmount, change, itemCount,
+  subtotal, totalTVA, netAmount, discount, discountAmount, itemCount,
   onUpdateQuantity, onRemoveItem, onClearCart, onValidateSale, onPrintLastReceipt, onGeneratePdf, generatingPdf,
   documentType, setDocumentType, isLoyaltyActive, ptsValueDH, ptsEarned, loyaltyDiscount, ptsToUse, isRestaurant
 }: CartPanelProps) {
@@ -116,11 +104,15 @@ export default function CartPanel({
   const activeClient = clients.find(c => c.id === selectedClient)
 
   const isSplit = paymentSplits.length > 0
-  const splitsTotal = paymentSplits.reduce((s, p) => s + p.amount, 0)
-  const splitRemaining = Math.max(0, netAmount - splitsTotal)
+  const totalRemisesLignes = round2(cart.reduce(
+    (s, i) => s + calculerLigne({ ...i, remise_ligne: 0 }).total_ligne - calculerLigne(i).total_ligne,
+    0,
+  ))
+  const splitsTotal = sommeDH(paymentSplits.map((p) => p.amount))
+  const splitRemaining = Math.max(0, sommeDH([netAmount, -splitsTotal]))
   const cashSplit = paymentSplits.find((p) => p.mode === "especes")
   const cashTotal = cashSplit?.amount || 0
-  const splitChange = cashTotal > 0 ? Math.max(0, cashTotal - (netAmount - splitsTotal + cashTotal)) : 0
+  const splitChange = cashTotal > 0 ? Math.max(0, sommeDH([splitsTotal, -netAmount])) : 0
 
   const handleHoldCart = () => {
     if (cart.length === 0) return
@@ -196,9 +188,9 @@ export default function CartPanel({
           cart.map((item) => {
             const article = articles.find((a) => a.id === item.article_id)
             const maxStock = item.variante_id ? item.stock_max : article?.stock
-            const lineTotalBase = item.quantite * item.prix_unitaire * (1 + item.tva / 100)
-            const lineDiscountAmount = lineTotalBase * (item.remise_ligne / 100)
-            const lineTotal = lineTotalBase - lineDiscountAmount
+            const lineTotalBase = calculerLigne({ ...item, remise_ligne: 0 }).total_ligne
+            const lineTotal = calculerLigne(item).total_ligne
+            const lineDiscountAmount = round2(lineTotalBase - lineTotal)
             return (
               <div
                 key={`${item.article_id}-${item.variante_id ?? "x"}`}
@@ -301,17 +293,10 @@ export default function CartPanel({
       <div className="flex-shrink-0 border-t border-border">
         {/* Summary */}
         <div className="p-4 space-y-1.5 bg-muted/20">
-          {cart.reduce((s, i) => {
-            const base = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
-            const remiseLigne = base * ((i.remise_ligne || 0) / 100)
-            return s + remiseLigne
-          }, 0) > 0 && (
+          {totalRemisesLignes > 0 && (
             <div className="flex justify-between text-sm text-success">
-              <span>Remises lignes</span>
-              <span>-{formatCurrency(cart.reduce((s, i) => {
-                const base = i.quantite * i.prix_unitaire * (1 + i.tva / 100)
-                return s + base * ((i.remise_ligne || 0) / 100)
-              }, 0))}</span>
+              <span>Remises lignes (incluses)</span>
+              <span>-{formatCurrency(totalRemisesLignes)}</span>
             </div>
           )}
           <div className="flex justify-between text-sm">
@@ -413,7 +398,7 @@ export default function CartPanel({
           )}
 
           <div className="grid grid-cols-2 gap-2">
-            <Select value={documentType} onValueChange={setDocumentType}>
+            <Select value={documentType} onValueChange={(v) => setDocumentType(v as TypeDocument)}>
               <SelectTrigger className="w-full h-10">
                 <SelectValue placeholder="Type de document" />
               </SelectTrigger>
@@ -517,7 +502,7 @@ export default function CartPanel({
                   <div key={idx} className="flex items-center gap-2">
                     <select
                       value={split.mode}
-                      onChange={(e) => updateSplitMode(idx, e.target.value)}
+                      onChange={(e) => updateSplitMode(idx, e.target.value as ModePaiement)}
                       className="h-10 px-2 rounded-lg border border-border bg-background text-sm font-medium outline-none focus:ring-2 focus:ring-primary/30"
                     >
                       {PAYMENT_MODES.map((m) => (
@@ -576,6 +561,7 @@ export default function CartPanel({
             <Button
               className="flex-1 h-11 bg-success hover:bg-success-hover text-success-foreground font-semibold"
               onClick={onValidateSale}
+              aria-keyshortcuts="F5"
               disabled={cart.length === 0 || processing || (isSplit ? splitsTotal < netAmount : paymentMode === "especes" && (parseFloat(cashGiven) || 0) < netAmount)}
             >
               {processing ? (

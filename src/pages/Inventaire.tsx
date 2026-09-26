@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { invoke } from "@/lib/tauri"
-import { Card, CardContent, CardHeader, CardTitle } from "@/ui/Card"
+import { Card, CardContent } from "@/ui/Card"
 import { Button } from "@/ui/Button"
 import { Input } from "@/ui/Input"
 import { Label } from "@/ui/Label"
@@ -13,46 +13,14 @@ import { toast } from "sonner"
 import { Plus, ClipboardCheck, Loader2, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react"
 import PageHeader from "@/components/PageHeader"
 import EmptyState from "@/components/EmptyState"
-import { formatDate, formatDateTime } from "@/lib/utils"
-import { useAuth } from "@/context/AuthContext"
+import { formatDateTime } from "@/lib/utils"
+import type { InventaireDetail } from "@/types/generated/InventaireDetail"
+import type { InventaireResume } from "@/types/generated/InventaireResume"
+import type { Magasin } from "@/types/generated/Magasin"
 
-interface Inventaire {
-  id: number
-  date_debut: string
-  date_fin: string | null
-  statut: string
-  magasin_id: number
-  utilisateur_id: number | null
-  nb_articles: number
-  nb_comptes: number
-}
-
-interface InventaireLigne {
-  id: number
-  article_id: number
-  designation: string
-  code_barre: string | null
-  stock_theorique: number
-  stock_compte: number | null
-  ecart: number | null
-}
-
-interface InventaireDetail {
-  id: number
-  date_debut: string
-  date_fin: string | null
-  statut: string
-  magasin_id: number
-  lignes: InventaireLigne[]
-}
-
-interface Magasin {
-  id: number
-  nom: string
-}
+type Inventaire = InventaireResume
 
 export default function Inventaire() {
-  const { user } = useAuth()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -79,7 +47,6 @@ export default function Inventaire() {
   const createMutation = useMutation({
     mutationFn: () => invoke<{ id: number }>("create_inventaire", {
       magasinId: parseInt(newMagasinId),
-      utilisateurId: user?.id,
     }),
     onSuccess: (result) => {
       toast.success("Inventaire créé")
@@ -102,7 +69,6 @@ export default function Inventaire() {
   const validerMutation = useMutation({
     mutationFn: () => invoke("valider_inventaire", {
       inventaireId: selectedId,
-      utilisateurId: user?.id,
     }),
     onSuccess: () => {
       toast.success("Inventaire validé — stock mis à jour")
