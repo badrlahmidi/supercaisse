@@ -119,6 +119,12 @@ pub fn get_stats_magasins(
 ) -> Result<Vec<super::contrats::StatsMagasin>, String> {
     let conn = db.lecture()?;
     let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    get_stats_magasins_impl(&conn)
+}
+
+pub(crate) fn get_stats_magasins_impl(
+    conn: &Connection,
+) -> Result<Vec<super::contrats::StatsMagasin>, String> {
     let mut stmt = conn.prepare(
         "SELECT
              m.id,
@@ -136,7 +142,7 @@ pub fn get_stats_magasins(
                  COUNT(CASE WHEN dtype != 'avoir' THEN 1 END) AS nb_ventes,
                  COUNT(DISTINCT CASE WHEN dtype != 'avoir' AND client_id IS NOT NULL THEN client_id END) AS nb_clients_actifs
              FROM ventes
-             WHERE statut != 'annule'
+             WHERE statut != 'annulee'
                AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')
              GROUP BY magasin_id
          ) v ON v.magasin_id = m.id
@@ -149,8 +155,9 @@ pub fn get_stats_magasins(
              WHERE as2.quantite > 0 AND a.actif = 1
              GROUP BY as2.magasin_id
          ) s ON s.magasin_id = m.id
-         ORDER BY m.id"
-    ).map_err(|e| e.to_string())?;
+         ORDER BY m.id",
+    )
+    .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok(super::contrats::StatsMagasin {
@@ -166,6 +173,153 @@ pub fn get_stats_magasins(
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> Connection {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute_batch(
+            "UPDATE magasins SET nom = 'Centre', adresse = 'Rue A' WHERE id = 1;
+             INSERT INTO magasins (nom, adresse) VALUES ('Nord', NULL);
+             INSERT INTO articles (designation, prix_vente, prix_achat, tva) VALUES ('Café', 50.0, 20.0, 20);
+             INSERT INTO articles (designation, prix_vente, prix_achat, tva) VALUES ('Thé',  30.0, 10.0, 20);
+             INSERT INTO clients (nom) VALUES ('Alice');
+             INSERT INTO clients (nom) VALUES ('Bob');",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn magasin_ids(conn: &Connection) -> (i64, i64) {
+        let id1: i64 = conn
+            .query_row("SELECT id FROM magasins WHERE nom = 'Centre'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let id2: i64 = conn
+            .query_row("SELECT id FROM magasins WHERE nom = 'Nord'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        (id1, id2)
+    }
+
+    fn article_ids(conn: &Connection) -> (i64, i64) {
+        let a1: i64 = conn
+            .query_row(
+                "SELECT id FROM articles WHERE designation = 'Café'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let a2: i64 = conn
+            .query_row(
+                "SELECT id FROM articles WHERE designation = 'Thé'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (a1, a2)
+    }
+
+    fn client_ids(conn: &Connection) -> (i64, i64) {
+        let c1: i64 = conn
+            .query_row(
+                "SELECT id FROM clients WHERE nom = 'Alice'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let c2: i64 = conn
+            .query_row(
+                "SELECT id FROM clients WHERE nom = 'Bob'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (c1, c2)
+    }
+
+    #[test]
+    fn test_stats_magasin_sans_ventes_renvoie_zeros() {
+        let conn = setup();
+        let stats = get_stats_magasins_impl(&conn).unwrap();
+        assert_eq!(stats.len(), 2);
+        let centre = stats.iter().find(|s| s.nom == "Centre").unwrap();
+        assert_eq!(centre.adresse, Some("Rue A".into()));
+        assert_eq!(centre.ca_mois, 0.0);
+        assert_eq!(centre.nb_ventes, 0);
+        assert_eq!(centre.nb_clients_actifs, 0);
+        assert_eq!(centre.valeur_stock, 0.0);
+    }
+
+    #[test]
+    fn test_stats_magasin_ventes_et_stock() {
+        let conn = setup();
+        let (m1, _) = magasin_ids(&conn);
+        let (a1, a2) = article_ids(&conn);
+        let (c1, c2) = client_ids(&conn);
+        conn.execute_batch(&format!(
+            "INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+                                 date, mode_paiement)
+             VALUES ({m1}, 200.0, 'facture', 'validee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');
+             INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+                                 date, mode_paiement)
+             VALUES ({m1}, 100.0, 'facture', 'validee', {c2}, strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');
+             INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES ({a1}, {m1}, 10);
+             INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES ({a2}, {m1},  5);",
+        ))
+        .unwrap();
+        let stats = get_stats_magasins_impl(&conn).unwrap();
+        let centre = stats.iter().find(|s| s.nom == "Centre").unwrap();
+        assert_eq!(centre.ca_mois, 300.0);
+        assert_eq!(centre.nb_ventes, 2);
+        assert_eq!(centre.nb_clients_actifs, 2);
+        assert_eq!(centre.valeur_stock, 10.0 * 20.0 + 5.0 * 10.0);
+        let nord = stats.iter().find(|s| s.nom == "Nord").unwrap();
+        assert_eq!(nord.ca_mois, 0.0);
+        assert_eq!(nord.valeur_stock, 0.0);
+    }
+
+    #[test]
+    fn test_avoir_deduit_du_ca() {
+        let conn = setup();
+        let (m1, _) = magasin_ids(&conn);
+        conn.execute_batch(&format!(
+            "INSERT INTO ventes (magasin_id, montant_total, dtype, statut,
+                                 date, mode_paiement)
+             VALUES ({m1}, 500.0, 'facture', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');
+             INSERT INTO ventes (magasin_id, montant_total, dtype, statut,
+                                 date, mode_paiement)
+             VALUES ({m1}, 100.0, 'avoir', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');",
+        ))
+        .unwrap();
+        let stats = get_stats_magasins_impl(&conn).unwrap();
+        let centre = stats.iter().find(|s| s.nom == "Centre").unwrap();
+        assert_eq!(centre.ca_mois, 400.0);
+        assert_eq!(centre.nb_ventes, 1);
+    }
+
+    #[test]
+    fn test_ventes_annulees_exclues() {
+        let conn = setup();
+        let (m1, _) = magasin_ids(&conn);
+        let (c1, _) = client_ids(&conn);
+        conn.execute_batch(&format!(
+            "INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+                                 date, mode_paiement)
+             VALUES ({m1}, 300.0, 'facture', 'annulee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');",
+        ))
+        .unwrap();
+        let stats = get_stats_magasins_impl(&conn).unwrap();
+        let centre = stats.iter().find(|s| s.nom == "Centre").unwrap();
+        assert_eq!(centre.ca_mois, 0.0);
+        assert_eq!(centre.nb_ventes, 0);
+        assert_eq!(centre.nb_clients_actifs, 0);
+    }
 }
 
 #[tauri::command(async)]
