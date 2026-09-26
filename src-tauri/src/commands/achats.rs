@@ -1,6 +1,6 @@
 use crate::db::*;
 use crate::session::{autoriser, Acces, AuthState};
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use tauri::State;
 
 use super::calcul::{montant_saisi, somme_dh};
@@ -125,15 +125,33 @@ pub fn update_achat_status(
 ) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
     let _me = autoriser(&auth, &conn, &token, Acces::Module("achats", "modifier"))?;
+    update_achat_status_impl(&mut conn, achat_id, &statut_livraison, &statut_paiement)
+}
+
+const STATUTS_LIVRAISON: &[&str] = &["en_attente", "partiel", "recu"];
+const STATUTS_PAIEMENT: &[&str] = &["non_paye", "partiel", "paye"];
+
+pub(crate) fn update_achat_status_impl(
+    conn: &mut Connection,
+    achat_id: i64,
+    statut_livraison: &str,
+    statut_paiement: &str,
+) -> Result<(), String> {
+    super::valeur_autorisee("Statut de livraison", statut_livraison, STATUTS_LIVRAISON)?;
+    super::valeur_autorisee("Statut de paiement", statut_paiement, STATUTS_PAIEMENT)?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let old_sl: String = tx
         .query_row(
-            "SELECT statut_livraison FROM achats WHERE id = ?1",
+            "SELECT COALESCE(statut_livraison, 'recu') FROM achats WHERE id = ?1",
             params![achat_id],
             |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| "Achat introuvable".to_string())?;
+
+    if old_sl == "recu" && statut_livraison != "recu" {
+        return Err("Cet achat est déjà réceptionné et son stock est entré : il ne peut plus repasser en attente. Pour corriger, faites un ajustement de stock.".to_string());
+    }
 
     tx.execute(
         "UPDATE achats SET statut_livraison = ?1, statut_paiement = ?2 WHERE id = ?3",
@@ -270,5 +288,41 @@ mod tests {
         assert!(ligne(json!({ "article_id": 1, "quantite": 0, "prix_unitaire": 2 })).is_err());
         assert!(ligne(json!({ "article_id": 1, "quantite": 1, "prix_unitaire": -2 })).is_err());
         assert!(ligne(json!({ "quantite": 1, "prix_unitaire": 2 })).is_err());
+    }
+
+    #[test]
+    fn test_reception_d_achat_comptee_une_seule_fois() {
+        let mut conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute_batch(
+            "INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Huile', 20, 20);
+             INSERT INTO achats (id, montant_total, statut_livraison, statut_paiement) VALUES (1, 50, 'en_attente', 'non_paye');
+             INSERT INTO achat_articles (achat_id, article_id, quantite, prix_unitaire, total_ligne) VALUES (1, 1, 5, 10, 50);",
+        )
+        .unwrap();
+        let stock = |conn: &Connection| -> f64 {
+            conn.query_row("SELECT stock FROM articles WHERE id = 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        update_achat_status_impl(&mut conn, 1, "recu", "non_paye").unwrap();
+        assert_eq!(stock(&conn), 5.0);
+        update_achat_status_impl(&mut conn, 1, "recu", "paye").unwrap();
+        assert_eq!(stock(&conn), 5.0);
+
+        let refus = update_achat_status_impl(&mut conn, 1, "en_attente", "paye").unwrap_err();
+        assert!(refus.contains("déjà réceptionné"), "{}", refus);
+        update_achat_status_impl(&mut conn, 1, "recu", "paye").unwrap();
+        assert_eq!(stock(&conn), 5.0);
+        let statut: String = conn
+            .query_row(
+                "SELECT statut_livraison FROM achats WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(statut, "recu");
+
+        assert!(update_achat_status_impl(&mut conn, 1, "livre", "paye").is_err());
+        assert!(update_achat_status_impl(&mut conn, 99, "recu", "paye").is_err());
     }
 }

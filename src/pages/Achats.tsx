@@ -114,11 +114,12 @@ export default function Achats() {
                     <TableCell className="text-right font-medium">{formatCurrency(achat.montant_total)}</TableCell>
                     <TableCell>
                       <button 
-                        onClick={() => updateStatusMutation.mutate({ achatId: achat.id, statutLivraison: achat.statut_livraison === "recu" ? "en_attente" : "recu", statutPaiement: achat.statut_paiement })}
-                        disabled={updateStatusMutation.isPending}
-                        className={`px-2 py-1 rounded text-xs font-medium cursor-pointer transition-colors ${
-                          achat.statut_livraison === "recu" ? "bg-success/10 text-success hover:bg-success/20" :
-                          "bg-warning/10 text-warning hover:bg-warning/20"
+                        onClick={() => updateStatusMutation.mutate({ achatId: achat.id, statutLivraison: "recu", statutPaiement: achat.statut_paiement })}
+                        disabled={updateStatusMutation.isPending || achat.statut_livraison === "recu"}
+                        title={achat.statut_livraison === "recu" ? "Réception enregistrée : le stock est entré" : "Marquer comme reçu (entrée en stock)"}
+                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                          achat.statut_livraison === "recu" ? "bg-success/10 text-success cursor-default" :
+                          "bg-warning/10 text-warning hover:bg-warning/20 cursor-pointer"
                         }`}
                       >
                         {achat.statut_livraison === "recu" ? "Reçu (Stock OK)" : "En attente"}
