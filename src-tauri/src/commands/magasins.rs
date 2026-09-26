@@ -112,6 +112,63 @@ pub fn delete_magasin(
 }
 
 #[tauri::command(async)]
+pub fn get_stats_magasins(
+    db: State<DbState>,
+    auth: State<AuthState>,
+    token: String,
+) -> Result<Vec<super::contrats::StatsMagasin>, String> {
+    let conn = db.lecture()?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let mut stmt = conn.prepare(
+        "SELECT
+             m.id,
+             m.nom,
+             m.adresse,
+             COALESCE(v.ca_mois, 0.0) AS ca_mois,
+             COALESCE(v.nb_ventes, 0) AS nb_ventes,
+             COALESCE(v.nb_clients_actifs, 0) AS nb_clients_actifs,
+             COALESCE(s.valeur_stock, 0.0) AS valeur_stock
+         FROM magasins m
+         LEFT JOIN (
+             SELECT
+                 magasin_id,
+                 SUM(CASE WHEN dtype = 'avoir' THEN -montant_total ELSE montant_total END) AS ca_mois,
+                 COUNT(CASE WHEN dtype != 'avoir' THEN 1 END) AS nb_ventes,
+                 COUNT(DISTINCT CASE WHEN dtype != 'avoir' AND client_id IS NOT NULL THEN client_id END) AS nb_clients_actifs
+             FROM ventes
+             WHERE statut != 'annule'
+               AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')
+             GROUP BY magasin_id
+         ) v ON v.magasin_id = m.id
+         LEFT JOIN (
+             SELECT
+                 as2.magasin_id,
+                 SUM(as2.quantite * a.prix_achat) AS valeur_stock
+             FROM article_stocks as2
+             JOIN articles a ON a.id = as2.article_id
+             WHERE as2.quantite > 0 AND a.actif = 1
+             GROUP BY as2.magasin_id
+         ) s ON s.magasin_id = m.id
+         ORDER BY m.id"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(super::contrats::StatsMagasin {
+                id: row.get(0)?,
+                nom: row.get(1)?,
+                adresse: row.get(2)?,
+                ca_mois: row.get(3)?,
+                nb_ventes: row.get(4)?,
+                nb_clients_actifs: row.get(5)?,
+                valeur_stock: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
 pub fn get_transferts(
     db: State<DbState>,
     auth: State<AuthState>,

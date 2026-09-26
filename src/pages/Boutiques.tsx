@@ -13,27 +13,21 @@ import { Plus, Store, TrendingUp, Package, Users, MapPin, Edit, Trash2 } from "l
 import PageHeader from "@/components/PageHeader"
 import { formatCurrency } from "@/lib/utils"
 import { invoke } from "@/lib/tauri"
-import type { Magasin } from "@/types/generated/Magasin"
+import type { StatsMagasin } from "@/types/generated/StatsMagasin"
 
 export default function Boutiques() {
   const [showForm, setShowForm] = useState(false)
-  const [editingMagasin, setEditingMagasin] = useState<Magasin | null>(null)
+  const [editingMagasin, setEditingMagasin] = useState<StatsMagasin | null>(null)
   const [nom, setNom] = useState("")
   const [adresse, setAdresse] = useState("")
 
-  const { data: magasins } = useQuery({
-    queryKey: ["magasins"],
-    queryFn: () => invoke<Magasin[]>("get_magasins"),
+  const { data: stats } = useQuery({
+    queryKey: ["stats_magasins"],
+    queryFn: () => invoke<StatsMagasin[]>("get_stats_magasins"),
     staleTime: 30000,
   })
 
-  const demoStats = [
-    { magasin: "Magasin Principal", ca: 125000, ventes: 342, clients: 189, stock_value: 450000 },
-    { magasin: "Succursale Maarif", ca: 89000, ventes: 256, clients: 143, stock_value: 320000 },
-    { magasin: "Point de vente Hay Hassani", ca: 67000, ventes: 198, clients: 112, stock_value: 280000 },
-  ]
-
-  const openEdit = (m: Magasin) => {
+  const openEdit = (m: StatsMagasin) => {
     setEditingMagasin(m)
     setNom(m.nom)
     setAdresse(m.adresse || "")
@@ -61,7 +55,7 @@ export default function Boutiques() {
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
               <Store className="h-5 w-5 text-primary" />
-              <div className="text-2xl font-bold">{magasins?.length || demoStats.length}</div>
+              <div className="text-2xl font-bold">{stats?.length ?? "—"}</div>
             </div>
             <p className="text-sm text-muted-foreground">Boutiques</p>
           </CardContent>
@@ -70,7 +64,7 @@ export default function Boutiques() {
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-green-500" />
-              <div className="text-2xl font-bold">{formatCurrency(demoStats.reduce((s, d) => s + d.ca, 0))}</div>
+              <div className="text-2xl font-bold">{formatCurrency(stats?.reduce((s, d) => s + d.ca_mois, 0) ?? 0)}</div>
             </div>
             <p className="text-sm text-muted-foreground">CA total (mois)</p>
           </CardContent>
@@ -79,7 +73,7 @@ export default function Boutiques() {
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
               <Package className="h-5 w-5 text-blue-500" />
-              <div className="text-2xl font-bold">{demoStats.reduce((s, d) => s + d.ventes, 0)}</div>
+              <div className="text-2xl font-bold">{stats?.reduce((s, d) => s + d.nb_ventes, 0) ?? "—"}</div>
             </div>
             <p className="text-sm text-muted-foreground">Ventes totales</p>
           </CardContent>
@@ -88,7 +82,7 @@ export default function Boutiques() {
           <CardContent className="pt-6">
             <div className="flex items-center gap-2">
               <Users className="h-5 w-5 text-purple-500" />
-              <div className="text-2xl font-bold">{demoStats.reduce((s, d) => s + d.clients, 0)}</div>
+              <div className="text-2xl font-bold">{stats?.reduce((s, d) => s + d.nb_clients_actifs, 0) ?? "—"}</div>
             </div>
             <p className="text-sm text-muted-foreground">Clients actifs</p>
           </CardContent>
@@ -116,21 +110,30 @@ export default function Boutiques() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {demoStats.map((stat, i) => (
-                    <TableRow key={i}>
+                  {(stats || []).map((stat) => (
+                    <TableRow key={stat.id}>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           <MapPin className="h-4 w-4 text-muted-foreground" />
-                          {stat.magasin}
+                          {stat.nom}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(stat.ca)}</TableCell>
-                      <TableCell className="text-right">{stat.ventes}</TableCell>
-                      <TableCell className="text-right">{stat.clients}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(stat.stock_value)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(stat.ca / stat.ventes)}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(stat.ca_mois)}</TableCell>
+                      <TableCell className="text-right">{stat.nb_ventes}</TableCell>
+                      <TableCell className="text-right">{stat.nb_clients_actifs}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(stat.valeur_stock)}</TableCell>
+                      <TableCell className="text-right">
+                        {stat.nb_ventes > 0 ? formatCurrency(stat.ca_mois / stat.nb_ventes) : "—"}
+                      </TableCell>
                     </TableRow>
                   ))}
+                  {!stats?.length && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        Aucune boutique configurée.
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
@@ -150,7 +153,7 @@ export default function Boutiques() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(magasins || []).map((m) => (
+                  {(stats || []).map((m) => (
                     <TableRow key={m.id}>
                       <TableCell className="font-medium">{m.nom}</TableCell>
                       <TableCell>{m.adresse || "—"}</TableCell>
@@ -167,7 +170,7 @@ export default function Boutiques() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!(magasins?.length) && (
+                  {!stats?.length && (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
                         Aucune boutique configurée. Ajoutez votre première boutique.
