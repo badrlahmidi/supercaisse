@@ -118,7 +118,7 @@ pub fn get_stats_magasins(
     token: String,
 ) -> Result<Vec<super::contrats::StatsMagasin>, String> {
     let conn = db.lecture()?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Connecte)?;
+    let _me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     get_stats_magasins_impl(&conn)
 }
 
