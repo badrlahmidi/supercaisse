@@ -138,12 +138,18 @@ pub(crate) fn get_stats_magasins_impl(
          LEFT JOIN (
              SELECT
                  magasin_id,
-                 SUM(CASE WHEN dtype = 'avoir' THEN -montant_total ELSE montant_total END) AS ca_mois,
+                 SUM(CASE WHEN dtype = 'avoir'
+                          THEN -(montant_total - montant_remise)
+                          ELSE  (montant_total - montant_remise) END) AS ca_mois,
                  COUNT(CASE WHEN dtype != 'avoir' THEN 1 END) AS nb_ventes,
                  COUNT(DISTINCT CASE WHEN dtype != 'avoir' AND client_id IS NOT NULL THEN client_id END) AS nb_clients_actifs
              FROM ventes
              WHERE statut != 'annulee'
-               AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now')
+               AND (COALESCE(dtype, 'facture') IN ('facture', 'avoir')
+                    OR (dtype = 'bl' AND NOT EXISTS (
+                            SELECT 1 FROM ventes vf
+                            WHERE vf.source_vente_id = ventes.id AND vf.dtype = 'facture')))
+               AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime')
              GROUP BY magasin_id
          ) v ON v.magasin_id = m.id
          LEFT JOIN (
@@ -263,12 +269,12 @@ mod tests {
         let (a1, a2) = article_ids(&conn);
         let (c1, c2) = client_ids(&conn);
         conn.execute_batch(&format!(
-            "INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+            "INSERT INTO ventes (magasin_id, montant_total, montant_remise, dtype, statut, client_id,
                                  date, mode_paiement)
-             VALUES ({m1}, 200.0, 'facture', 'validee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');
-             INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+             VALUES ({m1}, 200.0, 0.0, 'facture', 'validee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');
+             INSERT INTO ventes (magasin_id, montant_total, montant_remise, dtype, statut, client_id,
                                  date, mode_paiement)
-             VALUES ({m1}, 100.0, 'facture', 'validee', {c2}, strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');
+             VALUES ({m1}, 100.0, 0.0, 'facture', 'validee', {c2}, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');
              INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES ({a1}, {m1}, 10);
              INSERT INTO article_stocks (article_id, magasin_id, quantite) VALUES ({a2}, {m1},  5);",
         ))
@@ -285,33 +291,39 @@ mod tests {
     }
 
     #[test]
-    fn test_avoir_deduit_du_ca() {
+    fn test_avoir_deduit_et_remise_appliquee() {
         let conn = setup();
         let (m1, _) = magasin_ids(&conn);
         conn.execute_batch(&format!(
-            "INSERT INTO ventes (magasin_id, montant_total, dtype, statut,
+            "INSERT INTO ventes (magasin_id, montant_total, montant_remise, dtype, statut,
                                  date, mode_paiement)
-             VALUES ({m1}, 500.0, 'facture', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');
-             INSERT INTO ventes (magasin_id, montant_total, dtype, statut,
+             VALUES ({m1}, 500.0, 50.0, 'facture', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');
+             INSERT INTO ventes (magasin_id, montant_total, montant_remise, dtype, statut,
                                  date, mode_paiement)
-             VALUES ({m1}, 100.0, 'avoir', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');",
+             VALUES ({m1}, 100.0, 10.0, 'avoir', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');",
         ))
         .unwrap();
         let stats = get_stats_magasins_impl(&conn).unwrap();
         let centre = stats.iter().find(|s| s.nom == "Centre").unwrap();
-        assert_eq!(centre.ca_mois, 400.0);
+        assert_eq!(centre.ca_mois, (500.0 - 50.0) - (100.0 - 10.0));
         assert_eq!(centre.nb_ventes, 1);
     }
 
     #[test]
-    fn test_ventes_annulees_exclues() {
+    fn test_ventes_annulees_et_devis_exclus() {
         let conn = setup();
         let (m1, _) = magasin_ids(&conn);
         let (c1, _) = client_ids(&conn);
         conn.execute_batch(&format!(
             "INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
                                  date, mode_paiement)
-             VALUES ({m1}, 300.0, 'facture', 'annulee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now'), 'especes');",
+             VALUES ({m1}, 300.0, 'facture', 'annulee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');
+             INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+                                 date, mode_paiement)
+             VALUES ({m1}, 200.0, 'devis', 'validee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');
+             INSERT INTO ventes (magasin_id, montant_total, dtype, statut, client_id,
+                                 date, mode_paiement)
+             VALUES ({m1}, 150.0, 'commande', 'validee', {c1}, strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');",
         ))
         .unwrap();
         let stats = get_stats_magasins_impl(&conn).unwrap();
