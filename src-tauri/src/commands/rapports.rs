@@ -58,7 +58,7 @@ pub fn get_rapport_x(
 
     let mut stmt = conn
         .prepare(
-            "SELECT vp.mode, COALESCE(SUM(ROUND((vp.montant) * 100)) / 100.0, 0), COUNT(DISTINCT vp.vente_id)
+            "SELECT vp.mode, COALESCE(SUM(ROUND((CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) * 100)) / 100.0, 0), COUNT(DISTINCT vp.vente_id)
          FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
          WHERE vp.session_id = ?1 AND v.statut != 'annulee'
          GROUP BY vp.mode ORDER BY vp.mode",

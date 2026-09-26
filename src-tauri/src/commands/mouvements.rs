@@ -148,6 +148,25 @@ pub(crate) fn consommer_lots(
         .map_err(|e| e.to_string())?;
         reste -= pris;
     }
+    if reste > 1e-9 {
+        let perime: f64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(quantite), 0) FROM article_lots
+                 WHERE article_id = ?1 AND magasin_id = ?2 AND quantite > 0
+                   AND date(date_peremption) < date('now', 'localtime')",
+                params![article_id, magasin_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if perime > 1e-9 {
+            return Err(format!(
+                "Vente refusée : il manque {} unité(s) de {} dans des lots non périmés, et {} unité(s) en stock sont périmées. Sortez les lots périmés par un ajustement de stock.",
+                reste,
+                designation(conn, article_id),
+                perime
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -320,6 +339,7 @@ mod tests {
             INSERT INTO articles (id, designation, prix_vente, tva, est_kit) VALUES (3, 'Panier', 30, 0, 1);
             INSERT INTO article_composants (article_id, composant_id, quantite) VALUES (3, 1, 2);
             UPDATE settings SET value = 'false' WHERE key = 'fidelite_actif';
+            INSERT INTO sessions_caisse (caissier_id, fond_initial, statut, magasin_id) VALUES (1, 0, 'ouverte', 1);
         ",
         )
         .unwrap();
@@ -480,12 +500,33 @@ mod tests {
     }
 
     #[test]
+    fn test_vente_refusee_si_seuls_des_lots_perimes_restent() {
+        let mut conn = setup();
+        lots_yaourt(&conn);
+        let err = vendre(&mut conn, 2, None, 10.0, 1, "facture").unwrap_err();
+        assert!(err.contains("lots non périmés"), "{}", err);
+        assert_eq!(
+            (stock(&conn, 2, 1), lot(&conn, 1), lot(&conn, 3)),
+            (14.0, 3.0, 5.0)
+        );
+        let ventes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vente_lots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ventes, 0);
+
+        vendre(&mut conn, 2, None, 9.0, 1, "facture").unwrap();
+        adjust_article_stock(&conn, 2, 2, 3.0).unwrap();
+        vendre(&mut conn, 2, None, 2.0, 2, "facture").unwrap();
+        assert_eq!(stock(&conn, 2, 2), 1.0);
+    }
+
+    #[test]
     fn test_avoir_restitue_les_lots() {
         let mut conn = setup();
         lots_yaourt(&conn);
         let f = vendre(&mut conn, 2, None, 3.0, 1, "facture").unwrap();
         assert_eq!((lot(&conn, 2), lot(&conn, 1)), (0.0, 2.0));
-        let avoir = convert_document_impl(&mut conn, f, "avoir".into()).unwrap();
+        let avoir = convert_document_impl(&mut conn, f, "avoir".into(), 1).unwrap();
         assert_eq!((lot(&conn, 2), lot(&conn, 1)), (2.0, 3.0));
         annuler_vente_impl(&mut conn, avoir, None, Some("Test")).unwrap();
         assert_eq!((lot(&conn, 2), lot(&conn, 1)), (0.0, 2.0));
@@ -497,7 +538,7 @@ mod tests {
         lots_yaourt(&conn);
         let bl = vendre(&mut conn, 2, None, 2.0, 1, "bl").unwrap();
         assert_eq!(lot(&conn, 2), 0.0);
-        let f = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
+        let f = convert_document_impl(&mut conn, bl, "facture".into(), 1).unwrap();
         assert_eq!(lot(&conn, 2), 0.0);
         annuler_vente_impl(&mut conn, f, None, Some("Test")).unwrap();
         assert_eq!(lot(&conn, 2), 2.0);

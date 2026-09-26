@@ -45,17 +45,11 @@ export default function MouvementsStock() {
   const { data: resultat, isLoading } = useMouvementsStock(
     articleFilter === "all" ? null : parseInt(articleFilter),
     typeFilter === "all" ? null : typeFilter,
+    debouncedSearch.trim(),
     page,
   )
   const mouvements = resultat?.lignes
-
-  const filtered = mouvements?.filter((m) => {
-    if (debouncedSearch) {
-      const q = debouncedSearch.toLowerCase()
-      return m.designation.toLowerCase().includes(q)
-    }
-    return true
-  })
+  const filtered = mouvements
 
   const stats = {
     entree: mouvements?.filter((m) => m.mtype === "entree" || m.mtype === "achat").reduce((s, m) => s + m.quantite, 0) || 0,
@@ -111,7 +105,7 @@ export default function MouvementsStock() {
               <Input
                 placeholder="Rechercher par article..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0) }}
                 className="pl-10"
               />
             </div>

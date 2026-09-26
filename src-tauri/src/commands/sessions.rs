@@ -106,7 +106,7 @@ pub(crate) fn totaux_especes_session(
 ) -> Result<TotauxEspecesSession, String> {
     let ventes_especes: f64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(ROUND((vp.montant) * 100)) / 100.0, 0)
+            "SELECT COALESCE(SUM(ROUND((CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) * 100)) / 100.0, 0)
          FROM vente_paiements vp
          JOIN ventes v ON v.id = vp.vente_id
          WHERE vp.session_id = ?1 AND vp.mode = 'especes' AND v.statut != 'annulee'",

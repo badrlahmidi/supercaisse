@@ -15,7 +15,7 @@ pub(crate) struct Recettes {
 pub(crate) fn recettes_depuis(conn: &Connection, depuis: &str) -> Result<Recettes, String> {
     let sql = concat!(
         "SELECT mode, COALESCE(SUM(ROUND((montant) * 100)) / 100.0, 0) FROM (
-            SELECT vp.mode AS mode, vp.montant AS montant
+            SELECT vp.mode AS mode, (CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) AS montant
             FROM vente_paiements vp
             JOIN ventes v ON v.id = COALESCE(
                 (SELECT f.id FROM ventes f WHERE f.source_vente_id = vp.vente_id AND f.dtype = 'facture' LIMIT 1),
@@ -61,13 +61,13 @@ pub(crate) fn lister_sessions_caisse(
         .prepare(
             "SELECT s.id, s.caissier_id, u.nom, m.nom, s.statut, s.date_ouverture, s.date_cloture,
                 s.fond_initial,
-                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                COALESCE((SELECT SUM(ROUND((CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
                           WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode = 'especes'), 0),
-                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                COALESCE((SELECT SUM(ROUND((CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
                           WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode IN ('carte', 'cb')), 0),
-                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                COALESCE((SELECT SUM(ROUND((CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
                           WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode = 'cheque'), 0),
-                COALESCE((SELECT SUM(ROUND(vp.montant * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
+                COALESCE((SELECT SUM(ROUND((CASE WHEN v.dtype = 'avoir' THEN -vp.montant ELSE vp.montant END) * 100)) FROM vente_paiements vp JOIN ventes v ON v.id = vp.vente_id
                           WHERE vp.session_id = s.id AND v.statut != 'annulee' AND vp.mode = 'virement'), 0),
                 COALESCE((SELECT SUM(ROUND(ABS(j.montant) * 100)) FROM journal_caisse j
                           WHERE j.session_id = s.id AND j.jtype = 'sortie'), 0),
@@ -196,6 +196,7 @@ mod tests {
             INSERT INTO articles (id, designation, prix_vente, tva) VALUES (1, 'Huile', 100, 20);
             INSERT INTO clients (id, nom) VALUES (1, 'Client');
             UPDATE settings SET value = 'false' WHERE key = 'fidelite_actif';
+            INSERT INTO sessions_caisse (caissier_id, fond_initial, statut, magasin_id) VALUES (1, 0, 'ouverte', 1);
             INSERT INTO article_stocks (article_id, magasin_id, quantite) SELECT id, 1, 100 FROM articles; UPDATE articles SET stock = 100;
         ",
         )
@@ -203,9 +204,9 @@ mod tests {
         document(&mut conn, "devis", "especes");
         document(&mut conn, "commande", "especes");
         let bl = document(&mut conn, "bl", "credit");
-        convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
+        convert_document_impl(&mut conn, bl, "facture".into(), 1).unwrap();
         let facture = document(&mut conn, "facture", "especes");
-        convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
+        convert_document_impl(&mut conn, facture, "avoir".into(), 1).unwrap();
         let annulee = document(&mut conn, "facture", "especes");
         annuler_vente_impl(&mut conn, annulee, None, Some("Test")).unwrap();
         document(&mut conn, "facture", "carte");

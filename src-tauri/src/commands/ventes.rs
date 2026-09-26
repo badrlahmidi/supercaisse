@@ -4,8 +4,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tauri::State;
 
 use super::calcul::{
-    calculer_ligne, en_dh, round2, somme_dh, totaliser, valider_pourcentage, LigneCalculee,
-    TOLERANCE_MONTANT,
+    calculer_ligne, en_dh, round2, somme_dh, totaliser, valider_pourcentage, vers_centimes,
+    LigneCalculee, TOLERANCE_MONTANT,
 };
 use super::contrats::{
     LigneVenteDetail, LigneVenteSaisie, ListeVentes, ModePaiement, PaiementSaisi, TypeDocument,
@@ -462,6 +462,127 @@ pub(crate) fn create_vente_impl(
     })
 }
 
+fn documents_payes(tx: &Connection, facture_id: i64) -> Result<Vec<i64>, String> {
+    let source: Option<i64> = tx
+        .query_row(
+            "SELECT s.id FROM ventes v JOIN ventes s ON s.id = v.source_vente_id
+             WHERE v.id = ?1 AND COALESCE(s.dtype, 'facture') IN ('bl', 'facture')",
+            params![facture_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(std::iter::once(facture_id).chain(source).collect())
+}
+
+fn inverser_fidelite(
+    tx: &Connection,
+    client_id: i64,
+    documents: &[i64],
+    rattachement: i64,
+    inversions: &[(&str, f64, &str)],
+) -> Result<(), String> {
+    let mut a_inverser = Vec::new();
+    for document in documents {
+        for (mtype, signe, inverse) in inversions {
+            let points: f64 = tx
+                .query_row(
+                    "SELECT COALESCE(SUM(points), 0) FROM mouvements_fidelite WHERE vente_id = ?1 AND mtype = ?2",
+                    params![document, mtype],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if points.abs() >= 1e-9 {
+                a_inverser.push((points, *signe, *inverse));
+            }
+        }
+    }
+    for (points, signe, inverse) in a_inverser {
+        tx.execute(
+            "UPDATE clients SET points_fidelite = COALESCE(points_fidelite, 0) + ?1 WHERE id = ?2",
+            params![signe * points, client_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, ?4)",
+            params![client_id, rattachement, points, inverse],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn rembourser_avoir(
+    tx: &Connection,
+    facture_id: i64,
+    avoir_id: i64,
+    auteur: i64,
+) -> Result<(), String> {
+    let documents = documents_payes(tx, facture_id)?;
+    let mut paiements: Vec<(String, i64)> = Vec::new();
+    for document in &documents {
+        let mut stmt = tx
+            .prepare(
+                "SELECT mode, SUM(ROUND(montant * 100)) FROM vente_paiements WHERE vente_id = ?1 GROUP BY mode",
+            )
+            .map_err(|e| e.to_string())?;
+        let lignes = stmt
+            .query_map(params![document], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?.round() as i64))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        paiements.extend(lignes);
+    }
+    if paiements.is_empty() {
+        let (mode, net): (String, f64) = tx
+            .query_row(
+                "SELECT mode_paiement, montant_total - montant_remise FROM ventes WHERE id = ?1",
+                params![facture_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        paiements.push((mode, vers_centimes(net.abs())));
+    }
+    let remboursements: Vec<(String, i64)> = paiements
+        .into_iter()
+        .filter(|(mode, montant)| {
+            *montant > 0 && !matches!(mode.as_str(), "credit" | "fidelite" | "mixte")
+        })
+        .collect();
+    if remboursements.is_empty() {
+        return Ok(());
+    }
+    let session: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM sessions_caisse WHERE caissier_id = ?1 AND statut = 'ouverte' ORDER BY id DESC LIMIT 1",
+            params![auteur],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let especes: i64 = remboursements
+        .iter()
+        .filter(|(mode, _)| mode == "especes")
+        .map(|(_, m)| m)
+        .sum();
+    if especes > 0 && session.is_none() {
+        return Err(format!(
+            "L'avoir rembourse {:.2} DH en espèces : ouvrez votre session de caisse avant de l'émettre.",
+            en_dh(especes)
+        ));
+    }
+    for (mode, montant) in remboursements {
+        tx.execute(
+            "INSERT INTO vente_paiements (vente_id, session_id, mode, montant) VALUES (?1, ?2, ?3, ?4)",
+            params![avoir_id, session, mode, en_dh(montant)],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn credit_propre(tx: &Connection, vente_id: i64) -> Result<f64, String> {
     let (mode_paiement, montant_total, montant_remise): (String, f64, f64) = tx
         .query_row(
@@ -596,27 +717,18 @@ pub(crate) fn annuler_vente_impl(
             "avoir" => ajuster_credit(&tx, cid, credit_repris_par_avoir(&tx, vente_id)?)?,
             _ => {}
         }
-        let mouvements: Vec<(String, f64)> = {
-            let mut stmt = tx.prepare(
-                "SELECT mtype, COALESCE(SUM(points), 0) FROM mouvements_fidelite WHERE vente_id = ?1 AND mtype IN ('gain', 'depense') GROUP BY mtype"
-            ).map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map(params![vente_id], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map_err(|e| e.to_string())?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|e| e.to_string())?
-        };
-        for (mtype, points) in mouvements {
-            let (delta, annulation) = if mtype == "gain" {
-                (-points, "annulation_gain")
-            } else {
-                (points, "annulation_depense")
-            };
-            tx.execute("UPDATE clients SET points_fidelite = COALESCE(points_fidelite, 0) + ?1 WHERE id = ?2", params![delta, cid])
-                .map_err(|e| e.to_string())?;
-            tx.execute("INSERT INTO mouvements_fidelite (client_id, vente_id, points, mtype) VALUES (?1, ?2, ?3, ?4)", params![cid, vente_id, points, annulation])
-                .map_err(|e| e.to_string())?;
-        }
+        inverser_fidelite(
+            &tx,
+            cid,
+            &[vente_id],
+            vente_id,
+            &[
+                ("gain", -1.0, "annulation_gain"),
+                ("depense", 1.0, "annulation_depense"),
+                ("annulation_gain", 1.0, "retablissement_gain"),
+                ("annulation_depense", -1.0, "retablissement_depense"),
+            ],
+        )?;
     }
 
     let stock_was_deducted = dtype == "facture" || dtype == "bl";
@@ -882,13 +994,13 @@ pub fn convert_document(
     target_type: String,
 ) -> Result<i64, String> {
     let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let _me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
+    let me = autoriser(&auth, &conn, &token, Acces::Module("ventes", "modifier"))?;
     if super::fiscal::est_fiscal(&target_type) {
         super::fiscal::verifier_mentions_vendeur(&conn)?;
     }
     super::tracer(
         &format!("Conversion du document {}", vente_id),
-        convert_document_impl(&mut conn, vente_id, target_type),
+        convert_document_impl(&mut conn, vente_id, target_type, me.user_id),
     )
 }
 
@@ -896,6 +1008,7 @@ pub(crate) fn convert_document_impl(
     conn: &mut Connection,
     vente_id: i64,
     target_type: String,
+    auteur: i64,
 ) -> Result<i64, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -1073,12 +1186,27 @@ pub(crate) fn convert_document_impl(
             "avoir" => ajuster_credit(&tx, cid, -credit_repris_par_avoir(&tx, new_vente_id)?)?,
             _ => {}
         }
+        if target_type == "avoir" {
+            inverser_fidelite(
+                &tx,
+                cid,
+                &documents_payes(&tx, vente_id)?,
+                new_vente_id,
+                &[
+                    ("gain", -1.0, "annulation_gain"),
+                    ("depense", 1.0, "annulation_depense"),
+                ],
+            )?;
+        }
+    }
+    if target_type == "avoir" {
+        rembourser_avoir(&tx, vente_id, new_vente_id, auteur)?;
     }
 
     let source_ref = numero_facture_src.unwrap_or_else(|| format!("#{}", vente_id));
     log_audit(
         &tx,
-        caissier_id,
+        Some(auteur),
         "convertir_document",
         &format!(
             "Conversion {} {} → {} {}",
@@ -1544,8 +1672,81 @@ mod tests {
     }
 
     #[test]
+    fn test_avoir_rend_les_points_et_rembourse_la_session() {
+        let mut conn = setup();
+        conn.execute_batch(
+            "INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'gerant2', 'x', 'Gérant', 'manager');
+             INSERT INTO sessions_caisse (id, caissier_id, fond_initial, statut, magasin_id) VALUES (1, 1, 0, 'ouverte', 1);",
+        )
+        .unwrap();
+        let facture = vendre(
+            &mut conn,
+            Some(1),
+            json!([{ "article_id": 1, "quantite": 5 }]),
+            None,
+            json!([{ "mode": "especes", "montant": 570 }, { "mode": "fidelite", "montant": 30 }]),
+            "facture",
+            Some(30.0),
+        )
+        .unwrap()
+        .id;
+        let apres_vente = points(&conn);
+        assert_eq!(apres_vente, 50.0 - 30.0 + 5.0);
+        let especes = |conn: &Connection| {
+            crate::commands::sessions::totaux_especes_session(conn, 1)
+                .unwrap()
+                .ventes_especes
+        };
+        assert_eq!(especes(&conn), 570.0);
+
+        let refus = convert_document_impl(&mut conn, facture, "avoir".into(), 2).unwrap_err();
+        assert!(refus.contains("ouvrez votre session"), "{}", refus);
+
+        let avoir = convert_document_impl(&mut conn, facture, "avoir".into(), 1).unwrap();
+        assert_eq!(points(&conn), 50.0);
+        assert_eq!(especes(&conn), 0.0);
+        let auteur: Option<i64> = conn
+            .query_row(
+                "SELECT utilisateur_id FROM audit_log WHERE action = 'convertir_document' ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(auteur, Some(1));
+
+        annuler_vente_impl(&mut conn, avoir, Some(1), Some("Erreur")).unwrap();
+        assert_eq!(points(&conn), apres_vente);
+        assert_eq!(especes(&conn), 570.0);
+    }
+
+    #[test]
+    fn test_conversion_attribuee_a_son_auteur() {
+        let mut conn = setup();
+        conn.execute(
+            "INSERT INTO utilisateurs (id, login, password_hash, nom, role) VALUES (2, 'gerant2', 'x', 'Gérant', 'manager')",
+            [],
+        )
+        .unwrap();
+        let bl = document_credit(&mut conn, "bl");
+        convert_document_impl(&mut conn, bl, "facture".into(), 2).unwrap();
+        let auteur: Option<i64> = conn
+            .query_row(
+                "SELECT utilisateur_id FROM audit_log WHERE action = 'convertir_document'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(auteur, Some(2));
+    }
+
+    #[test]
     fn test_avoir_reprend_les_montants_en_negatif() {
         let mut conn = setup();
+        conn.execute(
+            "INSERT INTO sessions_caisse (caissier_id, fond_initial, statut, magasin_id) VALUES (1, 0, 'ouverte', 1)",
+            [],
+        )
+        .unwrap();
         let r = vendre(
             &mut conn,
             None,
@@ -1557,7 +1758,7 @@ mod tests {
         )
         .unwrap();
         let facture = r.id;
-        let avoir = convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
+        let avoir = convert_document_impl(&mut conn, facture, "avoir".into(), 1).unwrap();
         assert_eq!(montants(&conn, avoir), (-120.0, -12.0, -90.0, -18.0));
         let (ht, tva): (f64, f64) = conn
             .query_row(
@@ -1608,9 +1809,9 @@ mod tests {
         let mut conn = setup();
         let bl = document_credit(&mut conn, "bl");
         assert_eq!(credit(&conn), 120.0);
-        let facture = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
+        let facture = convert_document_impl(&mut conn, bl, "facture".into(), 1).unwrap();
         assert_eq!(credit(&conn), 120.0);
-        let avoir = convert_document_impl(&mut conn, facture, "avoir".into()).unwrap();
+        let avoir = convert_document_impl(&mut conn, facture, "avoir".into(), 1).unwrap();
         assert_eq!(credit(&conn), 0.0);
         annuler_vente_impl(&mut conn, avoir, None, Some("Test")).unwrap();
         assert_eq!(credit(&conn), 120.0);
@@ -1641,13 +1842,13 @@ mod tests {
             params![devis],
         )
         .unwrap();
-        assert!(convert_document_impl(&mut conn, devis, "facture".into())
+        assert!(convert_document_impl(&mut conn, devis, "facture".into(), 1)
             .unwrap_err()
             .contains("Plafond"));
         assert_eq!(credit(&conn), 0.0);
         conn.execute("UPDATE clients SET credit_plafond = 500 WHERE id = 1", [])
             .unwrap();
-        convert_document_impl(&mut conn, devis, "facture".into()).unwrap();
+        convert_document_impl(&mut conn, devis, "facture".into(), 1).unwrap();
         assert_eq!(credit(&conn), 120.0);
     }
 
@@ -1705,7 +1906,7 @@ mod tests {
     fn test_document_converti_non_annulable() {
         let mut conn = setup();
         let bl = document_credit(&mut conn, "bl");
-        let facture = convert_document_impl(&mut conn, bl, "facture".into()).unwrap();
+        let facture = convert_document_impl(&mut conn, bl, "facture".into(), 1).unwrap();
         assert!(annuler_vente_impl(&mut conn, bl, None, Some("Test"))
             .unwrap_err()
             .contains("converti"));

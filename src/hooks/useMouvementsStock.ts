@@ -7,12 +7,13 @@ export type MouvementStock = MouvementStockLigne
 
 export const MOUVEMENTS_PAR_PAGE = 100
 
-export function useMouvementsStock(articleId: number | null, mtype: string | null, page: number) {
+export function useMouvementsStock(articleId: number | null, mtype: string | null, recherche: string, page: number) {
   return useQuery({
-    queryKey: ["mouvements-stock", articleId, mtype, page],
+    queryKey: ["mouvements-stock", articleId, mtype, recherche, page],
     queryFn: () => invoke<Page<MouvementStockLigne>>("get_mouvements_stock", {
       articleId,
       mtype,
+      recherche: recherche || null,
       debut: null,
       fin: null,
       page,
