@@ -138,9 +138,7 @@ pub(crate) fn get_stats_magasins_impl(
          LEFT JOIN (
              SELECT
                  magasin_id,
-                 SUM(CASE WHEN dtype = 'avoir'
-                          THEN -(montant_total - montant_remise)
-                          ELSE  (montant_total - montant_remise) END) AS ca_mois,
+                 SUM(montant_total - montant_remise) AS ca_mois,
                  COUNT(CASE WHEN dtype != 'avoir' THEN 1 END) AS nb_ventes,
                  COUNT(DISTINCT CASE WHEN dtype != 'avoir' AND client_id IS NOT NULL THEN client_id END) AS nb_clients_actifs
              FROM ventes
@@ -300,12 +298,12 @@ mod tests {
              VALUES ({m1}, 500.0, 50.0, 'facture', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');
              INSERT INTO ventes (magasin_id, montant_total, montant_remise, dtype, statut,
                                  date, mode_paiement)
-             VALUES ({m1}, 100.0, 10.0, 'avoir', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');",
+             VALUES ({m1}, -100.0, -10.0, 'avoir', 'validee', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'), 'especes');",
         ))
         .unwrap();
         let stats = get_stats_magasins_impl(&conn).unwrap();
         let centre = stats.iter().find(|s| s.nom == "Centre").unwrap();
-        assert_eq!(centre.ca_mois, (500.0 - 50.0) - (100.0 - 10.0));
+        assert_eq!(centre.ca_mois, (500.0 - 50.0) + (-100.0 - (-10.0)));
         assert_eq!(centre.nb_ventes, 1);
     }
 
