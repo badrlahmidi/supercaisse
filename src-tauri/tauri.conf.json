@@ -43,7 +43,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4RjU4RTY0OTZFOUQ3QjUKUldTMTErbVdaSTcxbVBtam0zL2puRStSZW85Vm10TDg3K1R6YTZCWmYyV2xweXgwODZkclNhWUoK",
       "endpoints": [
         "https://github.com/badrlahmidi/supercaisse/releases/latest/download/latest.json"
       ],
