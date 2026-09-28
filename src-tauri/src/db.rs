@@ -1733,8 +1733,11 @@ mod tests {
         let mut conn = super::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         super::appliquer_migrations(&mut conn, &super::MIGRATIONS[..7]).unwrap();
-        conn.execute("INSERT INTO categories (id, nom) VALUES (1, 'Boissons')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO categories (id, nom) VALUES (1, 'Boissons')",
+            [],
+        )
+        .unwrap();
         super::migrer(&mut conn).unwrap();
 
         for table in super::TABLES_SYNCHRONISEES {
@@ -1749,7 +1752,11 @@ mod tests {
         let uuid_existant: String = conn
             .query_row("SELECT uuid FROM categories WHERE id = 1", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(uuid_existant.len(), 36, "la ligne pré-existante doit être rétro-remplie");
+        assert_eq!(
+            uuid_existant.len(),
+            36,
+            "la ligne pré-existante doit être rétro-remplie"
+        );
 
         let outbox_apres_migration: i64 = conn
             .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))
@@ -1762,9 +1769,11 @@ mod tests {
         conn.execute("INSERT INTO categories (nom) VALUES ('Snacks')", [])
             .unwrap();
         let uuid_nouveau: String = conn
-            .query_row("SELECT uuid FROM categories WHERE nom = 'Snacks'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT uuid FROM categories WHERE nom = 'Snacks'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(uuid_nouveau.len(), 36);
         assert_ne!(uuid_nouveau, uuid_existant);
@@ -1778,8 +1787,11 @@ mod tests {
             .unwrap();
         assert_eq!(outbox, vec![(uuid_nouveau.clone(), "upsert".to_string())]);
 
-        conn.execute("UPDATE categories SET nom = 'Snacks salés' WHERE nom = 'Snacks'", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE categories SET nom = 'Snacks salés' WHERE nom = 'Snacks'",
+            [],
+        )
+        .unwrap();
         let compte_apres_maj: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sync_outbox WHERE table_name = 'categories'",
@@ -1817,7 +1829,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let (uuid_conserve, ): (String,) = conn
+        let (uuid_conserve,): (String,) = conn
             .query_row(
                 "SELECT uuid FROM categories WHERE nom = 'Venue du cloud'",
                 [],
