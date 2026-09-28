@@ -1,10 +1,15 @@
 mod auth;
 mod client;
 mod outbox;
+mod pull;
 
 pub use auth::{connexion_par_mot_de_passe, lire_tenant_id, lister_magasins};
 pub use client::{ReqwestSupabaseClient, SupabaseClient};
-pub use outbox::{ligne_pour_cloud, lire_outbox_en_attente, marquer_echec, marquer_synchronise};
+pub use outbox::{
+    cle_suppression_cloud, ligne_pour_cloud, lire_outbox_en_attente, marquer_echec,
+    marquer_synchronise,
+};
+pub use pull::executer_cycle_pull;
 
 const SUPABASE_URL: &str = "https://codpcxvcrfgrcazwdtgw.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY: &str = "sb_publishable_F8jJLoN3EfFp_-i8YeRcdA_cuiCi8Ly";
@@ -82,9 +87,14 @@ pub async fn executer_un_cycle<C: SupabaseClient>(
 
     for entree in lignes {
         let resultat = if entree.operation == "delete" {
-            client
-                .supprimer(&identifiants, &entree.table_name, &entree.row_uuid)
-                .await
+            let filtres = {
+                let verrou = conn.lock().map_err(|e| e.to_string())?;
+                cle_suppression_cloud(&verrou, &entree)
+            };
+            match filtres {
+                Ok(f) => client.supprimer(&identifiants, &entree.table_name, &f).await,
+                Err(e) => Err(e),
+            }
         } else {
             let payload = {
                 let verrou = conn.lock().map_err(|e| e.to_string())?;
@@ -127,7 +137,16 @@ async fn boucle_synchro(conn: Arc<Mutex<Connection>>) {
     loop {
         intervalle.tick().await;
         if let Err(e) = executer_un_cycle(&conn, &client).await {
-            log::warn!("Cycle de synchronisation échoué : {}", e);
+            log::warn!("Cycle de synchronisation (envoi) échoué : {}", e);
+        }
+        let identifiants = match conn.lock() {
+            Ok(verrou) => lire_identifiants(&verrou).ok().flatten(),
+            Err(_) => None,
+        };
+        if let Some(creds) = identifiants {
+            if let Err(e) = executer_cycle_pull(&conn, &client, &creds).await {
+                log::warn!("Cycle de synchronisation (réception) échoué : {}", e);
+            }
         }
     }
 }
@@ -142,7 +161,7 @@ mod tests {
     #[derive(Default)]
     struct ClientFactice {
         upserts: StdMutex<Vec<(String, Value)>>,
-        suppressions: StdMutex<Vec<(String, String)>>,
+        suppressions: StdMutex<Vec<(String, Vec<(String, String)>)>>,
         echoue_sur: Option<String>,
     }
 
@@ -167,13 +186,23 @@ mod tests {
             &self,
             _creds: &SyncCredentials,
             table: &str,
-            row_uuid: &str,
+            filtres: &[(String, String)],
         ) -> Result<(), String> {
             self.suppressions
                 .lock()
                 .unwrap()
-                .push((table.to_string(), row_uuid.to_string()));
+                .push((table.to_string(), filtres.to_vec()));
             Ok(())
+        }
+
+        async fn recuperer(
+            &self,
+            _creds: &SyncCredentials,
+            _table: &str,
+            _depuis: Option<&str>,
+            _limite: i64,
+        ) -> Result<Vec<Value>, String> {
+            Ok(Vec::new())
         }
     }
 

@@ -148,6 +148,8 @@ const MIGRATIONS: &[Migration] = &[
     migration_006_plafonds_remise,
     migration_007_index_et_tracabilite,
     migration_008_synchronisation_cloud,
+    migration_009_pull_cloud,
+    migration_010_outbox_cles_composites,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -910,6 +912,44 @@ fn migration_008_synchronisation_cloud(conn: &Connection) -> Result<()> {
         ))?;
     }
 
+    Ok(())
+}
+
+fn migration_009_pull_cloud(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_pull_state (
+            table_name TEXT PRIMARY KEY,
+            last_pulled_at TEXT
+        );",
+    )
+}
+
+const TABLES_CLE_COMPOSITE_LOCALE: &[(&str, &str, &str)] = &[
+    ("article_stocks", "article_id", "magasin_id"),
+    ("article_variante_stocks", "variante_id", "magasin_id"),
+    ("transfert_lignes", "transfert_id", "article_id"),
+];
+
+fn migration_010_outbox_cles_composites(conn: &Connection) -> Result<()> {
+    ajouter_colonne(conn, "sync_outbox", "cle1_locale", "INTEGER")?;
+    ajouter_colonne(conn, "sync_outbox", "cle2_locale", "INTEGER")?;
+    for (table, colonne1, colonne2) in TABLES_CLE_COMPOSITE_LOCALE {
+        conn.execute_batch(&format!(
+            "DROP TRIGGER IF EXISTS trg_{t}_sync_del;
+             CREATE TRIGGER trg_{t}_sync_del AFTER DELETE ON {t}
+             WHEN OLD.uuid IS NOT NULL
+             BEGIN
+                 INSERT INTO sync_outbox (table_name, row_uuid, operation, cle1_locale, cle2_locale)
+                 VALUES ('{t}', OLD.uuid, 'delete', OLD.{c1}, OLD.{c2})
+                 ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                     operation = 'delete', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL,
+                     cle1_locale = excluded.cle1_locale, cle2_locale = excluded.cle2_locale;
+             END;",
+            t = table,
+            c1 = colonne1,
+            c2 = colonne2
+        ))?;
+    }
     Ok(())
 }
 
