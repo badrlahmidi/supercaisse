@@ -164,9 +164,7 @@ mod tests {
         )
         .unwrap();
         let uuid_categorie: String = conn
-            .query_row("SELECT uuid FROM categories WHERE id = 1", [], |r| {
-                r.get(0)
-            })
+            .query_row("SELECT uuid FROM categories WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         let uuid_article: String = conn
             .query_row("SELECT uuid FROM articles WHERE id = 1", [], |r| r.get(0))

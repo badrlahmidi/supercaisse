@@ -37,7 +37,10 @@ pub fn lire_identifiants(conn: &Connection) -> rusqlite::Result<Option<SyncCrede
 }
 
 #[allow(dead_code)]
-pub fn enregistrer_identifiants(conn: &Connection, creds: &SyncCredentials) -> rusqlite::Result<()> {
+pub fn enregistrer_identifiants(
+    conn: &Connection,
+    creds: &SyncCredentials,
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO sync_credentials (id, tenant_id, cloud_magasin_id, access_token, refresh_token, expires_at)
          VALUES (1, ?1, ?2, ?3, ?4, ?5)
