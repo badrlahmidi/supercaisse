@@ -162,10 +162,12 @@ mod tests {
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
 
+    type SuppressionEnregistree = (String, Vec<(String, String)>);
+
     #[derive(Default)]
     struct ClientFactice {
         upserts: StdMutex<Vec<(String, Value)>>,
-        suppressions: StdMutex<Vec<(String, Vec<(String, String)>)>>,
+        suppressions: StdMutex<Vec<SuppressionEnregistree>>,
         echoue_sur: Option<String>,
     }
 
