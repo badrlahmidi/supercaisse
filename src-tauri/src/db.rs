@@ -349,6 +349,7 @@ struct Reconstruction {
     definition: String,
     colonnes: &'static str,
     selection: &'static str,
+    contraintes_finales: &'static str,
 }
 
 fn reconstructions() -> Vec<Reconstruction> {
@@ -367,6 +368,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, login, password_hash, nom, role, pin_hash, must_change_password",
             selection: "id, login, password_hash, nom, COALESCE(role, 'caissier'), pin_hash, COALESCE(must_change_password, 0)",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "sessions_caisse",
@@ -385,6 +387,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, caissier_id, date_ouverture, date_cloture, fond_initial, total_especes_attendu, total_especes_declare, ecart, statut, magasin_id",
             selection: "id, caissier_id, date_ouverture, date_cloture, COALESCE(fond_initial, 0), total_especes_attendu, total_especes_declare, ecart, COALESCE(statut, 'ouverte'), magasin_id",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "ventes",
@@ -405,14 +408,14 @@ fn reconstructions() -> Vec<Reconstruction> {
                 source_vente_id INTEGER REFERENCES ventes(id),
                 magasin_id INTEGER REFERENCES magasins(id),
                 montant_ht REAL,
-                montant_tva REAL,
-                CHECK (dtype = 'avoir' OR montant_total >= 0)",
+                montant_tva REAL",
                 liste_sql(MODES_PAIEMENT_VENTE),
                 liste_sql(STATUTS_VENTE),
                 liste_sql(TYPES_DOCUMENT)
             ),
             colonnes: "id, date, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, points_utilises, points_gagnes, numero_facture, dtype, session_id, source_vente_id, magasin_id, montant_ht, montant_tva",
             selection: "id, date, client_id, caissier_id, COALESCE(montant_total, 0), COALESCE(montant_remise, 0), COALESCE(mode_paiement, 'especes'), COALESCE(statut, 'validee'), COALESCE(points_utilises, 0), COALESCE(points_gagnes, 0), numero_facture, COALESCE(dtype, 'facture'), session_id, source_vente_id, magasin_id, montant_ht, montant_tva",
+            contraintes_finales: "CHECK (dtype = 'avoir' OR montant_total >= 0)",
         },
         Reconstruction {
             table: "vente_articles",
@@ -432,6 +435,7 @@ fn reconstructions() -> Vec<Reconstruction> {
                 .to_string(),
             colonnes: "id, vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type, montant_ht, montant_tva",
             selection: "id, vente_id, article_id, quantite, prix_unitaire, COALESCE(tva, 0), total_ligne, COALESCE(remise_ligne, 0), note, variante_id, COALESCE(prix_type, 'public'), montant_ht, montant_tva",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "journal_caisse",
@@ -447,6 +451,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, date, utilisateur_id, jtype, montant, description, session_id",
             selection: "id, date, utilisateur_id, jtype, montant, description, session_id",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "mouvements_stock",
@@ -463,6 +468,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, date, article_id, quantite, mtype, reference_id, reference_type, magasin_id",
             selection: "id, date, article_id, quantite, mtype, reference_id, reference_type, magasin_id",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "cheques",
@@ -483,6 +489,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, numero, banque, tireur, montant, date_emission, date_echeance, statut, ctype, client_id, fournisseur_id",
             selection: "id, numero, banque, tireur, montant, date_emission, date_echeance, COALESCE(statut, 'en_attente'), ctype, client_id, fournisseur_id",
+            contraintes_finales: "",
         },
     ]
 }
@@ -667,6 +674,9 @@ fn reconstruire_table(conn: &Connection, r: &Reconstruction) -> Result<()> {
         ));
         colonnes.push_str(&format!(", {}", nom));
         selection.push_str(&format!(", {}", nom));
+    }
+    if !r.contraintes_finales.is_empty() {
+        definition.push_str(&format!(",\n{}", r.contraintes_finales));
     }
     let nouvelle = format!("{}_v3", r.table);
     conn.execute_batch(&format!(
