@@ -147,7 +147,7 @@ fn appliquer_ligne_uuid(conn: &Connection, table: &str, ligne: &Value) -> Result
     let mut colonnes = Vec::new();
     let mut valeurs: Vec<Box<dyn ToSql>> = Vec::new();
     for colonne in &colonnes_locales {
-        if colonne == "uuid" {
+        if colonne == "uuid" || colonne == "id" {
             continue;
         }
         let Some(valeur_cloud) = objet.get(colonne) else {
@@ -501,9 +501,12 @@ mod tests {
         let uuid_article: String = conn
             .query_row("SELECT uuid FROM articles WHERE id = 1", [], |r| r.get(0))
             .unwrap();
-        let uuid_magasin: String = conn
-            .query_row("SELECT uuid FROM magasins WHERE id = 1", [], |r| r.get(0))
-            .unwrap();
+        conn.execute(
+            "UPDATE magasins SET cloud_magasin_id = 'cloud-magasin-1' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        let uuid_magasin = "cloud-magasin-1".to_string();
 
         let ligne = json!({
             "tenant_id": "tenant-1",
