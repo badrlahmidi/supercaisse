@@ -4,6 +4,7 @@ mod commands;
 mod db;
 mod paths;
 mod session;
+mod sync;
 
 use db::{init_db, DbState};
 use paths::{legacy_database_candidates, prepare_database, AppDirs};
@@ -61,6 +62,7 @@ pub fn run() {
             }
             app.manage(DbState::avec_lecteurs(conn, &db_path, db::LECTEURS)?);
             app.manage(dirs);
+            sync::demarrer_si_configure(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -29,3 +29,5 @@ rand = "0.8"
 base64 = "0.22"
 tauri-plugin-updater = "2"
 ts-rs = { version = "11", features = ["serde-compat", "no-serde-warnings"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+tokio = { version = "1", features = ["time", "rt", "macros"] }
