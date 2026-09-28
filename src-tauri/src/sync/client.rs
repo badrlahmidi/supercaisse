@@ -134,6 +134,9 @@ impl SupabaseClient for ReqwestSupabaseClient {
             let corps = reponse.text().await.unwrap_or_default();
             return Err(format!("récupération {} refusée : {}", table, corps));
         }
-        reponse.json::<Vec<Value>>().await.map_err(|e| e.to_string())
+        reponse
+            .json::<Vec<Value>>()
+            .await
+            .map_err(|e| e.to_string())
     }
 }

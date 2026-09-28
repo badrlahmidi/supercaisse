@@ -138,11 +138,7 @@ fn appliquer_ligne_uuid(conn: &Connection, table: &str, ligne: &Value) -> Result
     let cles = cles_etrangeres(conn, table).map_err(|e| e.to_string())?;
     let obligatoires = colonnes_non_nulles(conn, table).map_err(|e| e.to_string())?;
 
-    let est_obligatoire = |nom: &str| {
-        obligatoires
-            .iter()
-            .any(|(n, notnull)| n == nom && *notnull)
-    };
+    let est_obligatoire = |nom: &str| obligatoires.iter().any(|(n, notnull)| n == nom && *notnull);
 
     let mut colonnes = Vec::new();
     let mut valeurs: Vec<Box<dyn ToSql>> = Vec::new();
@@ -156,8 +152,9 @@ fn appliquer_ligne_uuid(conn: &Connection, table: &str, ligne: &Value) -> Result
         if let Some((_, table_cible)) = cles.iter().find(|(c, _)| c == colonne) {
             let id_local = match valeur_cloud.as_str() {
                 None => None,
-                Some(s) => traduire_reference_inverse(conn, table_cible, s)
-                    .map_err(|e| e.to_string())?,
+                Some(s) => {
+                    traduire_reference_inverse(conn, table_cible, s).map_err(|e| e.to_string())?
+                }
             };
             match id_local {
                 Some(id) => {
@@ -179,7 +176,11 @@ fn appliquer_ligne_uuid(conn: &Connection, table: &str, ligne: &Value) -> Result
     Ok(true)
 }
 
-fn appliquer_ligne_composite(conn: &Connection, table: &str, ligne: &Value) -> Result<bool, String> {
+fn appliquer_ligne_composite(
+    conn: &Connection,
+    table: &str,
+    ligne: &Value,
+) -> Result<bool, String> {
     let objet = ligne
         .as_object()
         .ok_or_else(|| "ligne cloud invalide".to_string())?;
@@ -276,7 +277,9 @@ pub async fn executer_pull_table<C: SupabaseClient>(
         .await?;
 
     let verrou = conn.lock().map_err(|e| e.to_string())?;
-    let composite = TABLES_CLE_COMPOSITE_CLOUD.iter().any(|(t, _, _)| *t == table);
+    let composite = TABLES_CLE_COMPOSITE_CLOUD
+        .iter()
+        .any(|(t, _, _)| *t == table);
     let mut dernier_horodatage: Option<String> = None;
     for ligne in &lignes {
         let horodatage = ligne
@@ -362,7 +365,13 @@ mod tests {
             _: Option<&str>,
             _: i64,
         ) -> Result<Vec<Value>, String> {
-            Ok(self.pages.lock().unwrap().get(table).cloned().unwrap_or_default())
+            Ok(self
+                .pages
+                .lock()
+                .unwrap()
+                .get(table)
+                .cloned()
+                .unwrap_or_default())
         }
     }
 
@@ -407,7 +416,10 @@ mod tests {
         let compte: i64 = conn
             .query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(compte, 1, "une même ligne cloud ne doit pas se dupliquer localement");
+        assert_eq!(
+            compte, 1,
+            "une même ligne cloud ne doit pas se dupliquer localement"
+        );
         let nom: String = conn
             .query_row(
                 "SELECT nom FROM categories WHERE uuid = 'cloud-categorie-1'",
@@ -424,9 +436,11 @@ mod tests {
         conn.execute("INSERT INTO categories (nom) VALUES ('Boissons')", [])
             .unwrap();
         let uuid_categorie: String = conn
-            .query_row("SELECT uuid FROM categories WHERE nom = 'Boissons'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT uuid FROM categories WHERE nom = 'Boissons'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
 
         let ligne = json!({
@@ -460,9 +474,11 @@ mod tests {
         assert_eq!(designation, "Coca");
         assert_eq!(actif, 1);
         let id_categorie_locale: i64 = conn
-            .query_row("SELECT id FROM categories WHERE nom = 'Boissons'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT id FROM categories WHERE nom = 'Boissons'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(categorie_id, id_categorie_locale);
     }

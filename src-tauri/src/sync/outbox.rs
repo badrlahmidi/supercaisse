@@ -1,8 +1,11 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
-pub(super) const TABLES_CLE_COMPOSITE: &[&str] =
-    &["article_stocks", "article_variante_stocks", "transfert_lignes"];
+pub(super) const TABLES_CLE_COMPOSITE: &[&str] = &[
+    "article_stocks",
+    "article_variante_stocks",
+    "transfert_lignes",
+];
 
 const COLONNES_BOOLEENNES: &[&str] = &["actif", "suivi_lot", "est_kit"];
 const COLONNES_TRACABILITE_EXCLUES: &[&str] =
@@ -54,9 +57,7 @@ pub fn cle_suppression_cloud(
 ) -> Result<Vec<(String, String)>, String> {
     let (colonne1, table1, colonne2, table2) = match entree.table_name.as_str() {
         "article_stocks" => ("article_id", "articles", "magasin_id", "magasins"),
-        "article_variante_stocks" => {
-            ("variante_id", "article_variantes", "magasin_id", "magasins")
-        }
+        "article_variante_stocks" => ("variante_id", "article_variantes", "magasin_id", "magasins"),
         "transfert_lignes" => ("transfert_id", "transferts_stock", "article_id", "articles"),
         _ => return Ok(vec![("id".to_string(), entree.row_uuid.clone())]),
     };
@@ -72,7 +73,10 @@ pub fn cle_suppression_cloud(
     let uuid2 = traduire_reference(conn, table2, id2)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("{} #{} introuvable au cloud", table2, id2))?;
-    Ok(vec![(colonne1.to_string(), uuid1), (colonne2.to_string(), uuid2)])
+    Ok(vec![
+        (colonne1.to_string(), uuid1),
+        (colonne2.to_string(), uuid2),
+    ])
 }
 
 pub fn marquer_synchronise(conn: &Connection, id: i64) -> rusqlite::Result<()> {
@@ -132,7 +136,9 @@ pub fn ligne_pour_cloud(conn: &Connection, table: &str, row_uuid: &str) -> Resul
             for (index, nom) in colonnes.iter().enumerate() {
                 let valeur = match ligne.get_ref(index)? {
                     rusqlite::types::ValueRef::Null => Value::Null,
-                    rusqlite::types::ValueRef::Integer(i) if COLONNES_BOOLEENNES.contains(&nom.as_str()) => {
+                    rusqlite::types::ValueRef::Integer(i)
+                        if COLONNES_BOOLEENNES.contains(&nom.as_str()) =>
+                    {
                         Value::Bool(i != 0)
                     }
                     rusqlite::types::ValueRef::Integer(i) => Value::from(i),

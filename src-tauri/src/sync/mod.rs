@@ -92,7 +92,11 @@ pub async fn executer_un_cycle<C: SupabaseClient>(
                 cle_suppression_cloud(&verrou, &entree)
             };
             match filtres {
-                Ok(f) => client.supprimer(&identifiants, &entree.table_name, &f).await,
+                Ok(f) => {
+                    client
+                        .supprimer(&identifiants, &entree.table_name, &f)
+                        .await
+                }
                 Err(e) => Err(e),
             }
         } else {
