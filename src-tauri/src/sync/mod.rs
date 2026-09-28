@@ -2,9 +2,7 @@ mod client;
 mod outbox;
 
 pub use client::{ReqwestSupabaseClient, SupabaseClient};
-pub use outbox::{
-    ligne_pour_cloud, lire_outbox_en_attente, marquer_echec, marquer_synchronise, OutboxEntry,
-};
+pub use outbox::{ligne_pour_cloud, lire_outbox_en_attente, marquer_echec, marquer_synchronise};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::{Arc, Mutex};
@@ -38,6 +36,7 @@ pub fn lire_identifiants(conn: &Connection) -> rusqlite::Result<Option<SyncCrede
     .optional()
 }
 
+#[allow(dead_code)]
 pub fn enregistrer_identifiants(conn: &Connection, creds: &SyncCredentials) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO sync_credentials (id, tenant_id, cloud_magasin_id, access_token, refresh_token, expires_at)
