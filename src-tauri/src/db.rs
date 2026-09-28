@@ -147,6 +147,7 @@ const MIGRATIONS: &[Migration] = &[
     migration_005_verrouillage_pin,
     migration_006_plafonds_remise,
     migration_007_index_et_tracabilite,
+    migration_008_synchronisation_cloud,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -781,6 +782,124 @@ fn migration_007_index_et_tracabilite(conn: &Connection) -> Result<()> {
             t = table
         ))?;
     }
+    Ok(())
+}
+
+pub(crate) const TABLES_SYNCHRONISEES: &[&str] = &[
+    "categories",
+    "fournisseurs",
+    "clients",
+    "articles",
+    "article_variantes",
+    "article_composants",
+    "article_stocks",
+    "article_variante_stocks",
+    "article_lots",
+    "ventes",
+    "vente_articles",
+    "vente_paiements",
+    "vente_lots",
+    "achats",
+    "achat_articles",
+    "paiements",
+    "mouvements_stock",
+    "mouvements_fidelite",
+    "journal_caisse",
+    "sessions_caisse",
+    "caisses",
+    "cheques",
+    "inventaires",
+    "inventaire_lignes",
+    "transferts_stock",
+    "transfert_lignes",
+    "tables_resto",
+    "audit_log",
+];
+
+const UUID_V4_SQL: &str = "(lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',(abs(random())%4)+1,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6))))";
+
+fn migration_008_synchronisation_cloud(conn: &Connection) -> Result<()> {
+    for table in TABLES_SYNCHRONISEES {
+        ajouter_colonne(conn, table, "uuid", "TEXT")?;
+        conn.execute(
+            &format!(
+                "UPDATE {t} SET uuid = {u} WHERE uuid IS NULL",
+                t = table,
+                u = UUID_V4_SQL
+            ),
+            [],
+        )?;
+        conn.execute(
+            &format!(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_{t}_uuid ON {t}(uuid) WHERE uuid IS NOT NULL",
+                t = table
+            ),
+            [],
+        )?;
+    }
+
+    ajouter_colonne(conn, "utilisateurs", "cloud_profile_id", "TEXT")?;
+    ajouter_colonne(conn, "magasins", "cloud_magasin_id", "TEXT")?;
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS sync_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            row_uuid TEXT NOT NULL,
+            operation TEXT NOT NULL CHECK (operation IN ('upsert', 'delete')),
+            queued_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            UNIQUE (table_name, row_uuid)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sync_outbox_queued ON sync_outbox(queued_at);
+
+        CREATE TABLE IF NOT EXISTS sync_credentials (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            tenant_id TEXT NOT NULL,
+            cloud_magasin_id TEXT NOT NULL,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at TEXT,
+            derniere_synchro TEXT
+        );
+        ",
+    )?;
+
+    for table in TABLES_SYNCHRONISEES {
+        conn.execute_batch(&format!(
+            "
+            CREATE TRIGGER IF NOT EXISTS trg_{t}_sync_ins AFTER INSERT ON {t}
+            BEGIN
+                UPDATE {t} SET uuid = {u} WHERE rowid = NEW.rowid AND uuid IS NULL;
+                INSERT INTO sync_outbox (table_name, row_uuid, operation)
+                    SELECT '{t}', uuid, 'upsert' FROM {t} WHERE rowid = NEW.rowid
+                ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                    operation = 'upsert', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_{t}_sync_upd AFTER UPDATE ON {t}
+            WHEN NEW.uuid IS NOT NULL
+            BEGIN
+                INSERT INTO sync_outbox (table_name, row_uuid, operation) VALUES ('{t}', NEW.uuid, 'upsert')
+                ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                    operation = 'upsert', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_{t}_sync_del AFTER DELETE ON {t}
+            WHEN OLD.uuid IS NOT NULL
+            BEGIN
+                INSERT INTO sync_outbox (table_name, row_uuid, operation) VALUES ('{t}', OLD.uuid, 'delete')
+                ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                    operation = 'delete', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL;
+            END;
+            ",
+            t = table,
+            u = UUID_V4_SQL
+        ))?;
+    }
+
     Ok(())
 }
 
@@ -1607,6 +1726,108 @@ mod tests {
             .unwrap();
         assert!(modifie_le.is_some());
         assert_eq!(modifie_par, Some(1));
+    }
+
+    #[test]
+    fn test_synchronisation_cloud() {
+        let mut conn = super::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        super::appliquer_migrations(&mut conn, &super::MIGRATIONS[..7]).unwrap();
+        conn.execute("INSERT INTO categories (id, nom) VALUES (1, 'Boissons')", [])
+            .unwrap();
+        super::migrer(&mut conn).unwrap();
+
+        for table in super::TABLES_SYNCHRONISEES {
+            assert!(
+                super::colonne_existe(&conn, table, "uuid").unwrap(),
+                "{table}.uuid"
+            );
+        }
+        assert!(super::colonne_existe(&conn, "utilisateurs", "cloud_profile_id").unwrap());
+        assert!(super::colonne_existe(&conn, "magasins", "cloud_magasin_id").unwrap());
+
+        let uuid_existant: String = conn
+            .query_row("SELECT uuid FROM categories WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uuid_existant.len(), 36, "la ligne pré-existante doit être rétro-remplie");
+
+        let outbox_apres_migration: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            outbox_apres_migration, 0,
+            "le rétro-remplissage d'une migration ne doit pas mettre les données existantes en file de synchro"
+        );
+
+        conn.execute("INSERT INTO categories (nom) VALUES ('Snacks')", [])
+            .unwrap();
+        let uuid_nouveau: String = conn
+            .query_row("SELECT uuid FROM categories WHERE nom = 'Snacks'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(uuid_nouveau.len(), 36);
+        assert_ne!(uuid_nouveau, uuid_existant);
+
+        let outbox: Vec<(String, String)> = conn
+            .prepare("SELECT row_uuid, operation FROM sync_outbox WHERE table_name = 'categories'")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(outbox, vec![(uuid_nouveau.clone(), "upsert".to_string())]);
+
+        conn.execute("UPDATE categories SET nom = 'Snacks salés' WHERE nom = 'Snacks'", [])
+            .unwrap();
+        let compte_apres_maj: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sync_outbox WHERE table_name = 'categories'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            compte_apres_maj, 1,
+            "une mise à jour doit fusionner avec l'entrée en attente, pas en créer une nouvelle"
+        );
+
+        conn.execute("DELETE FROM categories WHERE nom = 'Snacks salés'", [])
+            .unwrap();
+        let operation: String = conn
+            .query_row(
+                "SELECT operation FROM sync_outbox WHERE row_uuid = ?1",
+                [&uuid_nouveau],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(operation, "delete");
+
+        assert!(
+            conn.execute(
+                "INSERT INTO categories (nom, uuid) VALUES ('Doublon', ?1)",
+                [&uuid_existant],
+            )
+            .is_err(),
+            "l'unicité du uuid doit être appliquée"
+        );
+
+        conn.execute(
+            "INSERT INTO categories (nom, uuid) VALUES ('Venue du cloud', 'uuid-fourni-par-le-cloud')",
+            [],
+        )
+        .unwrap();
+        let (uuid_conserve, ): (String,) = conn
+            .query_row(
+                "SELECT uuid FROM categories WHERE nom = 'Venue du cloud'",
+                [],
+                |r| Ok((r.get(0)?,)),
+            )
+            .unwrap();
+        assert_eq!(
+            uuid_conserve, "uuid-fourni-par-le-cloud",
+            "un uuid fourni explicitement (tiré du cloud) ne doit pas être remplacé"
+        );
     }
 
     #[test]
