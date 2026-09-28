@@ -231,18 +231,12 @@ mod tests {
 
     fn client_ids(conn: &Connection) -> (i64, i64) {
         let c1: i64 = conn
-            .query_row(
-                "SELECT id FROM clients WHERE nom = 'Alice'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT id FROM clients WHERE nom = 'Alice'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         let c2: i64 = conn
-            .query_row(
-                "SELECT id FROM clients WHERE nom = 'Bob'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT id FROM clients WHERE nom = 'Bob'", [], |r| r.get(0))
             .unwrap();
         (c1, c2)
     }
