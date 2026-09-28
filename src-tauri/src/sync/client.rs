@@ -1,8 +1,5 @@
-use super::SyncCredentials;
+use super::{SyncCredentials, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL};
 use serde_json::Value;
-
-const SUPABASE_URL: &str = "https://codpcxvcrfgrcazwdtgw.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY: &str = "sb_publishable_F8jJLoN3EfFp_-i8YeRcdA_cuiCi8Ly";
 
 pub trait SupabaseClient {
     async fn upsert(

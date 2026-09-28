@@ -820,6 +820,47 @@ pub struct StatsTableauDeBord {
     pub top_clients: Vec<MeilleurClient>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MagasinAppairageCloud {
+    pub cloud_magasin_id: String,
+    pub nom: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct MagasinLocalNonAssocie {
+    #[ts(as = "f64")]
+    pub id: i64,
+    pub nom: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ChoixAppairageCloud {
+    pub magasins_cloud: Vec<MagasinAppairageCloud>,
+    pub magasins_locaux: Vec<MagasinLocalNonAssocie>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct AssociationMagasinCloud {
+    #[ts(as = "f64")]
+    pub magasin_local_id: i64,
+    pub cloud_magasin_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct EtatSynchroCloud {
+    pub connecte: bool,
+    pub tenant_id: Option<String>,
+    pub cloud_magasin_id: Option<String>,
+    #[ts(as = "f64")]
+    pub en_attente: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

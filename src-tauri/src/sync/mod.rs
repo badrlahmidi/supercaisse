@@ -1,8 +1,13 @@
+mod auth;
 mod client;
 mod outbox;
 
+pub use auth::{connexion_par_mot_de_passe, lire_tenant_id, lister_magasins};
 pub use client::{ReqwestSupabaseClient, SupabaseClient};
 pub use outbox::{ligne_pour_cloud, lire_outbox_en_attente, marquer_echec, marquer_synchronise};
+
+const SUPABASE_URL: &str = "https://codpcxvcrfgrcazwdtgw.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY: &str = "sb_publishable_F8jJLoN3EfFp_-i8YeRcdA_cuiCi8Ly";
 
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::{Arc, Mutex};
