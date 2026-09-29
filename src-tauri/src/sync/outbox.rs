@@ -30,15 +30,17 @@ pub struct OutboxEntry {
     pub cle2_locale: Option<i64>,
 }
 
+const MAX_TENTATIVES: i64 = 10;
+
 pub fn lire_outbox_en_attente(
     conn: &Connection,
     limite: i64,
 ) -> rusqlite::Result<Vec<OutboxEntry>> {
     conn.prepare(
         "SELECT id, table_name, row_uuid, operation, cle1_locale, cle2_locale
-         FROM sync_outbox ORDER BY queued_at LIMIT ?1",
+         FROM sync_outbox WHERE attempts < ?2 ORDER BY queued_at LIMIT ?1",
     )?
-    .query_map(params![limite], |r| {
+    .query_map(params![limite, MAX_TENTATIVES], |r| {
         Ok(OutboxEntry {
             id: r.get(0)?,
             table_name: r.get(1)?,
@@ -183,6 +185,34 @@ pub fn ligne_pour_cloud(conn: &Connection, table: &str, row_uuid: &str) -> Resul
             colonne_locale,
             uuid_cloud.map(Value::String).unwrap_or(Value::Null),
         );
+    }
+
+    if table == "mouvements_stock" {
+        if let Some(Value::Number(ref_id_num)) = objet.get("reference_id").cloned() {
+            if let Some(id) = ref_id_num.as_i64() {
+                let ref_type = objet
+                    .get("reference_type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let ref_table = match ref_type {
+                    "vente" | "ventes" => Some("ventes"),
+                    "achat" | "achats" => Some("achats"),
+                    "inventaire" | "inventaires" => Some("inventaires"),
+                    "transfert" | "transferts_stock" => Some("transferts_stock"),
+                    _ => None,
+                };
+                if let Some(rt) = ref_table {
+                    let uuid =
+                        traduire_reference(conn, rt, id).map_err(|e| e.to_string())?;
+                    objet.insert(
+                        "reference_id".to_string(),
+                        uuid.map(Value::String).unwrap_or(Value::Null),
+                    );
+                } else {
+                    objet.insert("reference_id".to_string(), Value::Null);
+                }
+            }
+        }
     }
 
     Ok(Value::Object(objet))

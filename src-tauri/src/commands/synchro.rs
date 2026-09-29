@@ -15,6 +15,7 @@ pub struct PairingPending {
     access_token: String,
     refresh_token: String,
     expires_in: i64,
+    user_id: String,
 }
 
 #[derive(Default)]
@@ -61,6 +62,7 @@ pub async fn demarrer_appairage_cloud(
         access_token: session.access_token,
         refresh_token: session.refresh_token,
         expires_in: session.expires_in,
+        user_id: session.user.id,
     });
 
     Ok(ChoixAppairageCloud {
@@ -119,6 +121,11 @@ pub fn finaliser_appairage_cloud(
         )
         .map_err(|e| e.to_string())?;
     }
+    tx.execute(
+        "UPDATE utilisateurs SET cloud_profile_id = ?1 WHERE id = ?2",
+        params![pending.user_id, me.user_id],
+    )
+    .map_err(|e| e.to_string())?;
     crate::sync::enregistrer_identifiants(
         &tx,
         &crate::sync::SyncCredentials {
@@ -183,6 +190,16 @@ pub fn desappairer_cloud(
     let me = autoriser(&auth, &conn, &token, Acces::Admin)?;
     conn.execute("DELETE FROM sync_credentials", [])
         .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE magasins SET cloud_magasin_id = NULL WHERE cloud_magasin_id IS NOT NULL",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE utilisateurs SET cloud_profile_id = NULL WHERE cloud_profile_id IS NOT NULL",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     log_audit(
         &conn,
         Some(me.user_id),

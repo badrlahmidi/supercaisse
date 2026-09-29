@@ -72,6 +72,32 @@ pub async fn lire_tenant_id(access_token: &str, user_id: &str) -> Result<String,
         .ok_or_else(|| "Ce compte n'est associé à aucun tenant".to_string())
 }
 
+pub async fn rafraichir_jeton(refresh_token: &str) -> Result<SessionCloud, String> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/auth/v1/token?grant_type=refresh_token",
+        SUPABASE_URL
+    );
+    let reponse = client
+        .post(&url)
+        .header("apikey", SUPABASE_PUBLISHABLE_KEY)
+        .json(&serde_json::json!({ "refresh_token": refresh_token }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !reponse.status().is_success() {
+        let corps = reponse.text().await.unwrap_or_default();
+        return Err(format!(
+            "Rafraîchissement du jeton refusé : {}",
+            corps
+        ));
+    }
+    reponse
+        .json::<SessionCloud>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 pub async fn lister_magasins(
     access_token: &str,
     tenant_id: &str,

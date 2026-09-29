@@ -23,6 +23,7 @@ pub trait SupabaseClient {
         table: &str,
         depuis: Option<&str>,
         limite: i64,
+        colonne_curseur: Option<&str>,
     ) -> Result<Vec<Value>, String>;
 }
 
@@ -114,13 +115,17 @@ impl SupabaseClient for ReqwestSupabaseClient {
         table: &str,
         depuis: Option<&str>,
         limite: i64,
+        colonne_curseur: Option<&str>,
     ) -> Result<Vec<Value>, String> {
         let mut url = format!(
-            "{}/rest/v1/{}?tenant_id=eq.{}&order=updated_at.asc&limit={}",
+            "{}/rest/v1/{}?tenant_id=eq.{}&limit={}",
             self.base_url, table, creds.tenant_id, limite
         );
-        if let Some(depuis) = depuis {
-            url.push_str(&format!("&updated_at=gt.{}", depuis));
+        if let Some(col) = colonne_curseur {
+            url.push_str(&format!("&order={}.asc", col));
+            if let Some(depuis) = depuis {
+                url.push_str(&format!("&{}=gt.{}", col, depuis));
+            }
         }
         let reponse = self
             .http

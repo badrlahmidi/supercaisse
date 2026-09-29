@@ -15,9 +15,12 @@ const SUPABASE_URL: &str = "https://codpcxvcrfgrcazwdtgw.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY: &str = "sb_publishable_F8jJLoN3EfFp_-i8YeRcdA_cuiCi8Ly";
 
 use rusqlite::{params, Connection, OptionalExtension};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
+
+static SYNC_EN_COURS: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncCredentials {
@@ -67,6 +70,19 @@ pub fn enregistrer_identifiants(
             creds.refresh_token,
             creds.expires_at
         ],
+    )?;
+    Ok(())
+}
+
+fn mettre_a_jour_jeton(
+    conn: &Connection,
+    access_token: &str,
+    refresh_token: &str,
+    expires_at: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sync_credentials SET access_token = ?1, refresh_token = ?2, expires_at = ?3 WHERE id = 1",
+        params![access_token, refresh_token, expires_at],
     )?;
     Ok(())
 }
@@ -129,10 +145,61 @@ pub fn demarrer_si_configure(app: &tauri::AppHandle) {
         log::info!("Synchronisation cloud non configurée : boucle non démarrée");
         return;
     }
+    if SYNC_EN_COURS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        log::info!("Boucle de synchronisation déjà en cours");
+        return;
+    }
     let conn = etat.conn.clone();
     tauri::async_runtime::spawn(async move {
+        struct ResetOnDrop;
+        impl Drop for ResetOnDrop {
+            fn drop(&mut self) {
+                SYNC_EN_COURS.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = ResetOnDrop;
         boucle_synchro(conn).await;
     });
+}
+
+async fn rafraichir_si_expire(conn: &Arc<Mutex<Connection>>) {
+    let (refresh_token, expires_at) = {
+        let Ok(verrou) = conn.lock() else { return };
+        let Some(creds) = lire_identifiants(&verrou).ok().flatten() else {
+            return;
+        };
+        match (creds.refresh_token, creds.expires_at) {
+            (Some(rt), Some(ea)) => (rt, ea),
+            _ => return,
+        }
+    };
+
+    let expire = match chrono::DateTime::parse_from_rfc3339(&expires_at) {
+        Ok(dt) => dt,
+        Err(_) => return,
+    };
+    if expire > chrono::Utc::now() + chrono::Duration::minutes(5) {
+        return;
+    }
+
+    match auth::rafraichir_jeton(&refresh_token).await {
+        Ok(session) => {
+            let nouveau_expires =
+                (chrono::Utc::now() + chrono::Duration::seconds(session.expires_in)).to_rfc3339();
+            if let Ok(verrou) = conn.lock() {
+                let _ = mettre_a_jour_jeton(
+                    &verrou,
+                    &session.access_token,
+                    &session.refresh_token,
+                    &nouveau_expires,
+                );
+            }
+        }
+        Err(e) => log::warn!("Rafraîchissement du jeton échoué : {}", e),
+    }
 }
 
 async fn boucle_synchro(conn: Arc<Mutex<Connection>>) {
@@ -140,6 +207,7 @@ async fn boucle_synchro(conn: Arc<Mutex<Connection>>) {
     let mut intervalle = tokio::time::interval(Duration::from_secs(15));
     loop {
         intervalle.tick().await;
+        rafraichir_si_expire(&conn).await;
         if let Err(e) = executer_un_cycle(&conn, &client).await {
             log::warn!("Cycle de synchronisation (envoi) échoué : {}", e);
         }
@@ -207,6 +275,7 @@ mod tests {
             _table: &str,
             _depuis: Option<&str>,
             _limite: i64,
+            _colonne_curseur: Option<&str>,
         ) -> Result<Vec<Value>, String> {
             Ok(Vec::new())
         }

@@ -813,7 +813,6 @@ pub(crate) const TABLES_SYNCHRONISEES: &[&str] = &[
     "vente_lots",
     "achats",
     "achat_articles",
-    "paiements",
     "mouvements_stock",
     "mouvements_fidelite",
     "journal_caisse",
@@ -825,7 +824,6 @@ pub(crate) const TABLES_SYNCHRONISEES: &[&str] = &[
     "transferts_stock",
     "transfert_lignes",
     "tables_resto",
-    "audit_log",
 ];
 
 const UUID_V4_SQL: &str = "(lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',(abs(random())%4)+1,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6))))";

@@ -14,7 +14,6 @@ pub(super) const PULL_ORDER: &[&str] = &[
     "sessions_caisse",
     "articles",
     "cheques",
-    "paiements",
     "achats",
     "article_variantes",
     "article_composants",
@@ -34,6 +33,19 @@ pub(super) const PULL_ORDER: &[&str] = &[
     "inventaire_lignes",
     "transfert_lignes",
 ];
+
+fn colonne_curseur(table: &str) -> Option<&'static str> {
+    match table {
+        "categories" | "fournisseurs" | "clients" | "articles" => Some("updated_at"),
+        "ventes" | "journal_caisse" | "mouvements_stock" | "mouvements_fidelite" | "achats"
+        | "transferts_stock" => Some("date"),
+        "sessions_caisse" => Some("date_ouverture"),
+        "caisses" => Some("ouverture_date"),
+        "article_lots" => Some("date_reception"),
+        "inventaires" => Some("date_debut"),
+        _ => None,
+    }
+}
 
 const TABLES_CLE_COMPOSITE_CLOUD: &[(&str, &str, &str)] = &[
     ("article_stocks", "article_id", "magasin_id"),
@@ -268,12 +280,15 @@ pub async fn executer_pull_table<C: SupabaseClient>(
     creds: &SyncCredentials,
     table: &str,
 ) -> Result<(), String> {
-    let curseur = {
+    let col_curseur = colonne_curseur(table);
+    let curseur = if col_curseur.is_some() {
         let verrou = conn.lock().map_err(|e| e.to_string())?;
         lire_curseur(&verrou, table).map_err(|e| e.to_string())?
+    } else {
+        None
     };
     let lignes = client
-        .recuperer(creds, table, curseur.as_deref(), TAILLE_PAGE)
+        .recuperer(creds, table, curseur.as_deref(), TAILLE_PAGE, col_curseur)
         .await?;
 
     let verrou = conn.lock().map_err(|e| e.to_string())?;
@@ -281,18 +296,25 @@ pub async fn executer_pull_table<C: SupabaseClient>(
         .iter()
         .any(|(t, _, _)| *t == table);
     let mut dernier_horodatage: Option<String> = None;
+    let mut uuids_appliques: Vec<String> = Vec::new();
     for ligne in &lignes {
-        let horodatage = ligne
-            .get("updated_at")
+        let horodatage = col_curseur
+            .and_then(|col| ligne.get(col))
             .and_then(Value::as_str)
             .map(|s| s.to_string());
+        let uuid_ligne = ligne.get("id").and_then(Value::as_str).map(|s| s.to_string());
         let applique = if composite {
             appliquer_ligne_composite(&verrou, table, ligne)
         } else {
             appliquer_ligne_uuid(&verrou, table, ligne)
         };
         match applique {
-            Ok(true) => dernier_horodatage = horodatage.or(dernier_horodatage),
+            Ok(true) => {
+                dernier_horodatage = horodatage.or(dernier_horodatage);
+                if let Some(uuid) = uuid_ligne {
+                    uuids_appliques.push(uuid);
+                }
+            }
             Ok(false) => {
                 log::warn!(
                     "Pull {} : ligne ignorée (dépendance non résolue), nouvelle tentative au prochain cycle",
@@ -305,6 +327,14 @@ pub async fn executer_pull_table<C: SupabaseClient>(
                 break;
             }
         }
+    }
+    for uuid in &uuids_appliques {
+        verrou
+            .execute(
+                "DELETE FROM sync_outbox WHERE table_name = ?1 AND row_uuid = ?2",
+                params![table, uuid],
+            )
+            .map_err(|e| e.to_string())?;
     }
     if let Some(horodatage) = dernier_horodatage {
         ecrire_curseur(&verrou, table, &horodatage).map_err(|e| e.to_string())?;
@@ -364,6 +394,7 @@ mod tests {
             table: &str,
             _: Option<&str>,
             _: i64,
+            _: Option<&str>,
         ) -> Result<Vec<Value>, String> {
             Ok(self
                 .pages
