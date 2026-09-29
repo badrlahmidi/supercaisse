@@ -194,13 +194,26 @@ pub fn ligne_pour_cloud(conn: &Connection, table: &str, row_uuid: &str) -> Resul
                     .get("reference_type")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                let ref_table = match ref_type {
-                    "vente" | "ventes" => Some("ventes"),
-                    "achat" | "achats" => Some("achats"),
-                    "inventaire" | "inventaires" => Some("inventaires"),
-                    "transfert" | "transferts_stock" => Some("transferts_stock"),
-                    _ => None,
-                };
+                let ref_table =
+                    if matches!(ref_type, "vente" | "ventes")
+                        || ref_type.starts_with("vente_")
+                        || ref_type.starts_with("annulation_vente")
+                        || ref_type.starts_with("avoir")
+                    {
+                        Some("ventes")
+                    } else if matches!(ref_type, "achat" | "achats")
+                        || ref_type.starts_with("achat_")
+                    {
+                        Some("achats")
+                    } else {
+                        match ref_type {
+                            "inventaire" | "inventaires" => Some("inventaires"),
+                            "transfert" | "transferts_stock" => Some("transferts_stock"),
+                            "lot" | "peremption" => Some("article_lots"),
+                            "variante_ajustement" => Some("article_variantes"),
+                            _ => None,
+                        }
+                    };
                 if let Some(rt) = ref_table {
                     let uuid =
                         traduire_reference(conn, rt, id).map_err(|e| e.to_string())?;

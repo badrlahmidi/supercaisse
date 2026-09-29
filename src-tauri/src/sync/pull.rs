@@ -43,7 +43,8 @@ fn colonne_curseur(table: &str) -> Option<&'static str> {
         "caisses" => Some("ouverture_date"),
         "article_lots" => Some("date_reception"),
         "inventaires" => Some("date_debut"),
-        _ => None,
+        "article_stocks" | "article_variante_stocks" | "transfert_lignes" => None,
+        _ => Some("id"),
     }
 }
 
