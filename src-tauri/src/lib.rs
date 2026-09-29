@@ -4,6 +4,7 @@ mod commands;
 mod db;
 mod paths;
 mod session;
+mod sync;
 
 use db::{init_db, DbState};
 use paths::{legacy_database_candidates, prepare_database, AppDirs};
@@ -61,6 +62,8 @@ pub fn run() {
             }
             app.manage(DbState::avec_lecteurs(conn, &db_path, db::LECTEURS)?);
             app.manage(dirs);
+            app.manage(commands::PairingState::default());
+            sync::demarrer_si_configure(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -167,6 +170,11 @@ pub fn run() {
             commands::get_caisses,
             commands::get_tresorerie,
             commands::compare_fournisseur_prices,
+            commands::demarrer_appairage_cloud,
+            commands::annuler_appairage_cloud,
+            commands::finaliser_appairage_cloud,
+            commands::obtenir_etat_synchro,
+            commands::desappairer_cloud,
         ])
         .run(tauri::generate_context!());
     if let Err(e) = resultat {

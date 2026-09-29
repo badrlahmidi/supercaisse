@@ -18,11 +18,13 @@ import { toast } from "sonner"
 import PageHeader from "@/components/PageHeader"
 import { useAuth } from "@/context/AuthContext"
 import { Checkbox } from "@/ui/Checkbox"
-import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages } from "lucide-react"
+import { User, Shield, Database, Printer, Settings as SettingsIcon, Loader2, Eye, EyeOff, Trash2, Download, AlertTriangle, Upload, Palette, X, Languages, Cloud, CloudOff } from "lucide-react"
 import { useI18nStore } from "@/store/i18n"
 import { iceSaisieValide, ifSaisieValide } from "@/lib/fiscal"
 import MisesAJour from "@/components/MisesAJour"
 import type { FichierSauvegarde } from "@/types/generated/FichierSauvegarde"
+import type { ChoixAppairageCloud } from "@/types/generated/ChoixAppairageCloud"
+import type { EtatSynchroCloud } from "@/types/generated/EtatSynchroCloud"
 
 interface User {
   id: number
@@ -112,6 +114,64 @@ export default function Settings() {
   const [deleteUserConfirm, setDeleteUserConfirm] = useState<Utilisateur | null>(null)
   const [showImportConfirm, setShowImportConfirm] = useState(false)
   const [importPath, setImportPath] = useState("")
+  const [cloudEmail, setCloudEmail] = useState("")
+  const [cloudMotDePasse, setCloudMotDePasse] = useState("")
+  const [appairageChoix, setAppairageChoix] = useState<ChoixAppairageCloud | null>(null)
+  const [associationsChoisies, setAssociationsChoisies] = useState<Record<number, string>>({})
+  const [showDesappairageConfirm, setShowDesappairageConfirm] = useState(false)
+
+  const etatSynchroQuery = useQuery({
+    queryKey: ["etat-synchro"],
+    queryFn: () => invoke<EtatSynchroCloud>("obtenir_etat_synchro"),
+  })
+
+  const appairageMutation = useMutation({
+    mutationFn: () =>
+      invoke<ChoixAppairageCloud>("demarrer_appairage_cloud", {
+        email: cloudEmail.trim(),
+        mot_de_passe: cloudMotDePasse,
+      }),
+    onSuccess: (choix) => {
+      setAppairageChoix(choix)
+      const premiereBoutiqueCloud = choix.magasins_cloud[0]?.cloud_magasin_id ?? ""
+      setAssociationsChoisies(
+        Object.fromEntries(choix.magasins_locaux.map((m) => [m.id, premiereBoutiqueCloud]))
+      )
+    },
+    onError: (err) => toast.error("Connexion refusée", { description: String(err) }),
+  })
+
+  const annulerAppairageMutation = useMutation({
+    mutationFn: () => invoke("annuler_appairage_cloud"),
+    onSuccess: () => setAppairageChoix(null),
+  })
+
+  const finaliserAppairageMutation = useMutation({
+    mutationFn: () =>
+      invoke("finaliser_appairage_cloud", {
+        associations: Object.entries(associationsChoisies).map(([magasinLocalId, cloudMagasinId]) => ({
+          magasin_local_id: Number(magasinLocalId),
+          cloud_magasin_id: cloudMagasinId,
+        })),
+      }),
+    onSuccess: () => {
+      toast.success("Synchronisation cloud activée")
+      setAppairageChoix(null)
+      setCloudEmail("")
+      setCloudMotDePasse("")
+      queryClient.invalidateQueries({ queryKey: ["etat-synchro"] })
+    },
+    onError: (err) => toast.error("Échec de l'appairage", { description: String(err) }),
+  })
+
+  const desappairerMutation = useMutation({
+    mutationFn: () => invoke("desappairer_cloud"),
+    onSuccess: () => {
+      toast.success("Synchronisation cloud désactivée")
+      queryClient.invalidateQueries({ queryKey: ["etat-synchro"] })
+    },
+    onError: (err) => toast.error("Échec de la déconnexion", { description: String(err) }),
+  })
 
   const exportMutation = useMutation({
     mutationFn: () => invoke<string>("export_database"),
@@ -320,12 +380,13 @@ export default function Settings() {
       <PageHeader title={t("settings.title")} description={t("settings.description")} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="general">{t("settings.general")}</TabsTrigger>
           <TabsTrigger value="users">{t("settings.users")}</TabsTrigger>
           <TabsTrigger value="receipt">{t("settings.receipt")}</TabsTrigger>
           <TabsTrigger value="system">{t("settings.systemTab")}</TabsTrigger>
           <TabsTrigger value="backup">{t("settings.backup")}</TabsTrigger>
+          <TabsTrigger value="cloud">{t("settings.cloud")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
@@ -1088,7 +1149,163 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="cloud" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Cloud className="h-5 w-5" />
+                Synchronisation cloud
+              </CardTitle>
+              <CardDescription>
+                Connectez cette caisse au compte cloud de votre entreprise pour synchroniser ventes, stock et clients.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {etatSynchroQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Chargement…</p>
+              ) : etatSynchroQuery.data?.connecte ? (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="font-medium flex items-center gap-2">
+                      <Cloud className="h-4 w-4 text-green-600" />
+                      Connectée
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Boutique cloud : {etatSynchroQuery.data.cloud_magasin_id}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {etatSynchroQuery.data.en_attente} modification(s) en attente d'envoi
+                    </p>
+                  </div>
+                  <Button variant="destructive" onClick={() => setShowDesappairageConfirm(true)}>
+                    <CloudOff className="h-4 w-4 mr-2" />
+                    Déconnecter
+                  </Button>
+                </div>
+              ) : appairageChoix ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Associez chaque boutique locale à sa boutique cloud correspondante.
+                  </p>
+                  {appairageChoix.magasins_locaux.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Toutes les boutiques locales sont déjà associées.</p>
+                  ) : (
+                    appairageChoix.magasins_locaux.map((magasin) => (
+                      <div key={magasin.id} className="flex items-center justify-between gap-4">
+                        <Label className="min-w-0 flex-1 truncate">{magasin.nom}</Label>
+                        <Select
+                          value={associationsChoisies[magasin.id] ?? ""}
+                          onValueChange={(v) => setAssociationsChoisies((a) => ({ ...a, [magasin.id]: v }))}
+                        >
+                          <SelectTrigger className="w-64">
+                            <SelectValue placeholder="Choisir la boutique cloud" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {appairageChoix.magasins_cloud.map((mc) => (
+                              <SelectItem key={mc.cloud_magasin_id} value={mc.cloud_magasin_id}>
+                                {mc.nom}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => annulerAppairageMutation.mutate()}
+                      disabled={annulerAppairageMutation.isPending}
+                    >
+                      Annuler
+                    </Button>
+                    <Button
+                      onClick={() => finaliserAppairageMutation.mutate()}
+                      disabled={
+                        finaliserAppairageMutation.isPending ||
+                        appairageChoix.magasins_locaux.some((m) => !associationsChoisies[m.id])
+                      }
+                    >
+                      {finaliserAppairageMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Cloud className="h-4 w-4 mr-2" />
+                      )}
+                      Confirmer la connexion
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 max-w-sm">
+                  <div className="space-y-2">
+                    <Label htmlFor="cloud_email">Email administrateur</Label>
+                    <Input
+                      id="cloud_email"
+                      type="email"
+                      value={cloudEmail}
+                      onChange={(e) => setCloudEmail(e.target.value)}
+                      placeholder="admin@entreprise.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cloud_password">Mot de passe</Label>
+                    <Input
+                      id="cloud_password"
+                      type="password"
+                      value={cloudMotDePasse}
+                      onChange={(e) => setCloudMotDePasse(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    onClick={() => appairageMutation.mutate()}
+                    disabled={!cloudEmail.trim() || !cloudMotDePasse || appairageMutation.isPending}
+                  >
+                    {appairageMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Cloud className="h-4 w-4 mr-2" />
+                    )}
+                    Se connecter
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={showDesappairageConfirm} onOpenChange={setShowDesappairageConfirm}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Déconnecter la synchronisation cloud
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Cette caisse arrêtera d'envoyer ses données au cloud. Les modifications déjà envoyées ne sont pas affectées.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowDesappairageConfirm(false)}>Annuler</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                desappairerMutation.mutate()
+                setShowDesappairageConfirm(false)
+              }}
+              disabled={desappairerMutation.isPending}
+            >
+              {desappairerMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <CloudOff className="h-4 w-4 mr-2" />
+              )}
+              Déconnecter
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showImportConfirm} onOpenChange={(open) => { if (!importMutation.isPending) setShowImportConfirm(open) }}>
         <DialogContent className="max-w-md">

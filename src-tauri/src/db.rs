@@ -147,6 +147,9 @@ const MIGRATIONS: &[Migration] = &[
     migration_005_verrouillage_pin,
     migration_006_plafonds_remise,
     migration_007_index_et_tracabilite,
+    migration_008_synchronisation_cloud,
+    migration_009_pull_cloud,
+    migration_010_outbox_cles_composites,
 ];
 
 pub fn init_db(db_path: &str) -> std::result::Result<Connection, String> {
@@ -348,6 +351,7 @@ struct Reconstruction {
     definition: String,
     colonnes: &'static str,
     selection: &'static str,
+    contraintes_finales: &'static str,
 }
 
 fn reconstructions() -> Vec<Reconstruction> {
@@ -366,6 +370,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, login, password_hash, nom, role, pin_hash, must_change_password",
             selection: "id, login, password_hash, nom, COALESCE(role, 'caissier'), pin_hash, COALESCE(must_change_password, 0)",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "sessions_caisse",
@@ -384,6 +389,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, caissier_id, date_ouverture, date_cloture, fond_initial, total_especes_attendu, total_especes_declare, ecart, statut, magasin_id",
             selection: "id, caissier_id, date_ouverture, date_cloture, COALESCE(fond_initial, 0), total_especes_attendu, total_especes_declare, ecart, COALESCE(statut, 'ouverte'), magasin_id",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "ventes",
@@ -404,14 +410,14 @@ fn reconstructions() -> Vec<Reconstruction> {
                 source_vente_id INTEGER REFERENCES ventes(id),
                 magasin_id INTEGER REFERENCES magasins(id),
                 montant_ht REAL,
-                montant_tva REAL,
-                CHECK (dtype = 'avoir' OR montant_total >= 0)",
+                montant_tva REAL",
                 liste_sql(MODES_PAIEMENT_VENTE),
                 liste_sql(STATUTS_VENTE),
                 liste_sql(TYPES_DOCUMENT)
             ),
             colonnes: "id, date, client_id, caissier_id, montant_total, montant_remise, mode_paiement, statut, points_utilises, points_gagnes, numero_facture, dtype, session_id, source_vente_id, magasin_id, montant_ht, montant_tva",
             selection: "id, date, client_id, caissier_id, COALESCE(montant_total, 0), COALESCE(montant_remise, 0), COALESCE(mode_paiement, 'especes'), COALESCE(statut, 'validee'), COALESCE(points_utilises, 0), COALESCE(points_gagnes, 0), numero_facture, COALESCE(dtype, 'facture'), session_id, source_vente_id, magasin_id, montant_ht, montant_tva",
+            contraintes_finales: "CHECK (dtype = 'avoir' OR montant_total >= 0)",
         },
         Reconstruction {
             table: "vente_articles",
@@ -431,6 +437,7 @@ fn reconstructions() -> Vec<Reconstruction> {
                 .to_string(),
             colonnes: "id, vente_id, article_id, quantite, prix_unitaire, tva, total_ligne, remise_ligne, note, variante_id, prix_type, montant_ht, montant_tva",
             selection: "id, vente_id, article_id, quantite, prix_unitaire, COALESCE(tva, 0), total_ligne, COALESCE(remise_ligne, 0), note, variante_id, COALESCE(prix_type, 'public'), montant_ht, montant_tva",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "journal_caisse",
@@ -446,6 +453,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, date, utilisateur_id, jtype, montant, description, session_id",
             selection: "id, date, utilisateur_id, jtype, montant, description, session_id",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "mouvements_stock",
@@ -462,6 +470,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, date, article_id, quantite, mtype, reference_id, reference_type, magasin_id",
             selection: "id, date, article_id, quantite, mtype, reference_id, reference_type, magasin_id",
+            contraintes_finales: "",
         },
         Reconstruction {
             table: "cheques",
@@ -482,6 +491,7 @@ fn reconstructions() -> Vec<Reconstruction> {
             ),
             colonnes: "id, numero, banque, tireur, montant, date_emission, date_echeance, statut, ctype, client_id, fournisseur_id",
             selection: "id, numero, banque, tireur, montant, date_emission, date_echeance, COALESCE(statut, 'en_attente'), ctype, client_id, fournisseur_id",
+            contraintes_finales: "",
         },
     ]
 }
@@ -667,6 +677,9 @@ fn reconstruire_table(conn: &Connection, r: &Reconstruction) -> Result<()> {
         colonnes.push_str(&format!(", {}", nom));
         selection.push_str(&format!(", {}", nom));
     }
+    if !r.contraintes_finales.is_empty() {
+        definition.push_str(&format!(",\n{}", r.contraintes_finales));
+    }
     let nouvelle = format!("{}_v3", r.table);
     conn.execute_batch(&format!(
         "CREATE TABLE {n} ({d});
@@ -779,6 +792,160 @@ fn migration_007_index_et_tracabilite(conn: &Connection) -> Result<()> {
                  UPDATE {t} SET created_at = datetime('now', 'localtime') WHERE rowid = NEW.rowid;
              END;",
             t = table
+        ))?;
+    }
+    Ok(())
+}
+
+pub(crate) const TABLES_SYNCHRONISEES: &[&str] = &[
+    "categories",
+    "fournisseurs",
+    "clients",
+    "articles",
+    "article_variantes",
+    "article_composants",
+    "article_stocks",
+    "article_variante_stocks",
+    "article_lots",
+    "ventes",
+    "vente_articles",
+    "vente_paiements",
+    "vente_lots",
+    "achats",
+    "achat_articles",
+    "mouvements_stock",
+    "mouvements_fidelite",
+    "journal_caisse",
+    "sessions_caisse",
+    "caisses",
+    "cheques",
+    "inventaires",
+    "inventaire_lignes",
+    "transferts_stock",
+    "transfert_lignes",
+    "tables_resto",
+];
+
+const UUID_V4_SQL: &str = "(lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',(abs(random())%4)+1,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6))))";
+
+fn migration_008_synchronisation_cloud(conn: &Connection) -> Result<()> {
+    for table in TABLES_SYNCHRONISEES {
+        ajouter_colonne(conn, table, "uuid", "TEXT")?;
+        conn.execute(
+            &format!(
+                "UPDATE {t} SET uuid = {u} WHERE uuid IS NULL",
+                t = table,
+                u = UUID_V4_SQL
+            ),
+            [],
+        )?;
+        conn.execute(
+            &format!(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_{t}_uuid ON {t}(uuid) WHERE uuid IS NOT NULL",
+                t = table
+            ),
+            [],
+        )?;
+    }
+
+    ajouter_colonne(conn, "utilisateurs", "cloud_profile_id", "TEXT")?;
+    ajouter_colonne(conn, "magasins", "cloud_magasin_id", "TEXT")?;
+
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS sync_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            row_uuid TEXT NOT NULL,
+            operation TEXT NOT NULL CHECK (operation IN ('upsert', 'delete')),
+            queued_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            UNIQUE (table_name, row_uuid)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sync_outbox_queued ON sync_outbox(queued_at);
+
+        CREATE TABLE IF NOT EXISTS sync_credentials (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            tenant_id TEXT NOT NULL,
+            cloud_magasin_id TEXT NOT NULL,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at TEXT,
+            derniere_synchro TEXT
+        );
+        ",
+    )?;
+
+    for table in TABLES_SYNCHRONISEES {
+        conn.execute_batch(&format!(
+            "
+            CREATE TRIGGER IF NOT EXISTS trg_{t}_sync_ins AFTER INSERT ON {t}
+            BEGIN
+                UPDATE {t} SET uuid = {u} WHERE rowid = NEW.rowid AND uuid IS NULL;
+                INSERT INTO sync_outbox (table_name, row_uuid, operation)
+                    SELECT '{t}', uuid, 'upsert' FROM {t} WHERE rowid = NEW.rowid
+                ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                    operation = 'upsert', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_{t}_sync_upd AFTER UPDATE ON {t}
+            WHEN NEW.uuid IS NOT NULL
+            BEGIN
+                INSERT INTO sync_outbox (table_name, row_uuid, operation) VALUES ('{t}', NEW.uuid, 'upsert')
+                ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                    operation = 'upsert', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_{t}_sync_del AFTER DELETE ON {t}
+            WHEN OLD.uuid IS NOT NULL
+            BEGIN
+                INSERT INTO sync_outbox (table_name, row_uuid, operation) VALUES ('{t}', OLD.uuid, 'delete')
+                ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                    operation = 'delete', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL;
+            END;
+            ",
+            t = table,
+            u = UUID_V4_SQL
+        ))?;
+    }
+
+    Ok(())
+}
+
+fn migration_009_pull_cloud(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_pull_state (
+            table_name TEXT PRIMARY KEY,
+            last_pulled_at TEXT
+        );",
+    )
+}
+
+const TABLES_CLE_COMPOSITE_LOCALE: &[(&str, &str, &str)] = &[
+    ("article_stocks", "article_id", "magasin_id"),
+    ("article_variante_stocks", "variante_id", "magasin_id"),
+    ("transfert_lignes", "transfert_id", "article_id"),
+];
+
+fn migration_010_outbox_cles_composites(conn: &Connection) -> Result<()> {
+    ajouter_colonne(conn, "sync_outbox", "cle1_locale", "INTEGER")?;
+    ajouter_colonne(conn, "sync_outbox", "cle2_locale", "INTEGER")?;
+    for (table, colonne1, colonne2) in TABLES_CLE_COMPOSITE_LOCALE {
+        conn.execute_batch(&format!(
+            "DROP TRIGGER IF EXISTS trg_{t}_sync_del;
+             CREATE TRIGGER trg_{t}_sync_del AFTER DELETE ON {t}
+             WHEN OLD.uuid IS NOT NULL
+             BEGIN
+                 INSERT INTO sync_outbox (table_name, row_uuid, operation, cle1_locale, cle2_locale)
+                 VALUES ('{t}', OLD.uuid, 'delete', OLD.{c1}, OLD.{c2})
+                 ON CONFLICT (table_name, row_uuid) DO UPDATE SET
+                     operation = 'delete', queued_at = datetime('now', 'localtime'), attempts = 0, last_error = NULL,
+                     cle1_locale = excluded.cle1_locale, cle2_locale = excluded.cle2_locale;
+             END;",
+            t = table,
+            c1 = colonne1,
+            c2 = colonne2
         ))?;
     }
     Ok(())
@@ -1607,6 +1774,120 @@ mod tests {
             .unwrap();
         assert!(modifie_le.is_some());
         assert_eq!(modifie_par, Some(1));
+    }
+
+    #[test]
+    fn test_synchronisation_cloud() {
+        let mut conn = super::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        super::appliquer_migrations(&mut conn, &super::MIGRATIONS[..7]).unwrap();
+        conn.execute(
+            "INSERT INTO categories (id, nom) VALUES (1, 'Boissons')",
+            [],
+        )
+        .unwrap();
+        super::migrer(&mut conn).unwrap();
+
+        for table in super::TABLES_SYNCHRONISEES {
+            assert!(
+                super::colonne_existe(&conn, table, "uuid").unwrap(),
+                "{table}.uuid"
+            );
+        }
+        assert!(super::colonne_existe(&conn, "utilisateurs", "cloud_profile_id").unwrap());
+        assert!(super::colonne_existe(&conn, "magasins", "cloud_magasin_id").unwrap());
+
+        let uuid_existant: String = conn
+            .query_row("SELECT uuid FROM categories WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            uuid_existant.len(),
+            36,
+            "la ligne pré-existante doit être rétro-remplie"
+        );
+
+        let outbox_apres_migration: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            outbox_apres_migration, 0,
+            "le rétro-remplissage d'une migration ne doit pas mettre les données existantes en file de synchro"
+        );
+
+        conn.execute("INSERT INTO categories (nom) VALUES ('Snacks')", [])
+            .unwrap();
+        let uuid_nouveau: String = conn
+            .query_row(
+                "SELECT uuid FROM categories WHERE nom = 'Snacks'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(uuid_nouveau.len(), 36);
+        assert_ne!(uuid_nouveau, uuid_existant);
+
+        let outbox: Vec<(String, String)> = conn
+            .prepare("SELECT row_uuid, operation FROM sync_outbox WHERE table_name = 'categories'")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_>>()
+            .unwrap();
+        assert_eq!(outbox, vec![(uuid_nouveau.clone(), "upsert".to_string())]);
+
+        conn.execute(
+            "UPDATE categories SET nom = 'Snacks salés' WHERE nom = 'Snacks'",
+            [],
+        )
+        .unwrap();
+        let compte_apres_maj: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sync_outbox WHERE table_name = 'categories'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            compte_apres_maj, 1,
+            "une mise à jour doit fusionner avec l'entrée en attente, pas en créer une nouvelle"
+        );
+
+        conn.execute("DELETE FROM categories WHERE nom = 'Snacks salés'", [])
+            .unwrap();
+        let operation: String = conn
+            .query_row(
+                "SELECT operation FROM sync_outbox WHERE row_uuid = ?1",
+                [&uuid_nouveau],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(operation, "delete");
+
+        assert!(
+            conn.execute(
+                "INSERT INTO categories (nom, uuid) VALUES ('Doublon', ?1)",
+                [&uuid_existant],
+            )
+            .is_err(),
+            "l'unicité du uuid doit être appliquée"
+        );
+
+        conn.execute(
+            "INSERT INTO categories (nom, uuid) VALUES ('Venue du cloud', 'uuid-fourni-par-le-cloud')",
+            [],
+        )
+        .unwrap();
+        let (uuid_conserve,): (String,) = conn
+            .query_row(
+                "SELECT uuid FROM categories WHERE nom = 'Venue du cloud'",
+                [],
+                |r| Ok((r.get(0)?,)),
+            )
+            .unwrap();
+        assert_eq!(
+            uuid_conserve, "uuid-fourni-par-le-cloud",
+            "un uuid fourni explicitement (tiré du cloud) ne doit pas être remplacé"
+        );
     }
 
     #[test]
